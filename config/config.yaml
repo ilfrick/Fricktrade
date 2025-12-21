@@ -45,7 +45,7 @@ strategy:
     allow_shorts: true
 
 backtest:
-  data_dir: "/data/market"
+  data_dir: "/data"
   start: "2023-01-01"
   end: "2024-01-01"
   initial_cash: 100000
@@ -61,7 +61,11 @@ data:
     - "UCG.MI"
     - "ENEL.MI"
   interval: "1m"
-  lookback_days: 30
+  lookback_days: 7
+  start: ""
+  end: ""
+  proxy: ""
+  rate_limit_seconds: 2
 
 monitoring:
   prometheus_port: 8001

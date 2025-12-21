@@ -32,27 +32,41 @@ def _gpu_sma(series, period: int):
     return cp.asnumpy(cumsum[period - 1 :] / period)
 
 
-def run_backtest(data_dir: str, start: str, end: str, initial_cash: float, commission_pct: float) -> dict:
+def run_backtest(
+    data_dir: str,
+    start: str,
+    end: str,
+    initial_cash: float,
+    commission_pct: float,
+    interval: str | None = None,
+) -> dict:
     cerebro = bt.Cerebro()
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.setcommission(commission=commission_pct / 100.0)
     cerebro.addstrategy(MomentumStrategy)
 
-    data_path = next(Path(data_dir).glob("*_1m.csv"), None)
+    data_dir_path = Path(data_dir)
+    pattern = f"*_{interval}.csv" if interval else "*.csv"
+    data_path = next(data_dir_path.glob(pattern), None)
     if not data_path:
-        raise FileNotFoundError("No 1m CSV data found in data_dir")
+        data_path = next(data_dir_path.glob("*.csv"), None)
+    if not data_path:
+        raise FileNotFoundError(f"No CSV data found in {data_dir}")
 
+    dtformat = "%Y-%m-%d %H:%M:%S"
+    if interval and interval.endswith("d"):
+        dtformat = "%Y-%m-%d"
     data = bt.feeds.GenericCSVData(
         dataname=str(data_path),
-        fromdate=bt.date2num(datetime.strptime(start, "%Y-%m-%d")),
-        todate=bt.date2num(datetime.strptime(end, "%Y-%m-%d")),
-        dtformat="%Y-%m-%d %H:%M:%S",
+        fromdate=datetime.strptime(start, "%Y-%m-%d"),
+        todate=datetime.strptime(end, "%Y-%m-%d"),
+        dtformat=dtformat,
         datetime=0,
         open=1,
         high=2,
         low=3,
         close=4,
-        volume=6,
+        volume=5,
         openinterest=-1,
         timeframe=bt.TimeFrame.Minutes,
     )

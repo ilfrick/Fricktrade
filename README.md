@@ -78,6 +78,11 @@ IBKR provides broad EU equity access including Borsa Italiana. Alpaca does not g
 
 Data is saved to `/data` inside the container (mapped to `./data`).
 
+If Yahoo blocks the container, set a proxy and slow down requests in `config/config.yaml`:
+
+- `data.proxy` (e.g. `http://user:pass@proxy:8080`)
+- `data.rate_limit_seconds` (e.g. `5`)
+
 ## Backtesting
 
 ```bash

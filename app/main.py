@@ -48,8 +48,15 @@ def main():
     parser.add_argument("--config", default="/app/config/config.yaml")
     sub = parser.add_subparsers(dest="cmd")
 
-    for name in ("trade", "backtest", "download", "api"):
-        sub.add_parser(name).add_argument("--config", default="/app/config/config.yaml")
+    trade_parser = sub.add_parser("trade")
+    backtest_parser = sub.add_parser("backtest")
+    download_parser = sub.add_parser("download")
+    api_parser = sub.add_parser("api")
+
+    for parser_item in (trade_parser, backtest_parser, download_parser, api_parser):
+        parser_item.add_argument("--config", default="/app/config/config.yaml")
+
+    download_parser.add_argument("--symbols", nargs="*", default=[])
 
     args = parser.parse_args()
     cfg = load_config(args.config)
@@ -59,7 +66,17 @@ def main():
 
     if args.cmd == "download":
         out_dir = cfg["backtest"]["data_dir"]
-        download_yfinance(cfg["data"]["symbols"], cfg["data"]["interval"], cfg["data"]["lookback_days"], out_dir)
+        symbols = args.symbols or cfg["data"]["symbols"]
+        download_yfinance(
+            symbols,
+            cfg["data"]["interval"],
+            cfg["data"]["lookback_days"],
+            out_dir,
+            proxy=cfg["data"].get("proxy", ""),
+            rate_limit_seconds=cfg["data"].get("rate_limit_seconds", 2),
+            start=cfg["data"].get("start", ""),
+            end=cfg["data"].get("end", ""),
+        )
         logging.info("Download complete")
         return
 
@@ -70,6 +87,7 @@ def main():
             cfg["backtest"]["end"],
             cfg["backtest"]["initial_cash"],
             cfg["backtest"]["commission_pct"],
+            interval=cfg["data"].get("interval"),
         )
         logging.info("Backtest result: %s", result)
         return
