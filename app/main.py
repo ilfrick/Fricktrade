@@ -48,10 +48,8 @@ def main():
     parser.add_argument("--config", default="/app/config/config.yaml")
     sub = parser.add_subparsers(dest="cmd")
 
-    sub.add_parser("trade")
-    sub.add_parser("backtest")
-    sub.add_parser("download")
-    sub.add_parser("api")
+    for name in ("trade", "backtest", "download", "api"):
+        sub.add_parser(name).add_argument("--config", default="/app/config/config.yaml")
 
     args = parser.parse_args()
     cfg = load_config(args.config)
