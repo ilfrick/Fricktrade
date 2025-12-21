@@ -10,7 +10,7 @@ services:
     volumes:
       - ./config:/app/config
       - ./data:/data
-    command: ["python", "-m", "app.main", "trade", "--config", "/app/config/config.yaml"]
+    command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "trade"]
     ports:
       - "8001:8001"
     restart: unless-stopped
@@ -23,7 +23,7 @@ services:
       - .env
     volumes:
       - ./config:/app/config
-    command: ["python", "-m", "app.main", "api", "--config", "/app/config/config.yaml"]
+    command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "api"]
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -57,7 +57,7 @@ services:
     volumes:
       - ./config:/app/config
       - ./data:/data
-    command: ["python3", "-m", "app.main", "backtest", "--config", "/app/config/config.yaml"]
+    command: ["python3", "-m", "app.main", "--config", "/app/config/config.yaml", "backtest"]
     deploy:
       resources:
         reservations:
