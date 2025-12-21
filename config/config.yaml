@@ -1,0 +1,68 @@
+app:
+  name: autotrader
+  env: prod
+  timezone: Europe/Rome
+  log_level: INFO
+
+market:
+  venue: BorsaItaliana
+  default_currency: EUR
+  trading_hours:
+    open: "09:00"
+    close: "17:30"
+  holidays: []
+
+brokers:
+  alpaca:
+    enabled: true
+    base_url: "https://paper-api.alpaca.markets"
+    api_key: "${ALPACA_API_KEY}"
+    api_secret: "${ALPACA_API_SECRET}"
+  ibkr:
+    enabled: true
+    host: "127.0.0.1"
+    port: 7497
+    client_id: 1
+
+risk:
+  max_daily_loss_pct: 2.0
+  max_position_size_pct: 5.0
+  max_portfolio_leverage: 1.5
+  max_short_exposure_pct: 30.0
+  max_positions: 20
+  cooldown_seconds: 120
+  hard_stop_pct: 4.0
+  trailing_stop_pct: 2.0
+  circuit_breaker_drawdown_pct: 5.0
+
+strategy:
+  name: "intraday_momentum"
+  params:
+    lookback_minutes: 30
+    entry_threshold_pct: 0.8
+    exit_threshold_pct: 0.4
+    position_horizon_minutes: 90
+    allow_shorts: true
+
+backtest:
+  data_dir: "/data/market"
+  start: "2023-01-01"
+  end: "2024-01-01"
+  initial_cash: 100000
+  commission_pct: 0.05
+  slippage_bps: 2
+  use_gpu: true
+
+data:
+  provider: yfinance
+  symbols:
+    - "ENI.MI"
+    - "ISP.MI"
+    - "UCG.MI"
+    - "ENEL.MI"
+  interval: "1m"
+  lookback_days: 30
+
+monitoring:
+  prometheus_port: 8001
+  metrics_path: "/metrics"

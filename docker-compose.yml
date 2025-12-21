@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  trader:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config
+      - ./data:/data
+    command: ["python", "-m", "app.main", "trade", "--config", "/app/config/config.yaml"]
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config
+    command: ["python", "-m", "app.main", "api", "--config", "/app/config/config.yaml"]
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:11.1.4
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  backtest-gpu:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gpu
+    profiles: ["gpu"]
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config
+      - ./data:/data
+    command: ["python3", "-m", "app.main", "backtest", "--config", "/app/config/config.yaml"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]

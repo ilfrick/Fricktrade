@@ -1,0 +1,13 @@
+alpaca-py==0.26.1
+backtrader==1.9.78.123
+ib-insync==0.9.86
+prometheus-client==0.20.0
+pydantic==2.8.2
+pyyaml==6.0.2
+requests==2.32.3
+uvicorn==0.30.6
+fastapi==0.112.2
+yfinance==0.2.43
+numpy==2.0.2
+pandas==2.2.2
+python-dotenv==1.0.1
