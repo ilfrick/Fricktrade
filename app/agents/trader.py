@@ -422,6 +422,8 @@ class TradingAgent:
             api_secret=news_cfg.get("api_secret", ""),
             lookback_hours=int(news_cfg.get("lookback_hours", 12)),
             keywords=news_cfg.get("keywords", []),
+            timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
+            retries=int(news_cfg.get("retries", 2)),
         )
         self._news_cache_at = now
 
@@ -463,6 +465,8 @@ class TradingAgent:
         )
         max_symbols = int(dyn_cfg.get("max_symbols", 50))
         feed = dyn_cfg.get("feed", "iex")
+        timeout_seconds = int(dyn_cfg.get("timeout_seconds", 10))
+        retries = int(dyn_cfg.get("retries", 2))
         catalyst_map = self._news_cache
         if filters.require_catalyst:
             catalyst_map = fetch_catalyst_symbols(
@@ -473,6 +477,8 @@ class TradingAgent:
                 api_secret=self.cfg.get("news", {}).get("api_secret", ""),
                 lookback_hours=int(self.cfg.get("news", {}).get("lookback_hours", 12)),
                 keywords=self.cfg.get("news", {}).get("keywords", []),
+                timeout_seconds=int(self.cfg.get("news", {}).get("timeout_seconds", 10)),
+                retries=int(self.cfg.get("news", {}).get("retries", 2)),
             )
         candidates = scan_symbols(
             universe,
@@ -482,6 +488,8 @@ class TradingAgent:
             filters=filters,
             catalyst_map=catalyst_map,
             max_symbols=max_symbols,
+            timeout_seconds=timeout_seconds,
+            retries=retries,
         )
         if not candidates:
             fallback_cfg = dyn_cfg.get("fallback", {})
@@ -506,6 +514,8 @@ class TradingAgent:
                     filters=fallback_filters,
                     catalyst_map=fallback_catalysts,
                     max_symbols=max_symbols,
+                    timeout_seconds=timeout_seconds,
+                    retries=retries,
                 )
                 if candidates:
                     logging.info("Dynamic symbols fallback found %d candidates.", len(candidates))

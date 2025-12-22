@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockSnapshotRequest
@@ -29,6 +30,8 @@ def scan_symbols(
     filters: ScanFilters,
     catalyst_map: dict[str, bool] | None = None,
     max_symbols: int = 50,
+    timeout_seconds: int = 10,
+    retries: int = 2,
 ) -> list[str]:
     symbols = [s for s in symbols if s]
     if not symbols or not api_key or not api_secret:
@@ -37,9 +40,9 @@ def scan_symbols(
     results = []
     catalyst_map = catalyst_map or {}
     for chunk in _chunked(symbols, 100):
-        snapshots = client.get_stock_snapshot(
-            StockSnapshotRequest(symbol_or_symbols=chunk, feed=_map_feed(feed))
-        )
+        snapshots = _fetch_snapshots(client, chunk, feed, timeout_seconds, retries)
+        if snapshots is None:
+            continue
         for symbol, snap in snapshots.items():
             price = getattr(getattr(snap, "latest_trade", None), "price", None) or getattr(
                 getattr(snap, "minute_bar", None), "close", None
@@ -69,6 +72,30 @@ def scan_symbols(
 
 def _chunked(items: list[str], size: int) -> list[list[str]]:
     return [items[idx : idx + size] for idx in range(0, len(items), size)]
+
+
+def _fetch_snapshots(
+    client: StockHistoricalDataClient,
+    symbols: list[str],
+    feed: str,
+    timeout_seconds: int,
+    retries: int,
+):
+    for attempt in range(retries + 1):
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                client.get_stock_snapshot,
+                StockSnapshotRequest(symbol_or_symbols=symbols, feed=_map_feed(feed)),
+            )
+            try:
+                return future.result(timeout=timeout_seconds)
+            except TimeoutError:
+                if attempt >= retries:
+                    return None
+            except Exception:
+                if attempt >= retries:
+                    return None
+    return None
 
 
 def load_universe(

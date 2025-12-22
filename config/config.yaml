@@ -152,6 +152,7 @@ orchestrator:
     score_ema_alpha: 0.1
     pretrain:
       enabled: true
+      in_trader: false
       lookback_days: 30
       interval: 5m
       max_symbols: 20
@@ -159,6 +160,8 @@ orchestrator:
       epochs: 2
       warmup_bars: 50
       symbols_source: data
+      timeout_seconds: 15
+      retries: 2
   learning:
     enabled: true
     learning_rate: 0.1
@@ -265,6 +268,8 @@ data:
     cash_buffer_pct: 95
     cash_cap_mode: cash
     cash_max_pct: 100
+    timeout_seconds: 10
+    retries: 2
     fallback:
       enabled: true
       relative_volume_min: 0.0
@@ -312,6 +317,8 @@ news:
   lookback_hours: 12
   cache_minutes: 15
   keywords: []
+  timeout_seconds: 10
+  retries: 2
 pattern_trading:
   selection:
     price_min: 1.0

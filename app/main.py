@@ -12,6 +12,7 @@ from app.backtest.engine import run_backtest
 from app.data.downloader import download_yfinance
 from app.data.ingestion import ingest_from_config
 from app.learning.train_rl import train_from_config
+from app.learning.pretrain_orchestrator import run_pretrain
 from app.learning.evaluate import evaluate_from_config
 from app.monitoring.metrics import start_metrics_server
 from app.utils.config import load_config
@@ -137,6 +138,7 @@ def main():
     train_parser = sub.add_parser("train")
     online_parser = sub.add_parser("online-train")
     eval_parser = sub.add_parser("evaluate")
+    pretrain_orch_parser = sub.add_parser("pretrain-orchestrator")
 
     for parser_item in (
         trade_parser,
@@ -147,6 +149,7 @@ def main():
         train_parser,
         online_parser,
         eval_parser,
+        pretrain_orch_parser,
     ):
         parser_item.add_argument("--config", default="/app/config/config.yaml")
 
@@ -220,6 +223,11 @@ def main():
     if args.cmd == "evaluate":
         report = evaluate_from_config(cfg)
         logging.info("Evaluation complete. Avg return %.2f%%", report["average"]["return_pct"])
+        return
+
+    if args.cmd == "pretrain-orchestrator":
+        run_pretrain(args.config)
+        logging.info("Orchestrator pretraining complete.")
         return
 
     if args.cmd == "trade":

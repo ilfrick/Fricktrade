@@ -249,6 +249,12 @@ a rolling sequence of market features for each symbol. It maintains a replay buf
 updates the model each bar, and checkpoints the best-performing model automatically. Pretraining pulls fresh
 historical data via yfinance to warm start the policy.
 
+Pretraining runs out-of-band by default (`orchestrator.ml.pretrain.in_trader: false`). To pretrain manually:
+
+```bash
+docker compose run --rm trader python3 -m app.main pretrain-orchestrator --config /app/config/config.yaml
+```
+
 Weights for the rule-based fallback live under `orchestrator.strategy_weights` and include `momentum`, `trend`,
 `volatility`, `relative_volume`, `session_gain_pct`, `spread`, and `catalyst`.
 

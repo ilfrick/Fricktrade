@@ -14,6 +14,8 @@ def fetch_catalyst_symbols(
     api_secret: str,
     lookback_hours: int,
     keywords: list[str] | None = None,
+    timeout_seconds: int = 10,
+    retries: int = 2,
 ) -> dict[str, bool]:
     symbols = [s for s in symbols if s]
     if not symbols:
@@ -30,6 +32,8 @@ def fetch_catalyst_symbols(
             api_secret=api_secret,
             lookback_hours=lookback_hours,
             keywords=keywords or [],
+            timeout_seconds=timeout_seconds,
+            retries=retries,
         )
     except Exception:
         return {s: False for s in symbols}
@@ -42,6 +46,8 @@ def _fetch_alpaca_news(
     api_secret: str,
     lookback_hours: int,
     keywords: list[str],
+    timeout_seconds: int,
+    retries: int,
 ) -> dict[str, bool]:
     url = f"{base_url.rstrip('/')}/v1beta1/news"
     params = {"symbols": ",".join(symbols), "limit": 50}
@@ -49,9 +55,19 @@ def _fetch_alpaca_news(
         "APCA-API-KEY-ID": api_key,
         "APCA-API-SECRET-KEY": api_secret,
     }
-    resp = requests.get(url, params=params, headers=headers, timeout=10)
-    resp.raise_for_status()
-    payload = resp.json()
+    payload = None
+    for attempt in range(retries + 1):
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=timeout_seconds)
+            resp.raise_for_status()
+            payload = resp.json()
+            break
+        except requests.RequestException:
+            if attempt >= retries:
+                raise
+            continue
+    if payload is None:
+        return {s: False for s in symbols}
     items = payload.get("news", payload if isinstance(payload, list) else [])
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)

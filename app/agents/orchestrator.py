@@ -10,6 +10,7 @@ from statistics import pstdev
 
 import torch
 from torch import nn
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import yfinance as yf
 
@@ -61,6 +62,7 @@ class MLOrchestratorConfig:
     save_interval_seconds: int = 300
     score_ema_alpha: float = 0.1
     pretrain_enabled: bool = True
+    pretrain_in_trader: bool = False
     pretrain_lookback_days: int = 30
     pretrain_interval: str = "5m"
     pretrain_max_symbols: int = 20
@@ -68,6 +70,8 @@ class MLOrchestratorConfig:
     pretrain_epochs: int = 2
     pretrain_warmup_bars: int = 50
     pretrain_symbols_source: str = "data"
+    yf_timeout_seconds: int = 15
+    yf_retries: int = 2
 
 class StrategyOrchestrator:
     def __init__(self, cfg: dict | None):
@@ -276,6 +280,7 @@ class MLStrategyOrchestrator:
             save_interval_seconds=int(ml_cfg.get("save_interval_seconds", 300)),
             score_ema_alpha=float(ml_cfg.get("score_ema_alpha", 0.1)),
             pretrain_enabled=bool(ml_cfg.get("pretrain", {}).get("enabled", True)),
+            pretrain_in_trader=bool(ml_cfg.get("pretrain", {}).get("in_trader", False)),
             pretrain_lookback_days=int(ml_cfg.get("pretrain", {}).get("lookback_days", 30)),
             pretrain_interval=str(ml_cfg.get("pretrain", {}).get("interval", "5m")),
             pretrain_max_symbols=int(ml_cfg.get("pretrain", {}).get("max_symbols", 20)),
@@ -283,6 +288,8 @@ class MLStrategyOrchestrator:
             pretrain_epochs=int(ml_cfg.get("pretrain", {}).get("epochs", 2)),
             pretrain_warmup_bars=int(ml_cfg.get("pretrain", {}).get("warmup_bars", 50)),
             pretrain_symbols_source=str(ml_cfg.get("pretrain", {}).get("symbols_source", "data")),
+            yf_timeout_seconds=int(ml_cfg.get("pretrain", {}).get("timeout_seconds", 15)),
+            yf_retries=int(ml_cfg.get("pretrain", {}).get("retries", 2)),
         )
         self._device = _resolve_device(self.cfg.device)
         self._model: nn.Module | None = None
@@ -307,9 +314,20 @@ class MLStrategyOrchestrator:
         self._load_best_score()
         if self._load_model():
             return
-        if not self.cfg.pretrain_enabled:
+        if not self.cfg.pretrain_enabled or not self.cfg.pretrain_in_trader:
             return
         self._pretrain(strategy_names, build_strategy, strategy_params, data_cfg)
+        self._save_model(self.cfg.model_path)
+        if not Path(self.cfg.best_model_path).exists():
+            self._save_model(self.cfg.best_model_path)
+
+    def run_pretrain(self, strategy_names: list[str], build_strategy, strategy_params: dict, data_cfg: dict) -> None:
+        if not self.cfg.enabled or not self.cfg.pretrain_enabled:
+            return
+        self._ensure_model(strategy_names)
+        self._pretrain(strategy_names, build_strategy, strategy_params, data_cfg)
+        self._save_model(self.cfg.model_path)
+        self._save_model(self.cfg.best_model_path)
 
     def select(
         self,
@@ -533,15 +551,14 @@ class MLStrategyOrchestrator:
         samples = 0
         strategies = {name: build_strategy(name, strategy_params) for name in strategy_names}
         for symbol in symbols:
-            try:
-                data = yf.download(
-                    tickers=symbol,
-                    period=f"{self.cfg.pretrain_lookback_days}d",
-                    interval=self.cfg.pretrain_interval,
-                    auto_adjust=True,
-                    progress=False,
-                )
-            except Exception:
+            data = _download_yf(
+                symbol,
+                lookback_days=self.cfg.pretrain_lookback_days,
+                interval=self.cfg.pretrain_interval,
+                timeout_seconds=self.cfg.yf_timeout_seconds,
+                retries=self.cfg.yf_retries,
+            )
+            if data is None:
                 continue
             if data is None or data.empty:
                 continue
@@ -730,3 +747,31 @@ def _pad_sequence(sequence: list[list[float]], target_len: int, feature_dim: int
     pad = [0.0] * feature_dim
     needed = target_len - len(sequence)
     return [pad for _ in range(needed)] + sequence
+
+
+def _download_yf(
+    symbol: str,
+    lookback_days: int,
+    interval: str,
+    timeout_seconds: int,
+    retries: int,
+):
+    for attempt in range(retries + 1):
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                yf.download,
+                tickers=symbol,
+                period=f"{lookback_days}d",
+                interval=interval,
+                auto_adjust=True,
+                progress=False,
+            )
+            try:
+                return future.result(timeout=timeout_seconds)
+            except TimeoutError:
+                if attempt >= retries:
+                    return None
+            except Exception:
+                if attempt >= retries:
+                    return None
+    return None
