@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections import deque
+from datetime import datetime, timedelta, timezone
 import json
 import random
 import time
 from pathlib import Path
 from statistics import pstdev
+import logging
 
 import torch
 from torch import nn
@@ -65,6 +67,9 @@ class MLOrchestratorConfig:
     pretrain_in_trader: bool = False
     pretrain_lookback_days: int = 30
     pretrain_interval: str = "5m"
+    pretrain_window_days: int = 60
+    pretrain_coverage_days: int = 365
+    pretrain_step_days: int = 30
     pretrain_max_symbols: int = 20
     pretrain_max_samples: int = 2000
     pretrain_epochs: int = 2
@@ -283,6 +288,9 @@ class MLStrategyOrchestrator:
             pretrain_in_trader=bool(ml_cfg.get("pretrain", {}).get("in_trader", False)),
             pretrain_lookback_days=int(ml_cfg.get("pretrain", {}).get("lookback_days", 30)),
             pretrain_interval=str(ml_cfg.get("pretrain", {}).get("interval", "5m")),
+            pretrain_window_days=int(ml_cfg.get("pretrain", {}).get("window_days", 60)),
+            pretrain_coverage_days=int(ml_cfg.get("pretrain", {}).get("coverage_days", 365)),
+            pretrain_step_days=int(ml_cfg.get("pretrain", {}).get("step_days", 30)),
             pretrain_max_symbols=int(ml_cfg.get("pretrain", {}).get("max_symbols", 20)),
             pretrain_max_samples=int(ml_cfg.get("pretrain", {}).get("max_samples", 2000)),
             pretrain_epochs=int(ml_cfg.get("pretrain", {}).get("epochs", 2)),
@@ -551,77 +559,71 @@ class MLStrategyOrchestrator:
         samples = 0
         strategies = {name: build_strategy(name, strategy_params) for name in strategy_names}
         for symbol in symbols:
-            data = _download_yf(
-                symbol,
-                lookback_days=self.cfg.pretrain_lookback_days,
-                interval=self.cfg.pretrain_interval,
-                timeout_seconds=self.cfg.yf_timeout_seconds,
-                retries=self.cfg.yf_retries,
-            )
-            if data is None:
-                continue
-            if data is None or data.empty:
-                continue
-            if getattr(data.columns, "nlevels", 1) > 1:
-                data = data.copy()
-                if "Close" in data.columns.get_level_values(0):
-                    data.columns = data.columns.get_level_values(0)
-                else:
-                    data.columns = data.columns.get_level_values(-1)
-            if "Close" not in data.columns:
-                continue
-            prices = data["Close"].tolist()
-            if hasattr(prices, "tolist"):
-                prices = prices.tolist()
-            volumes = data["Volume"].tolist() if "Volume" in data else []
-            opens = data["Open"].tolist() if "Open" in data else []
-            highs = data["High"].tolist() if "High" in data else []
-            lows = data["Low"].tolist() if "Low" in data else []
-            if len(prices) < 3:
-                continue
-            warmup = min(self.cfg.pretrain_warmup_bars, len(prices) - 2)
-            seq = deque(maxlen=self.cfg.seq_len)
-            for idx in range(warmup, len(prices) - 1):
-                window_prices = prices[max(0, idx - warmup) : idx + 1]
-                window_volumes = volumes[max(0, idx - warmup) : idx + 1] if volumes else []
-                window_opens = opens[max(0, idx - warmup) : idx + 1] if opens else []
-                window_highs = highs[max(0, idx - warmup) : idx + 1] if highs else []
-                window_lows = lows[max(0, idx - warmup) : idx + 1] if lows else []
-                market_state = {
-                    "prices": window_prices,
-                    "volumes": window_volumes,
-                    "opens": window_opens,
-                    "highs": window_highs,
-                    "lows": window_lows,
-                    "last_price": window_prices[-1] if window_prices else None,
-                }
-                seq.append(_feature_vector(market_state))
-                sequence = list(seq)
-                if len(sequence) < self.cfg.seq_len:
-                    sequence = _pad_sequence(sequence, self.cfg.seq_len, self._input_dim or len(sequence[-1]))
-                signals = []
-                for name, strategy in strategies.items():
-                    if strategy is None:
-                        continue
-                    signal = strategy.generate_signal(market_state)
-                    signal["name"] = name
-                    signals.append(signal)
-                actions = {s.get("name"): s.get("action") for s in signals if s.get("name")}
-                if not actions:
+            for data in _iter_pretrain_windows(symbol, self.cfg):
+                if data is None or data.empty:
                     continue
-                next_price = prices[idx + 1]
-                move_pct = (next_price - prices[idx]) / prices[idx] * 100.0 if prices[idx] else 0.0
-                rewards = {}
-                for name, action in actions.items():
-                    if action == "buy":
-                        rewards[name] = move_pct
-                    elif action == "sell":
-                        rewards[name] = -move_pct
+                if getattr(data.columns, "nlevels", 1) > 1:
+                    data = data.copy()
+                    if "Close" in data.columns.get_level_values(0):
+                        data.columns = data.columns.get_level_values(0)
                     else:
-                        rewards[name] = 0.0
-                features = sequence if self.cfg.model_type == "lstm" else _feature_vector(market_state)
-                self._enqueue(features, rewards)
-                samples += 1
+                        data.columns = data.columns.get_level_values(-1)
+                if "Close" not in data.columns:
+                    continue
+                prices = data["Close"].tolist()
+                if hasattr(prices, "tolist"):
+                    prices = prices.tolist()
+                volumes = data["Volume"].tolist() if "Volume" in data else []
+                opens = data["Open"].tolist() if "Open" in data else []
+                highs = data["High"].tolist() if "High" in data else []
+                lows = data["Low"].tolist() if "Low" in data else []
+                if len(prices) < 3:
+                    continue
+                warmup = min(self.cfg.pretrain_warmup_bars, len(prices) - 2)
+                seq = deque(maxlen=self.cfg.seq_len)
+                for idx in range(warmup, len(prices) - 1):
+                    window_prices = prices[max(0, idx - warmup) : idx + 1]
+                    window_volumes = volumes[max(0, idx - warmup) : idx + 1] if volumes else []
+                    window_opens = opens[max(0, idx - warmup) : idx + 1] if opens else []
+                    window_highs = highs[max(0, idx - warmup) : idx + 1] if highs else []
+                    window_lows = lows[max(0, idx - warmup) : idx + 1] if lows else []
+                    market_state = {
+                        "prices": window_prices,
+                        "volumes": window_volumes,
+                        "opens": window_opens,
+                        "highs": window_highs,
+                        "lows": window_lows,
+                        "last_price": window_prices[-1] if window_prices else None,
+                    }
+                    seq.append(_feature_vector(market_state))
+                    sequence = list(seq)
+                    if len(sequence) < self.cfg.seq_len:
+                        sequence = _pad_sequence(sequence, self.cfg.seq_len, self._input_dim or len(sequence[-1]))
+                    signals = []
+                    for name, strategy in strategies.items():
+                        if strategy is None:
+                            continue
+                        signal = strategy.generate_signal(market_state)
+                        signal["name"] = name
+                        signals.append(signal)
+                    actions = {s.get("name"): s.get("action") for s in signals if s.get("name")}
+                    if not actions:
+                        continue
+                    next_price = prices[idx + 1]
+                    move_pct = (next_price - prices[idx]) / prices[idx] * 100.0 if prices[idx] else 0.0
+                    rewards = {}
+                    for name, action in actions.items():
+                        if action == "buy":
+                            rewards[name] = move_pct
+                        elif action == "sell":
+                            rewards[name] = -move_pct
+                        else:
+                            rewards[name] = 0.0
+                    features = sequence if self.cfg.model_type == "lstm" else _feature_vector(market_state)
+                    self._enqueue(features, rewards)
+                    samples += 1
+                    if samples >= self.cfg.pretrain_max_samples:
+                        break
                 if samples >= self.cfg.pretrain_max_samples:
                     break
             if samples >= self.cfg.pretrain_max_samples:
@@ -762,6 +764,70 @@ def _download_yf(
                 yf.download,
                 tickers=symbol,
                 period=f"{lookback_days}d",
+                interval=interval,
+                auto_adjust=True,
+                progress=False,
+            )
+            try:
+                return future.result(timeout=timeout_seconds)
+            except TimeoutError:
+                if attempt >= retries:
+                    return None
+            except Exception:
+                if attempt >= retries:
+                    return None
+    return None
+
+
+def _iter_pretrain_windows(symbol: str, cfg: MLOrchestratorConfig):
+    if cfg.pretrain_interval != "5m":
+        data = _download_yf(
+            symbol,
+            lookback_days=cfg.pretrain_lookback_days,
+            interval=cfg.pretrain_interval,
+            timeout_seconds=cfg.yf_timeout_seconds,
+            retries=cfg.yf_retries,
+        )
+        if data is not None:
+            yield data
+        return
+
+    now = datetime.now(timezone.utc)
+    end = now
+    coverage_days = max(cfg.pretrain_coverage_days, cfg.pretrain_window_days)
+    earliest = now - timedelta(days=coverage_days)
+    step = max(1, cfg.pretrain_step_days)
+    window = max(1, cfg.pretrain_window_days)
+    while end > earliest:
+        start = end - timedelta(days=window)
+        data = _download_yf_range(
+            symbol,
+            start=start,
+            end=end,
+            interval=cfg.pretrain_interval,
+            timeout_seconds=cfg.yf_timeout_seconds,
+            retries=cfg.yf_retries,
+        )
+        if data is not None:
+            yield data
+        end = end - timedelta(days=step)
+
+
+def _download_yf_range(
+    symbol: str,
+    start: datetime,
+    end: datetime,
+    interval: str,
+    timeout_seconds: int,
+    retries: int,
+):
+    for attempt in range(retries + 1):
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                yf.download,
+                tickers=symbol,
+                start=start,
+                end=end,
                 interval=interval,
                 auto_adjust=True,
                 progress=False,

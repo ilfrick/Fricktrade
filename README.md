@@ -271,6 +271,10 @@ orchestrator:
   ml:
     pretrain:
       symbols_source: alpaca_active_random
+      interval: 5m
+      window_days: 60
+      coverage_days: 365
+      step_days: 30
 ```
 
 Weights for the rule-based fallback live under `orchestrator.strategy_weights` and include `momentum`, `trend`,

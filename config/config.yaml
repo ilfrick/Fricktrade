@@ -153,10 +153,13 @@ orchestrator:
     pretrain:
       enabled: true
       in_trader: false
-      lookback_days: 365
-      interval: 1d
+      lookback_days: 60
+      interval: 5m
+      window_days: 60
+      coverage_days: 365
+      step_days: 30
       max_symbols: 100
-      max_samples: 5000
+      max_samples: 8000
       epochs: 3
       warmup_bars: 50
       symbols_source: alpaca_active_random
