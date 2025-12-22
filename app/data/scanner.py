@@ -73,17 +73,23 @@ def load_universe(
     max_universe: int = 500,
 ) -> list[str]:
     if isinstance(universe, str) and universe == "alpaca_active":
-        client = TradingClient(api_key, api_secret)
+        client = TradingClient(api_key, api_secret, raw_data=True)
         assets = client.get_all_assets()
         symbols = []
         for asset in assets:
-            if getattr(asset, "status", "") != "active":
+            status = asset.get("status")
+            tradable = asset.get("tradable")
+            asset_class = asset.get("class") or asset.get("asset_class")
+            if status != "active":
                 continue
-            if getattr(asset, "tradable", False) is not True:
+            if tradable is not True:
                 continue
-            if getattr(asset, "class", "") != "us_equity":
+            if asset_class != "us_equity":
                 continue
-            symbols.append(asset.symbol)
+            symbol = asset.get("symbol")
+            if not symbol:
+                continue
+            symbols.append(symbol)
             if len(symbols) >= max_universe:
                 break
         return symbols
