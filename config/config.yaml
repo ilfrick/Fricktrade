@@ -91,6 +91,7 @@ learning:
     commission_pct: 0.05
     slippage_bps: 2
     eval_split: 0.2
+    resume: true
     report_path: "/app/models/training_report.json"
     report_plot_dir: "/app/models/reports"
 
@@ -106,10 +107,8 @@ backtest:
 data:
   provider: yfinance
   symbols:
-    - "ENI.MI"
-    - "ISP.MI"
-    - "UCG.MI"
-    - "ENEL.MI"
+    - "AAPL"
+    - "MSFT"
   interval: "1m"
   lookback_days: 7
   start: ""
@@ -121,10 +120,8 @@ data:
     - provider: yfinance
       enabled: true
       symbols:
-        - "ENI.MI"
-        - "ISP.MI"
-        - "UCG.MI"
-        - "ENEL.MI"
+        - "AAPL"
+        - "MSFT"
       interval: "1m"
       lookback_days: 7
       rate_limit_seconds: 2

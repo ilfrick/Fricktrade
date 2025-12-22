@@ -17,6 +17,7 @@ def run_online_updates(cfg: dict) -> None:
     interval_minutes = int(online_cfg.get("update_interval_minutes", 60))
     timesteps = int(online_cfg.get("timesteps", 1000))
     eval_split = float(online_cfg.get("eval_split", 0.1))
+    resume = bool(learning_cfg.get("training", {}).get("resume", True))
 
     while True:
         loop_cfg = copy.deepcopy(cfg)
@@ -24,6 +25,6 @@ def run_online_updates(cfg: dict) -> None:
         loop_cfg["learning"]["training"]["timesteps"] = timesteps
         loop_cfg["learning"]["training"]["eval_split"] = eval_split
         logging.info("Starting online update (%d timesteps)", timesteps)
-        train_from_config(loop_cfg, resume=True)
+        train_from_config(loop_cfg, resume=resume)
         logging.info("Online update complete; sleeping %d minutes", interval_minutes)
         time.sleep(interval_minutes * 60)

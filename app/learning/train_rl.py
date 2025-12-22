@@ -11,7 +11,7 @@ from app.learning.env import TradingEnv
 from app.learning.evaluate import evaluate_model
 
 
-def train_from_config(cfg: dict, resume: bool = False) -> str:
+def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     learning_cfg = cfg.get("learning", {})
     training_cfg = learning_cfg.get("training", {})
     model_path = learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
@@ -23,6 +23,9 @@ def train_from_config(cfg: dict, resume: bool = False) -> str:
     window_size = learning_cfg.get("window_size", 50)
     timesteps = int(training_cfg.get("timesteps", 200_000))
     eval_split = float(training_cfg.get("eval_split", 0.2))
+
+    if resume is None:
+        resume = bool(training_cfg.get("resume", True))
 
     datasets = load_csv_data(data_dir, interval=interval)
     envs = []

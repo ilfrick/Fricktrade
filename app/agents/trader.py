@@ -16,8 +16,9 @@ class TradingAgent:
         self.risk = RiskManager(cfg["risk"])
         self.learning_cfg = cfg.get("learning", {})
         params = cfg["strategy"]["params"]
-        self.strategy = self._build_strategy(params)
-        self.guardrail = self._build_guardrail(params)
+        self._strategy_params = params
+        self._strategy_by_symbol: dict[str, object] = {}
+        self._guardrail_by_symbol: dict[str, object] = {}
         self.executor = ExecutionEngine(broker)
         self._last_market_open = None
 
@@ -55,6 +56,16 @@ class TradingAgent:
             guard_params.get("allow_shorts", params["allow_shorts"]),
         )
 
+    def _get_strategy(self, symbol: str):
+        if symbol not in self._strategy_by_symbol:
+            self._strategy_by_symbol[symbol] = self._build_strategy(self._strategy_params)
+        return self._strategy_by_symbol[symbol]
+
+    def _get_guardrail(self, symbol: str):
+        if symbol not in self._guardrail_by_symbol:
+            self._guardrail_by_symbol[symbol] = self._build_guardrail(self._strategy_params)
+        return self._guardrail_by_symbol[symbol]
+
     def _apply_guardrail(self, action: str, guard_action: str, mode: str) -> str:
         if action not in ("buy", "sell"):
             return action
@@ -66,10 +77,12 @@ class TradingAgent:
         return action
 
     def run_once(self, symbol: str, market_state: dict):
-        signal = self.strategy.generate_signal(market_state)
+        strategy = self._get_strategy(symbol)
+        signal = strategy.generate_signal(market_state)
         action = signal.get("action", "hold")
-        if self.guardrail:
-            guard_action = self.guardrail.generate_signal(market_state).get("action", "hold")
+        guardrail = self._get_guardrail(symbol)
+        if guardrail:
+            guard_action = guardrail.generate_signal(market_state).get("action", "hold")
             mode = self.learning_cfg.get("guardrail", {}).get("mode", "confirm")
             action = self._apply_guardrail(action, guard_action, mode)
         if action == "hold":
@@ -87,7 +100,8 @@ class TradingAgent:
             TRADES.labels(symbol=symbol, side=action).inc()
         return order_id
 
-    def loop(self, symbol: str, market_data_provider, interval_seconds: int = 60):
+    def loop(self, symbol: str | list[str], market_data_provider, interval_seconds: int = 60):
+        symbols = symbol if isinstance(symbol, list) else [symbol]
         while True:
             market_open = is_market_open(self.cfg)
             if market_open != self._last_market_open:
@@ -97,6 +111,7 @@ class TradingAgent:
             if not market_open:
                 time.sleep(interval_seconds)
                 continue
-            market_state = market_data_provider(symbol)
-            self.run_once(symbol, market_state)
+            for sym in symbols:
+                market_state = market_data_provider(sym)
+                self.run_once(sym, market_state)
             time.sleep(interval_seconds)

@@ -152,7 +152,9 @@ def main():
         return
 
     if args.cmd == "train":
-        model_path = train_from_config(cfg)
+        training_cfg = cfg.get("learning", {}).get("training", {})
+        resume = bool(training_cfg.get("resume", True))
+        model_path = train_from_config(cfg, resume=resume)
         logging.info("Training complete. Model saved to %s", model_path)
         return
 
@@ -170,9 +172,9 @@ def main():
     if args.cmd == "trade":
         broker = _build_broker(cfg)
         agent = TradingAgent(broker, cfg)
-        symbol = cfg["data"]["symbols"][0]
+        symbols = cfg["data"]["symbols"]
         agent.loop(
-            symbol,
+            symbols,
             lambda s: _market_state_from_yf(s, cfg["data"]["lookback_days"], cfg["data"]["interval"]),
             60,
         )
