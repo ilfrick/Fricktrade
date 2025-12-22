@@ -106,7 +106,7 @@ risk:
   circuit_breaker_drawdown_pct: 5.0
 strategy:
   name: intraday_momentum
-  names: []
+  names: [intraday_momentum, pattern_trading, rl_policy]
   combine: priority
   params:
     lookback_minutes: 30

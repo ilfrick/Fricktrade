@@ -67,7 +67,7 @@ Key knobs:
 - `strategy.params.*`
 
 You manage strategy and risk by editing `config/config.yaml` and restarting the trader container, or use the web UI.
-Multi-strategy mode is available via `strategy.names` (e.g. `["intraday_momentum", "pattern_trading", "rl_policy"]`) with `strategy.combine: priority|vote`.
+Multi-strategy mode is enabled by default via `strategy.names` (intraday momentum + pattern trading + RL policy) and can be adjusted as needed. Combine behavior is set with `strategy.combine: priority|vote`.
 The `api` service exposes:
 - Web UI at `http://localhost:18081/ui`
 - Read-only config at `http://localhost:18081/config`
