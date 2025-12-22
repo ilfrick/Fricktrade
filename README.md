@@ -1,6 +1,6 @@
-# Autotrader (Borsa Italiana)
+# Autotrader (Multi-Market)
 
-An intraday trading agent for EU equities with shorting support, Alpaca + IBKR integration, configurable risk controls, backtesting, local data download (yfinance), and Grafana monitoring.
+An intraday trading agent with shorting support, Alpaca + IBKR integration, configurable risk controls, backtesting, local data download (yfinance), and Grafana monitoring. Supports multi-market trading gates (NYSE, Nasdaq, Borsa Italiana).
 
 ## Features
 
@@ -8,9 +8,10 @@ An intraday trading agent for EU equities with shorting support, Alpaca + IBKR i
 - Broker adapters: Alpaca (paper/live) + Interactive Brokers (paper/live)
 - Risk manager with configurable limits and circuit breakers
 - Backtesting on locally downloaded data
-- Data download via yfinance (Borsa Italiana tickers with .MI)
+- Data download via yfinance (US and EU tickers supported)
 - Prometheus metrics + Grafana dashboard
 - Optional CUDA acceleration for analytics/backtests (profile `gpu`)
+- Market-open gating for NYSE, Nasdaq, and Borsa Italiana (configurable)
 
 ## Repository Layout
 
@@ -42,7 +43,7 @@ docker compose up -d --build
 
 4) Open Grafana:
 
-- URL: `http://localhost:3000`
+- URL: `http://localhost:3002`
 - User: `admin`
 - Pass: `admin`
 
@@ -64,16 +65,18 @@ Key knobs:
 - `strategy.params.*`
 
 You manage strategy and risk by editing `config/config.yaml` and restarting the trader container.
-The `api` service exposes a read-only config endpoint at `http://localhost:8000/config` for UI tooling.
+The `api` service exposes a read-only config endpoint at `http://localhost:18081/config` for UI tooling.
 
-## Notes on Borsa Italiana
+## Notes on Markets and Brokers
 
 IBKR provides broad EU equity access including Borsa Italiana. Alpaca does not generally support EU stocks; use Alpaca for US markets or paper testing.
+Trading only starts when at least one configured market is open (see `market.venues` and `market.open_mode`).
+Holiday lists are empty by default; populate `market.venues[].holidays` per venue.
 
 ## Data Download (yfinance)
 
 ```bash
-./scripts/download_data.sh
+docker compose run --rm trader python -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
 ```
 
 Data is saved to `/data` inside the container (mapped to `./data`).
@@ -100,6 +103,7 @@ docker compose run --rm trader python -m app.main train --config /app/config/con
 Enable learning in `config/config.yaml` by setting `learning.enabled: true`. A rule-based guardrail is configurable under `learning.guardrail`.
 Training produces a report at `learning.training.report_path` with return, Sharpe, and drawdown metrics, plus charts in `learning.training.report_plot_dir`.
 Models and reports are persisted under `./models` on the host.
+Use `learning.training.resume: true` to reuse an existing model on restart, or set it to `false` to retrain from scratch.
 
 Evaluate an existing model and regenerate charts:
 
@@ -123,9 +127,31 @@ Pull data from configured sources (`yfinance`, `stooq`, `alphavantage`):
 docker compose run --rm trader python -m app.main ingest --config /app/config/config.yaml
 ```
 
-### Config Reference (Learning + Data)
+### Config Reference (Learning + Data + Markets)
 
 ```yaml
+market:
+  open_mode: any
+  venues:
+    - name: BorsaItaliana
+      timezone: Europe/Rome
+      trading_hours:
+        open: "09:00"
+        close: "17:30"
+      holidays: []
+    - name: NYSE
+      timezone: America/New_York
+      trading_hours:
+        open: "09:30"
+        close: "16:00"
+      holidays: []
+    - name: Nasdaq
+      timezone: America/New_York
+      trading_hours:
+        open: "09:30"
+        close: "16:00"
+      holidays: []
+
 learning:
   enabled: false
   model_path: "/app/models/ppo_policy.zip"
@@ -157,15 +183,17 @@ learning:
     commission_pct: 0.05
     slippage_bps: 2
     eval_split: 0.2
+    resume: true
     report_path: "/app/models/training_report.json"
     report_plot_dir: "/app/models/reports"
 
 data:
   output_dir: "/data"
+  symbols: ["AAPL", "MSFT"]
   sources:
     - provider: yfinance
       enabled: true
-      symbols: ["ENI.MI", "ISP.MI"]
+      symbols: ["AAPL", "MSFT"]
       interval: "1m"
       lookback_days: 7
       rate_limit_seconds: 2
@@ -201,6 +229,8 @@ Run trading loop:
 docker compose run --rm trader python -m app.main trade --config /app/config/config.yaml
 ```
 
+The trader iterates over every symbol listed in `data.symbols` each cycle. Trading is paused when all configured markets are closed.
+
 ## Monitoring
 
 Prometheus scrapes `trader:8001/metrics`.
@@ -231,7 +261,7 @@ Grafana auto-provisions a dashboard with:
 - Cooldown windows between trades
 - Trailing/hard stop settings (configurable)
 
-## GitHub Repo Creation
+## Git Repo Creation
 
 Use the following steps to create a private repo and push:
 
@@ -242,7 +272,7 @@ git commit -m "Initial Autotrader"
 
 git remote add origin https://github.com/ilfrick/Autotrader.git
 
-git push -u origin main
+git push -u origin master
 ```
 
 If you use the GitHub CLI:
