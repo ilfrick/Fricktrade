@@ -24,6 +24,43 @@ An intraday trading agent with shorting support, Alpaca + IBKR integration, conf
 - `prometheus/`: Prometheus scrape config
 - `scripts/`: helper scripts
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Data["Market Data & Scanning"]
+        YF[yfinance live data]
+        Scan[Dynamic symbol scanner]
+        News[News catalyst fetcher]
+    end
+    subgraph Core["Trading Loop"]
+        Trader[TradingAgent]
+        Strat[Strategies<br/>intraday_momentum / pattern_trading / rl_policy]
+        Orchestrator[AI Orchestrator]
+        Risk[Risk Manager]
+        Exec[Execution Engine]
+    end
+    subgraph Broker["Broker Layer"]
+        Alpaca[Alpaca]
+        IBKR[IBKR]
+    end
+    subgraph Observability["Monitoring & Control"]
+        Metrics[Prometheus Metrics]
+        Grafana[Grafana Dashboard]
+        API[FastAPI Config/UI]
+        Logs[Rotating Logs]
+    end
+
+    YF --> Trader
+    Scan --> Trader
+    News --> Strat
+    Trader --> Strat --> Orchestrator --> Risk --> Exec --> Alpaca
+    Exec --> IBKR
+    Trader --> Metrics --> Grafana
+    Trader --> Logs
+    API <--> Trader
+```
+
 ## Quick Start (Docker)
 
 1) Copy env template:
