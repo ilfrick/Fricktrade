@@ -256,7 +256,7 @@ data:
   - GOOGL
   - TSLA
   - MSFT
-  interval: 1m
+  interval: 5m
   lookback_days: 7
   session_gain_mode: gap
   dynamic_symbols:
@@ -293,7 +293,7 @@ data:
     - GOOGL
     - TSLA
     - MSFT
-    interval: 1m
+    interval: 5m
     lookback_days: 7
     rate_limit_seconds: 2
   - provider: stooq
