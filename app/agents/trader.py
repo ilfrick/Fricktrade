@@ -21,6 +21,7 @@ from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols
+from app.data.scanner import ScanFilters, load_universe, scan_symbols
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.utils.market import is_market_open
 from app.utils.restart import should_restart
@@ -46,6 +47,8 @@ class TradingAgent:
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
         self._broker_name = self._resolve_broker_name()
+        self._dynamic_symbols_at: datetime | None = None
+        self._symbols: list[str] = []
 
     def _build_strategy(self, name: str, params: dict):
         if name == "rl_policy":
@@ -294,19 +297,22 @@ class TradingAgent:
         ACCOUNT_INVESTED.set(total_val - cash_val)
 
     def loop(self, symbol: str | list[str], market_data_provider, interval_seconds: int = 60):
-        symbols = symbol if isinstance(symbol, list) else [symbol]
+        self._symbols = symbol if isinstance(symbol, list) else [symbol]
         while True:
             if should_restart(self._started_at):
                 logging.info("Restart requested; exiting trading loop.")
                 raise SystemExit(0)
             portfolio = self._get_portfolio_snapshot()
-            for sym in symbols:
-                SYMBOL_ACTIVE.labels(symbol=sym).set(1)
+            symbols = self._symbols
             for name in self._strategy_names:
                 STRATEGY_ACTIVE.labels(strategy=name).set(1)
             BROKER_ACTIVE.labels(broker=self._broker_name).set(1)
             self._update_account_metrics()
             self._refresh_news_cache(symbols)
+            self._refresh_dynamic_symbols()
+            symbols = self._symbols
+            for sym in symbols:
+                SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             self._refresh_open_orders_cache(symbols)
             market_open = is_market_open(self.cfg)
             if market_open != self._last_market_open:
@@ -341,6 +347,65 @@ class TradingAgent:
             keywords=news_cfg.get("keywords", []),
         )
         self._news_cache_at = now
+
+    def _refresh_dynamic_symbols(self) -> None:
+        dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})
+        if not dyn_cfg.get("enabled", False):
+            return
+        now = datetime.utcnow()
+        refresh_minutes = int(dyn_cfg.get("refresh_minutes", 15))
+        if self._dynamic_symbols_at and (now - self._dynamic_symbols_at).total_seconds() < refresh_minutes * 60:
+            return
+
+        provider = dyn_cfg.get("provider", "alpaca")
+        if provider != "alpaca":
+            return
+        alpaca_cfg = self.cfg.get("brokers", {}).get("alpaca", {})
+        api_key = alpaca_cfg.get("api_key", "")
+        api_secret = alpaca_cfg.get("api_secret", "")
+
+        universe_cfg = dyn_cfg.get("universe", self._symbols)
+        max_universe = int(dyn_cfg.get("max_universe", 500))
+        universe = load_universe(api_key, api_secret, universe_cfg, max_universe=max_universe)
+        if not universe:
+            return
+
+        filters_cfg = self.cfg.get("pattern_trading", {}).get("selection", {})
+        filters = ScanFilters(
+            price_min=float(filters_cfg.get("price_min", 1.0)),
+            price_max=float(filters_cfg.get("price_max", 20.0)),
+            relative_volume_min=float(filters_cfg.get("relative_volume_min", 2.0)),
+            premarket_gain_min_pct=float(filters_cfg.get("premarket_gain_min_pct", 5.0)),
+            min_shares_traded=float(filters_cfg.get("min_shares_traded", 1_000_000)),
+            max_spread_pct=float(filters_cfg.get("max_spread_pct", 1.0)),
+            require_catalyst=bool(filters_cfg.get("require_catalyst", True)),
+            strict_spread=bool(filters_cfg.get("strict_spread", False)),
+        )
+        max_symbols = int(dyn_cfg.get("max_symbols", 50))
+        feed = dyn_cfg.get("feed", "iex")
+        catalyst_map = self._news_cache
+        if filters.require_catalyst:
+            catalyst_map = fetch_catalyst_symbols(
+                symbols=universe,
+                provider=self.cfg.get("news", {}).get("provider", "alpaca"),
+                base_url=self.cfg.get("news", {}).get("base_url", "https://data.alpaca.markets"),
+                api_key=self.cfg.get("news", {}).get("api_key", ""),
+                api_secret=self.cfg.get("news", {}).get("api_secret", ""),
+                lookback_hours=int(self.cfg.get("news", {}).get("lookback_hours", 12)),
+                keywords=self.cfg.get("news", {}).get("keywords", []),
+            )
+        candidates = scan_symbols(
+            universe,
+            api_key=api_key,
+            api_secret=api_secret,
+            feed=feed,
+            filters=filters,
+            catalyst_map=catalyst_map,
+            max_symbols=max_symbols,
+        )
+        if candidates:
+            self._symbols = candidates
+        self._dynamic_symbols_at = now
 
     def _enrich_market_state(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         equity = float(portfolio.get("equity", 0.0) or 0.0)

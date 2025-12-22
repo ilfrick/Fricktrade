@@ -173,6 +173,14 @@ data:
   interval: 1m
   lookback_days: 7
   session_gain_mode: gap
+  dynamic_symbols:
+    enabled: false
+    provider: alpaca
+    feed: iex
+    refresh_minutes: 15
+    max_symbols: 50
+    max_universe: 500
+    universe: alpaca_active
   start: ''
   end: ''
   proxy: ''

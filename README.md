@@ -132,6 +132,22 @@ Session gain is configurable via `data.session_gain_mode`:
 - `gap`: compare current price to prior close
 - `session`: compare to session open
 
+## Dynamic Symbols (Alpaca Scanner)
+
+Enable dynamic scanning to let the agent adapt the traded symbol list based on pattern filters:
+
+```yaml
+data:
+  dynamic_symbols:
+    enabled: true
+    provider: alpaca
+    feed: iex
+    refresh_minutes: 15
+    universe: alpaca_active
+```
+
+The scanner applies `pattern_trading.selection.*` filters to Alpaca snapshots (price, volume, gain, spread, catalyst) and replaces the active symbols list when candidates are found.
+
 ## Multi-Strategy Mode
 
 Set `strategy.names` to a list of strategies and choose how to combine them:
