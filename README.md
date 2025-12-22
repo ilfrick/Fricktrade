@@ -105,7 +105,7 @@ Train a PPO policy on local OHLCV data:
 docker compose run --rm trader python -m app.main train --config /app/config/config.yaml
 ```
 
-Enable learning in `config/config.yaml` by setting `learning.enabled: true`. A rule-based guardrail is configurable under `learning.guardrail`.
+Enable learning in `config/config.yaml` by setting `learning.enabled: true`. A rule-based guardrail is configurable under `learning.guardrail`. When `learning.device` is set to `auto`, CUDA is used if available.
 Training produces a report at `learning.training.report_path` with return, Sharpe, and drawdown metrics, plus charts in `learning.training.report_plot_dir`.
 Models and reports are persisted under `./models` on the host.
 Use `learning.training.resume: true` to reuse an existing model on restart, or set it to `false` to retrain from scratch.

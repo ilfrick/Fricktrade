@@ -18,7 +18,7 @@ class RLPolicyStrategy(Strategy):
         feature_config: dict | None = None,
     ):
         self.window_size = window_size
-        self.device = device
+        self.device = _resolve_device(device)
         self.model_path = model_path
         self.feature_config = feature_config or {}
         self.model = None
@@ -71,3 +71,13 @@ class RLPolicyStrategy(Strategy):
             self.position = -1.0
             return {"action": "sell"}
         return {"action": "hold"}
+
+
+def _resolve_device(device: str) -> str:
+    if device != "auto":
+        return device
+    try:
+        import torch
+    except Exception:
+        return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"

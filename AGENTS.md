@@ -119,7 +119,7 @@ docker compose run --rm api
 ## Configuration Notes
 
 - Risk and strategy parameters live in `config/config.yaml`.
-- Learning config lives under `learning` (enable policy, guardrail mode, feature set, and optional online updates).
+- Learning config lives under `learning` (enable policy, guardrail mode, feature set, and optional online updates). `learning.device: auto` uses CUDA if available.
 - Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
 - Models and reports are stored in `./models` via the Docker volume.
 - `learning.training.resume` controls whether training resumes from an existing model or starts fresh.

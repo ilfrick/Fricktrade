@@ -127,7 +127,7 @@ def evaluate_from_config(cfg: dict) -> dict:
     learning_cfg = cfg.get("learning", {})
     training_cfg = learning_cfg.get("training", {})
     model_path = learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
-    device = learning_cfg.get("device", "auto")
+    device = _resolve_device(learning_cfg.get("device", "auto"))
     feature_config = learning_cfg.get("features", {})
 
     data_dir = training_cfg.get("data_dir", cfg["backtest"]["data_dir"])
@@ -154,3 +154,13 @@ def evaluate_from_config(cfg: dict) -> dict:
         feature_config=feature_config,
         plot_dir=plot_dir,
     )
+
+
+def _resolve_device(device: str) -> str:
+    if device != "auto":
+        return device
+    try:
+        import torch
+    except Exception:
+        return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"
