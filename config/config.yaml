@@ -301,7 +301,7 @@ data:
     symbols:
     - eni
     - pkn
-    interval: 1d
+    interval: 5m
     rate_limit_seconds: 2
   - provider: alphavantage
     enabled: false
@@ -309,7 +309,7 @@ data:
     symbols:
     - AAPL
     - MSFT
-    interval: 1d
+    interval: 5m
     rate_limit_seconds: 15
 news:
   enabled: true
