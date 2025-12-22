@@ -95,7 +95,15 @@ def download_yfinance(
             continue
         if isinstance(data.columns, pd.MultiIndex):
             data = data.copy()
-            data.columns = data.columns.get_level_values(-1)
+            level0 = data.columns.get_level_values(0)
+            level1 = data.columns.get_level_values(-1)
+            required = {"Open", "High", "Low", "Close", "Volume"}
+            if required.issubset(set(level0)):
+                data.columns = level0
+            elif required.issubset(set(level1)):
+                data.columns = level1
+            else:
+                data.columns = level0
         ordered = ["Open", "High", "Low", "Close", "Volume"]
         if all(col in data.columns for col in ordered):
             data = data[ordered]

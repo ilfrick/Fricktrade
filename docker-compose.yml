@@ -26,7 +26,7 @@ services:
       - ./config:/app/config
     command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "api"]
     ports:
-      - "8002:8000"
+      - "18081:8000"
     restart: unless-stopped
 
   learner:

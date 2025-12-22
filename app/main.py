@@ -20,8 +20,38 @@ from app.utils.logging import setup_logging
 
 def _market_state_from_yf(symbol: str, lookback: int, interval: str):
     data = yf.download(tickers=symbol, period=f"{lookback}d", interval=interval, auto_adjust=True, progress=False)
-    prices = data["Close"].tolist()[-lookback:]
-    volumes = data["Volume"].tolist()[-lookback:] if "Volume" in data else []
+    if data is None or data.empty:
+        return {
+            "prices": [],
+            "volumes": [],
+            "qty": 1,
+            "exposure_pct": 1.0,
+            "short_exposure_pct": 0.0,
+            "leverage": 1.0,
+        }
+    if getattr(data.columns, "nlevels", 1) > 1:
+        data = data.copy()
+        if "Close" in data.columns.get_level_values(0):
+            data.columns = data.columns.get_level_values(0)
+        else:
+            data.columns = data.columns.get_level_values(-1)
+    if "Close" not in data.columns:
+        return {
+            "prices": [],
+            "volumes": [],
+            "qty": 1,
+            "exposure_pct": 1.0,
+            "short_exposure_pct": 0.0,
+            "leverage": 1.0,
+        }
+    close = data["Close"]
+    volume = data["Volume"] if "Volume" in data else None
+    if isinstance(close, type(data)):
+        close = close.iloc[:, 0]
+    if volume is not None and isinstance(volume, type(data)):
+        volume = volume.iloc[:, 0]
+    prices = close.iloc[-lookback:].tolist()
+    volumes = volume.iloc[-lookback:].tolist() if volume is not None else []
     return {
         "prices": prices,
         "volumes": volumes,

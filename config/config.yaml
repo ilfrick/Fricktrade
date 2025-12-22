@@ -5,12 +5,28 @@ app:
   log_level: INFO
 
 market:
-  venue: BorsaItaliana
+  venue: Multi
   default_currency: EUR
-  trading_hours:
-    open: "09:00"
-    close: "17:30"
-  holidays: []
+  open_mode: any
+  venues:
+    - name: BorsaItaliana
+      timezone: Europe/Rome
+      trading_hours:
+        open: "09:00"
+        close: "17:30"
+      holidays: []
+    - name: NYSE
+      timezone: America/New_York
+      trading_hours:
+        open: "09:30"
+        close: "16:00"
+      holidays: []
+    - name: Nasdaq
+      timezone: America/New_York
+      trading_hours:
+        open: "09:30"
+        close: "16:00"
+      holidays: []
 
 brokers:
   alpaca:
@@ -19,7 +35,7 @@ brokers:
     api_key: "${ALPACA_API_KEY}"
     api_secret: "${ALPACA_API_SECRET}"
   ibkr:
-    enabled: true
+    enabled: false
     host: "127.0.0.1"
     port: 7497
     client_id: 1
@@ -45,7 +61,7 @@ strategy:
     allow_shorts: true
 
 learning:
-  enabled: false
+  enabled: true
   model_path: "/app/models/ppo_policy.zip"
   device: "auto"
   window_size: 50
@@ -63,7 +79,7 @@ learning:
       exit_threshold_pct: 0.4
       allow_shorts: true
   online:
-    enabled: false
+    enabled: true
     update_interval_minutes: 60
     timesteps: 1000
     eval_split: 0.1
@@ -80,8 +96,8 @@ learning:
 
 backtest:
   data_dir: "/data"
-  start: "2023-01-01"
-  end: "2024-01-01"
+  start: "2025-12-11"
+  end: "2025-12-19"
   initial_cash: 100000
   commission_pct: 0.05
   slippage_bps: 2

@@ -6,6 +6,7 @@ from app.monitoring.metrics import TRADES, PNL, DRAWDOWN
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.rl_policy import RLPolicyStrategy
+from app.utils.market import is_market_open
 
 
 class TradingAgent:
@@ -18,6 +19,7 @@ class TradingAgent:
         self.strategy = self._build_strategy(params)
         self.guardrail = self._build_guardrail(params)
         self.executor = ExecutionEngine(broker)
+        self._last_market_open = None
 
     def _build_strategy(self, params: dict):
         if self.learning_cfg.get("enabled"):
@@ -87,6 +89,14 @@ class TradingAgent:
 
     def loop(self, symbol: str, market_data_provider, interval_seconds: int = 60):
         while True:
+            market_open = is_market_open(self.cfg)
+            if market_open != self._last_market_open:
+                state = "open" if market_open else "closed"
+                logging.info("Market is %s; %s trading loop.", state, "starting" if market_open else "waiting")
+                self._last_market_open = market_open
+            if not market_open:
+                time.sleep(interval_seconds)
+                continue
             market_state = market_data_provider(symbol)
             self.run_once(symbol, market_state)
             time.sleep(interval_seconds)
