@@ -27,6 +27,10 @@ cp .env.example .env
 
 ```bash
 docker compose up -d --build
+
+By default the `trader` service uses the GPU-enabled image. To force CPU execution for RL
+inference/training, set `learning.device: cpu` in `config/config.yaml` (or via the web UI).
+To disable GPU acceleration in backtests, set `backtest.use_gpu: false`.
 ```
 
 Services:
@@ -44,31 +48,31 @@ Web UI:
 - Download data:
 
 ```bash
-docker compose run --rm trader python -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
+docker compose run --rm trader python3 -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
 ```
 
 - Backtest:
 
 ```bash
-docker compose run --rm trader python -m app.main backtest --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml
 ```
 
 - Trade:
 
 ```bash
-docker compose run --rm trader python -m app.main trade --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main trade --config /app/config/config.yaml
 ```
 
 - Train RL policy (offline):
 
 ```bash
-docker compose run --rm trader python -m app.main train --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main train --config /app/config/config.yaml
 ```
 
 - Evaluate policy and regenerate charts:
 
 ```bash
-docker compose run --rm trader python -m app.main evaluate --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main evaluate --config /app/config/config.yaml
 ```
 
 - Online updates (separate process):
@@ -101,7 +105,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 - Ingest data from configured sources:
 
 ```bash
-docker compose run --rm trader python -m app.main ingest --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main ingest --config /app/config/config.yaml
 ```
 
 - Start API:

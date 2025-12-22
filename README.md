@@ -41,6 +41,10 @@ cp .env.example .env
 
 ```bash
 docker compose up -d --build
+
+By default the `trader` service uses the GPU-enabled image. To force CPU execution for RL
+inference/training, set `learning.device: cpu` in `config/config.yaml` (or via the web UI).
+To disable GPU acceleration in backtests, set `backtest.use_gpu: false`.
 ```
 
 4) Open Grafana:
@@ -84,7 +88,7 @@ Holiday lists are empty by default; populate `market.venues[].holidays` per venu
 ## Data Download (yfinance)
 
 ```bash
-docker compose run --rm trader python -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
+docker compose run --rm trader python3 -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
 ```
 
 Data is saved to `/data` inside the container (mapped to `./data`).
@@ -97,7 +101,7 @@ If Yahoo blocks the container, set a proxy and slow down requests in `config/con
 ## Backtesting
 
 ```bash
-docker compose run --rm trader python -m app.main backtest --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml
 ```
 
 ## Learning (RL)
@@ -105,7 +109,7 @@ docker compose run --rm trader python -m app.main backtest --config /app/config/
 Train a PPO policy on local OHLCV data:
 
 ```bash
-docker compose run --rm trader python -m app.main train --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main train --config /app/config/config.yaml
 ```
 
 Enable learning in `config/config.yaml` by setting `learning.enabled: true`. A rule-based guardrail is configurable under `learning.guardrail`. When `learning.device` is set to `auto`, CUDA is used if available.
@@ -168,7 +172,7 @@ Available strategy names:
 Evaluate an existing model and regenerate charts:
 
 ```bash
-docker compose run --rm trader python -m app.main evaluate --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main evaluate --config /app/config/config.yaml
 ```
 
 ### Online Updates
@@ -199,7 +203,7 @@ PY
 Pull data from configured sources (`yfinance`, `stooq`, `alphavantage`):
 
 ```bash
-docker compose run --rm trader python -m app.main ingest --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main ingest --config /app/config/config.yaml
 ```
 
 ### Config Reference (Learning + Data + Markets)
@@ -301,7 +305,7 @@ Requires NVIDIA Docker runtime. If you don’t have a GPU, ignore this.
 Run trading loop:
 
 ```bash
-docker compose run --rm trader python -m app.main trade --config /app/config/config.yaml
+docker compose run --rm trader python3 -m app.main trade --config /app/config/config.yaml
 ```
 
 The trader iterates over every symbol listed in `data.symbols` each cycle. Trading is paused when all configured markets are closed.
