@@ -3,32 +3,82 @@
   "uid": "autotrader",
   "title": "Autotrader Overview",
   "schemaVersion": 38,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
+  "timezone": "browser",
   "panels": [
     {
       "type": "stat",
       "title": "Trades Total",
-      "gridPos": {"x": 0, "y": 0, "w": 8, "h": 6},
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 5},
       "targets": [
         {"expr": "sum(trades_total)", "refId": "A"}
-      ]
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
     },
     {
       "type": "stat",
       "title": "PnL %",
-      "gridPos": {"x": 8, "y": 0, "w": 8, "h": 6},
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 5},
       "targets": [
         {"expr": "pnl_percent", "refId": "A"}
-      ]
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
     },
     {
       "type": "stat",
       "title": "Drawdown %",
-      "gridPos": {"x": 16, "y": 0, "w": 8, "h": 6},
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 5},
       "targets": [
         {"expr": "drawdown_percent", "refId": "A"}
-      ]
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "type": "stat",
+      "title": "Active Symbols",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 5},
+      "targets": [
+        {"expr": "count(count by (symbol) (trades_total))", "refId": "A"}
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Trades Rate (5m)",
+      "gridPos": {"x": 0, "y": 5, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (symbol, side) (rate(trades_total[5m]))", "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "ops"},
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cumulative Trades by Symbol",
+      "gridPos": {"x": 12, "y": 5, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (symbol) (trades_total)", "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "short"},
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "PnL % / Drawdown %",
+      "gridPos": {"x": 0, "y": 13, "w": 24, "h": 8},
+      "targets": [
+        {"expr": "pnl_percent", "refId": "A"},
+        {"expr": "drawdown_percent", "refId": "B"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "percent"},
+        "overrides": []
+      }
     }
   ]
 }

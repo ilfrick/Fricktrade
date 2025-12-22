@@ -114,6 +114,7 @@ docker compose run --rm api
 - Risk checks are basic thresholds only; no PnL accounting is wired into execution.
 - Backtest engine loads the first matching CSV in `backtest.data_dir`.
 - API `/config` masks Alpaca keys before returning.
+- Grafana auto-provisions the "Autotrader Overview" dashboard with trade counts/rates, PnL, and drawdown.
 
 ## Extending the Codebase
 

@@ -237,6 +237,8 @@ Prometheus scrapes `trader:8001/metrics`.
 Grafana auto-provisions a dashboard with:
 
 - Trades total
+- Trades rate by symbol/side
+- Cumulative trades by symbol
 - PnL %
 - Drawdown %
 
