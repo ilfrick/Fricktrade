@@ -16,6 +16,8 @@ from app.monitoring.metrics import (
 )
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
+from app.strategies.pattern_trading import PatternTradingStrategy
+from app.data.news import fetch_catalyst_symbols
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.utils.market import is_market_open
 from app.utils.restart import should_restart
@@ -34,6 +36,8 @@ class TradingAgent:
         self.executor = ExecutionEngine(broker)
         self._last_market_open = None
         self._started_at = datetime.utcnow()
+        self._news_cache: dict[str, bool] = {}
+        self._news_cache_at: datetime | None = None
 
     def _build_strategy(self, params: dict):
         if self.learning_cfg.get("enabled"):
@@ -50,6 +54,8 @@ class TradingAgent:
                 )
             except FileNotFoundError as exc:
                 logging.warning("RL model unavailable, falling back to rule-based strategy: %s", exc)
+        if self.cfg["strategy"].get("name") == "pattern_trading":
+            return PatternTradingStrategy(self.cfg.get("pattern_trading", {}))
         return IntradayMomentumStrategy(
             params["lookback_minutes"],
             params["entry_threshold_pct"],
@@ -121,7 +127,11 @@ class TradingAgent:
             return None
 
         portfolio = market_state.get("portfolio", {})
-        qty, skip_reason = self._size_order(action, last_price, portfolio, symbol)
+        if action == "sell":
+            reduce_pct = float(signal.get("reduce_pct", 1.0))
+            qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, reduce_pct=reduce_pct)
+        else:
+            qty, skip_reason = self._size_order(action, last_price, portfolio, symbol)
         if qty <= 0:
             if skip_reason:
                 SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=skip_reason).inc()
@@ -143,7 +153,14 @@ class TradingAgent:
             TRADES.labels(symbol=symbol, side=action).inc()
         return order_id
 
-    def _size_order(self, action: str, last_price: float, portfolio: dict, symbol: str) -> tuple[int, str | None]:
+    def _size_order(
+        self,
+        action: str,
+        last_price: float,
+        portfolio: dict,
+        symbol: str,
+        reduce_pct: float = 1.0,
+    ) -> tuple[int, str | None]:
         if last_price <= 0:
             return 0, "no_price"
         equity = float(portfolio.get("equity", 0.0) or 0.0)
@@ -169,7 +186,8 @@ class TradingAgent:
 
         if action == "sell":
             if current_qty > 0:
-                return int(current_qty), None
+                qty = int(current_qty * max(min(reduce_pct, 1.0), 0.0))
+                return (qty, None) if qty > 0 else (0, "position_limit")
             if not allow_shorts or equity <= 0:
                 return 0, "short_limit"
             short_limit = equity * (max_short_pct / 100.0)
@@ -216,6 +234,7 @@ class TradingAgent:
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             self._update_account_metrics()
+            self._refresh_news_cache(symbols)
             market_open = is_market_open(self.cfg)
             if market_open != self._last_market_open:
                 state = "open" if market_open else "closed"
@@ -229,6 +248,26 @@ class TradingAgent:
                 self._enrich_market_state(market_state, portfolio, sym)
                 self.run_once(sym, market_state)
             time.sleep(interval_seconds)
+
+    def _refresh_news_cache(self, symbols: list[str]) -> None:
+        news_cfg = self.cfg.get("news", {})
+        if not news_cfg.get("enabled", False):
+            self._news_cache = {}
+            return
+        now = datetime.utcnow()
+        ttl_minutes = int(news_cfg.get("cache_minutes", 15))
+        if self._news_cache_at and (now - self._news_cache_at).total_seconds() < ttl_minutes * 60:
+            return
+        self._news_cache = fetch_catalyst_symbols(
+            symbols=symbols,
+            provider=news_cfg.get("provider", "alpaca"),
+            base_url=news_cfg.get("base_url", "https://data.alpaca.markets"),
+            api_key=news_cfg.get("api_key", ""),
+            api_secret=news_cfg.get("api_secret", ""),
+            lookback_hours=int(news_cfg.get("lookback_hours", 12)),
+            keywords=news_cfg.get("keywords", []),
+        )
+        self._news_cache_at = now
 
     def _enrich_market_state(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         equity = float(portfolio.get("equity", 0.0) or 0.0)
@@ -245,6 +284,7 @@ class TradingAgent:
         market_state["short_exposure_pct"] = (short_exposure / equity * 100.0) if equity else 0.0
         market_state["leverage"] = (gross_exposure / equity) if equity else 1.0
         market_state["portfolio"] = portfolio
+        market_state["catalyst"] = self._news_cache.get(symbol, False)
 
     def _get_portfolio_snapshot(self) -> dict:
         account = self.broker.get_account()

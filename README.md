@@ -8,6 +8,7 @@ An intraday trading agent with shorting support, Alpaca + IBKR integration, conf
 - Broker adapters: Alpaca (paper/live) + Interactive Brokers (paper/live)
 - Risk manager with configurable limits and circuit breakers
 - Cash-aware position sizing based on broker equity/cash and exposure caps
+- Pattern Trading strategy for momentum breakouts with configurable filters
 - Backtesting on locally downloaded data
 - Data download via yfinance (US and EU tickers supported)
 - Prometheus metrics + Grafana dashboard
@@ -111,6 +112,20 @@ Training produces a report at `learning.training.report_path` with return, Sharp
 Models and reports are persisted under `./models` on the host.
 Use `learning.training.resume: true` to reuse an existing model on restart, or set it to `false` to retrain from scratch.
 The trainer writes a best-performing copy to `learning.best_model_path` when evaluation metrics improve; the trader loads it by default unless `learning.use_best_model: false`.
+
+## Pattern Trading Mode
+
+Enable Pattern Trading by setting `strategy.name: pattern_trading` and configure:
+- `pattern_trading.selection.*` for price/volume/gain/liquidity/catalyst filters
+- `pattern_trading.pattern.*` for MA trend + pullback rules
+- `pattern_trading.entry.*` for breakout and volume confirmation
+- `pattern_trading.risk.*` for stop, partial take profit, and trailing stop
+
+News catalysts use Alpaca’s news API by default (configure in `news.*`). If news data is unavailable, symbols are filtered out when `pattern_trading.selection.require_catalyst: true`.
+
+Session gain is configurable via `data.session_gain_mode`:
+- `gap`: compare current price to prior close
+- `session`: compare to session open
 
 Evaluate an existing model and regenerate charts:
 

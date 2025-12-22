@@ -120,15 +120,18 @@ docker compose run --rm api
 
 - Risk and strategy parameters live in `config/config.yaml`.
 - Learning config lives under `learning` (enable policy, guardrail mode, feature set, and optional online updates). `learning.device: auto` uses CUDA if available.
+- Pattern Trading config lives under `pattern_trading` and is enabled via `strategy.name: pattern_trading`.
 - Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
 - Models and reports are stored in `./models` via the Docker volume.
 - `learning.training.resume` controls whether training resumes from an existing model or starts fresh.
 - `learning.use_best_model` selects the best model copy (from `learning.best_model_path`) if available.
 - Data ingestion sources are configured under `data.sources`.
+- News catalysts (for Pattern Trading) are configured under `news` (default Alpaca news API).
 - Alpaca keys come from `ALPACA_API_KEY` / `ALPACA_API_SECRET` in `.env`.
 - `brokers.ibkr.enabled` controls IBKR adapter selection. If `false`, Alpaca is used.
 - Data directory is `/data` inside containers (mapped to `./data` on host).
 - `data.interval` and `data.lookback_days` are clamped for yfinance intraday limits.
+- `data.session_gain_mode` controls session gain calculation (`gap` or `session`).
 - `market.open_mode` chooses whether any or all configured venues must be open to trade.
 - `market.venues[].holidays` is refreshed by `calendar-updater` (or can be edited manually).
 - `calendar-updater` refreshes holiday calendars weekly from online sources (NYSE, Nasdaq, Italy public holidays).

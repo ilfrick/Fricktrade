@@ -164,12 +164,13 @@ backtest:
 data:
   provider: yfinance
   symbols:
-  - AAPL
-  - GOOGL
-  - TSLA
-  - MSFT
+    - AAPL
+    - GOOGL
+    - TSLA
+    - MSFT
   interval: 1m
   lookback_days: 7
+  session_gain_mode: gap
   start: ''
   end: ''
   proxy: ''
@@ -201,6 +202,35 @@ data:
     - MSFT
     interval: 1d
     rate_limit_seconds: 15
+news:
+  enabled: false
+  provider: alpaca
+  base_url: https://data.alpaca.markets
+  api_key: ${ALPACA_API_KEY}
+  api_secret: ${ALPACA_API_SECRET}
+  lookback_hours: 12
+  cache_minutes: 15
+  keywords: []
+pattern_trading:
+  selection:
+    price_min: 1.0
+    price_max: 20.0
+    relative_volume_min: 2.0
+    premarket_gain_min_pct: 5.0
+    min_shares_traded: 1000000
+    max_spread_pct: 1.0
+    strict_spread: false
+    require_catalyst: true
+  pattern:
+    ma_periods: [9, 20]
+    pullback_max_retrace_pct: 50
+  entry:
+    breakout_lookback_bars: 20
+    volume_confirm_mult: 1.5
+  risk:
+    stop_loss_pct: 0.05
+    partial_take_profit_pct: 0.10
+    trailing_stop_pct: 0.02
 monitoring:
   prometheus_port: 8001
   metrics_path: /metrics

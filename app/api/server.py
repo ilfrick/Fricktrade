@@ -95,6 +95,7 @@ _DESCRIPTIONS = {
     "data.symbols": "Symbols to trade.",
     "data.interval": "Data interval (e.g., 1m).",
     "data.lookback_days": "Lookback days for live data.",
+    "data.session_gain_mode": "Session gain mode: gap (vs prior close) or session (from open).",
     "data.start": "Historical start date override.",
     "data.end": "Historical end date override.",
     "data.proxy": "Proxy for data downloads.",
@@ -107,6 +108,29 @@ _DESCRIPTIONS = {
     "data.sources[].lookback_days": "Lookback days for source.",
     "data.sources[].rate_limit_seconds": "Rate limit for source.",
     "data.sources[].api_key": "API key for source.",
+    "news.enabled": "Enable news catalyst filtering.",
+    "news.provider": "News provider (alpaca).",
+    "news.base_url": "News API base URL.",
+    "news.api_key": "News API key (defaults to Alpaca key).",
+    "news.api_secret": "News API secret (defaults to Alpaca secret).",
+    "news.lookback_hours": "Lookback window for catalyst news.",
+    "news.cache_minutes": "Cache duration for news lookups.",
+    "news.keywords": "Optional keyword filters for news headlines.",
+    "pattern_trading.selection.price_min": "Minimum price for pattern trading.",
+    "pattern_trading.selection.price_max": "Maximum price for pattern trading.",
+    "pattern_trading.selection.relative_volume_min": "Minimum relative volume.",
+    "pattern_trading.selection.premarket_gain_min_pct": "Minimum session gain percent.",
+    "pattern_trading.selection.min_shares_traded": "Minimum intraday shares traded.",
+    "pattern_trading.selection.max_spread_pct": "Maximum spread percent.",
+    "pattern_trading.selection.strict_spread": "Require spread data to be present.",
+    "pattern_trading.selection.require_catalyst": "Require news catalyst.",
+    "pattern_trading.pattern.ma_periods": "Moving average periods for trend confirmation.",
+    "pattern_trading.pattern.pullback_max_retrace_pct": "Maximum pullback retrace percent.",
+    "pattern_trading.entry.breakout_lookback_bars": "Lookback bars for breakout.",
+    "pattern_trading.entry.volume_confirm_mult": "Volume multiplier for entry confirmation.",
+    "pattern_trading.risk.stop_loss_pct": "Stop loss percent below entry.",
+    "pattern_trading.risk.partial_take_profit_pct": "Partial take profit percent.",
+    "pattern_trading.risk.trailing_stop_pct": "Trailing stop percent.",
     "monitoring.prometheus_port": "Prometheus metrics port.",
     "monitoring.metrics_path": "Metrics path.",
 }
@@ -122,6 +146,9 @@ async def get_config():
     cfg = load_config("/app/config/config.yaml")
     cfg["brokers"]["alpaca"]["api_key"] = "***"
     cfg["brokers"]["alpaca"]["api_secret"] = "***"
+    if "news" in cfg:
+        cfg["news"]["api_key"] = "***"
+        cfg["news"]["api_secret"] = "***"
     return cfg
 
 
@@ -174,6 +201,11 @@ def _mask_secrets(cfg: dict) -> None:
     except Exception:
         pass
     try:
+        cfg["news"]["api_key"] = "***"
+        cfg["news"]["api_secret"] = "***"
+    except Exception:
+        pass
+    try:
         cfg["data"]["sources"][2]["api_key"] = "***"
     except Exception:
         pass
@@ -183,6 +215,8 @@ def _merge_secrets(target: dict, source: dict) -> None:
     for path in (
         ("brokers", "alpaca", "api_key"),
         ("brokers", "alpaca", "api_secret"),
+        ("news", "api_key"),
+        ("news", "api_secret"),
         ("data", "sources", 2, "api_key"),
     ):
         try:

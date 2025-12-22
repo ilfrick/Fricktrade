@@ -18,7 +18,7 @@ from app.utils.config import load_config
 from app.utils.logging import setup_logging
 
 
-def _market_state_from_yf(symbol: str, lookback: int, interval: str):
+def _market_state_from_yf(symbol: str, lookback: int, interval: str, session_gain_mode: str):
     data = yf.download(tickers=symbol, period=f"{lookback}d", interval=interval, auto_adjust=True, progress=False)
     if data is None or data.empty:
         return {
@@ -29,6 +29,13 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str):
             "short_exposure_pct": 0.0,
             "leverage": 1.0,
             "last_price": None,
+            "opens": [],
+            "highs": [],
+            "lows": [],
+            "session_volume": 0.0,
+            "relative_volume": 0.0,
+            "session_gain_pct": 0.0,
+            "spread_pct": None,
         }
     if getattr(data.columns, "nlevels", 1) > 1:
         data = data.copy()
@@ -48,13 +55,23 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str):
         }
     close = data["Close"]
     volume = data["Volume"] if "Volume" in data else None
+    open_ = data["Open"] if "Open" in data else None
+    high = data["High"] if "High" in data else None
+    low = data["Low"] if "Low" in data else None
     if isinstance(close, type(data)):
         close = close.iloc[:, 0]
     if volume is not None and isinstance(volume, type(data)):
         volume = volume.iloc[:, 0]
     prices = close.iloc[-lookback:].tolist()
     volumes = volume.iloc[-lookback:].tolist() if volume is not None else []
+    opens = open_.iloc[-lookback:].tolist() if open_ is not None else []
+    highs = high.iloc[-lookback:].tolist() if high is not None else []
+    lows = low.iloc[-lookback:].tolist() if low is not None else []
     last_price = prices[-1] if prices else None
+    avg_volume = float(sum(volumes) / len(volumes)) if volumes else 0.0
+    session_volume = float(sum(volumes)) if volumes else 0.0
+    rel_volume = float(volumes[-1] / avg_volume) if avg_volume else 0.0
+    session_gain_pct = _session_gain_pct(data, prices, session_gain_mode)
     return {
         "prices": prices,
         "volumes": volumes,
@@ -63,7 +80,32 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str):
         "short_exposure_pct": 0.0,
         "leverage": 1.0,
         "last_price": last_price,
+        "opens": opens,
+        "highs": highs,
+        "lows": lows,
+        "session_volume": session_volume,
+        "relative_volume": rel_volume,
+        "session_gain_pct": session_gain_pct,
+        "spread_pct": None,
     }
+
+
+def _session_gain_pct(data, prices: list[float], mode: str) -> float:
+    if data is None or data.empty or not prices:
+        return 0.0
+    try:
+        if mode == "session":
+            first_price = prices[0]
+            return (prices[-1] - first_price) / first_price * 100.0 if first_price else 0.0
+        prior_data = data.iloc[:-1]
+        prev_close = None
+        if not prior_data.empty:
+            prev_close = prior_data["Close"].iloc[-1]
+        if prev_close:
+            return (prices[-1] - prev_close) / prev_close * 100.0
+        return 0.0
+    except Exception:
+        return 0.0
 
 
 def _build_broker(cfg: dict):
@@ -180,7 +222,12 @@ def main():
         symbols = cfg["data"]["symbols"]
         agent.loop(
             symbols,
-            lambda s: _market_state_from_yf(s, cfg["data"]["lookback_days"], cfg["data"]["interval"]),
+            lambda s: _market_state_from_yf(
+                s,
+                cfg["data"]["lookback_days"],
+                cfg["data"]["interval"],
+                cfg["data"].get("session_gain_mode", "gap"),
+            ),
             60,
         )
         return
