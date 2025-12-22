@@ -10,101 +10,254 @@
     {
       "type": "stat",
       "title": "Trades Total",
-      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 5},
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
       "targets": [
-        {"expr": "sum(trades_total)", "refId": "A"}
+        {
+          "expr": "sum(trades_total)",
+          "refId": "A"
+        }
       ],
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
     {
       "type": "stat",
       "title": "Total Equity",
-      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 5},
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
       "targets": [
-        {"expr": "account_total", "refId": "A"}
+        {
+          "expr": "account_total",
+          "refId": "A"
+        }
       ],
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
-      "fieldConfig": {"defaults": {"unit": "currencyUSD"}}
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
     },
     {
       "type": "stat",
       "title": "Available Cash",
-      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 5},
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
       "targets": [
-        {"expr": "account_cash", "refId": "A"}
+        {
+          "expr": "account_cash",
+          "refId": "A"
+        }
       ],
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
-      "fieldConfig": {"defaults": {"unit": "currencyUSD"}}
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
     },
     {
       "type": "stat",
       "title": "Invested",
-      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 5},
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
       "targets": [
-        {"expr": "account_invested", "refId": "A"}
+        {
+          "expr": "account_invested",
+          "refId": "A"
+        }
       ],
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
-      "fieldConfig": {"defaults": {"unit": "currencyUSD"}}
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
     },
     {
       "type": "stat",
       "title": "Active Symbols",
-      "gridPos": {"x": 0, "y": 5, "w": 6, "h": 5},
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 6,
+        "h": 5
+      },
       "targets": [
-        {"expr": "count(symbol_active)", "refId": "A"}
+        {
+          "expr": "count(symbol_active)",
+          "refId": "A"
+        }
       ],
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
     {
       "type": "table",
       "title": "Symbols Traded",
-      "gridPos": {"x": 6, "y": 5, "w": 18, "h": 5},
+      "gridPos": {
+        "x": 6,
+        "y": 5,
+        "w": 18,
+        "h": 5
+      },
       "targets": [
-        {"expr": "symbol_active", "refId": "A"}
+        {
+          "expr": "symbol_active",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "table",
       "title": "Trades by Symbol/Side",
-      "gridPos": {"x": 0, "y": 10, "w": 12, "h": 6},
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 12,
+        "h": 6
+      },
       "targets": [
-        {"expr": "sum by (symbol, side) (trades_total)", "refId": "A"}
+        {
+          "expr": "sum by (symbol, side) (trades_total)",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Trades Rate (5m)",
-      "gridPos": {"x": 12, "y": 10, "w": 12, "h": 8},
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        {"expr": "sum by (symbol, side) (rate(trades_total[5m]))", "refId": "A"}
+        {
+          "expr": "sum by (symbol, side) (rate(trades_total[5m]))",
+          "refId": "A"
+        }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "ops"},
+        "defaults": {
+          "unit": "ops"
+        },
         "overrides": []
       }
     },
     {
       "type": "timeseries",
       "title": "Cumulative Trades by Symbol",
-      "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        {"expr": "sum by (symbol) (trades_total)", "refId": "A"}
+        {
+          "expr": "sum by (symbol) (trades_total)",
+          "refId": "A"
+        }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "short"},
+        "defaults": {
+          "unit": "short"
+        },
         "overrides": []
       }
     },
     {
       "type": "timeseries",
       "title": "PnL % / Drawdown %",
-      "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        {"expr": "pnl_percent", "refId": "A"},
-        {"expr": "drawdown_percent", "refId": "B"}
+        {
+          "expr": "pnl_percent",
+          "refId": "A"
+        },
+        {
+          "expr": "drawdown_percent",
+          "refId": "B"
+        }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "percent"},
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Skipped Orders Rate (5m)",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(orders_skipped_total[5m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
         "overrides": []
       }
     }
