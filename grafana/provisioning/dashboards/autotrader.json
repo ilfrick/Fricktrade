@@ -64,9 +64,17 @@
       ]
     },
     {
+      "type": "table",
+      "title": "Trades by Symbol/Side",
+      "gridPos": {"x": 0, "y": 10, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "sum by (symbol, side) (trades_total)", "refId": "A"}
+      ]
+    },
+    {
       "type": "timeseries",
       "title": "Trades Rate (5m)",
-      "gridPos": {"x": 0, "y": 10, "w": 12, "h": 8},
+      "gridPos": {"x": 12, "y": 10, "w": 12, "h": 8},
       "targets": [
         {"expr": "sum by (symbol, side) (rate(trades_total[5m]))", "refId": "A"}
       ],
@@ -78,7 +86,7 @@
     {
       "type": "timeseries",
       "title": "Cumulative Trades by Symbol",
-      "gridPos": {"x": 12, "y": 10, "w": 12, "h": 8},
+      "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
       "targets": [
         {"expr": "sum by (symbol) (trades_total)", "refId": "A"}
       ],
@@ -90,7 +98,7 @@
     {
       "type": "timeseries",
       "title": "PnL % / Drawdown %",
-      "gridPos": {"x": 0, "y": 18, "w": 24, "h": 8},
+      "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
       "targets": [
         {"expr": "pnl_percent", "refId": "A"},
         {"expr": "drawdown_percent", "refId": "B"}
