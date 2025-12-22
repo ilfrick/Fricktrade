@@ -136,6 +136,10 @@ orchestrator:
     min_price_move_pct: 0.05
     state_path: /data/orchestrator_state.json
     save_interval_seconds: 300
+    use_best_state: true
+    best_state_path: /data/orchestrator_state_best.json
+    best_score_path: /data/orchestrator_best_score.json
+    score_ema_alpha: 0.1
   strategy_weights:
     intraday_momentum:
       momentum: 1.0

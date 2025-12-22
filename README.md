@@ -192,11 +192,16 @@ orchestrator:
     min_price_move_pct: 0.05
     state_path: /data/orchestrator_state.json
     save_interval_seconds: 300
+    use_best_state: true
+    best_state_path: /data/orchestrator_state_best.json
+    best_score_path: /data/orchestrator_best_score.json
+    score_ema_alpha: 0.1
 ```
 
 Weights live under `orchestrator.strategy_weights` and include `momentum`, `trend`, `volatility`, `relative_volume`,
 `session_gain_pct`, `spread`, and `catalyst`.
 Learning updates a per-strategy bias based on the next price move after each decision and persists it in `state_path`.
+The best-performing bias set is checkpointed to `best_state_path` and loaded by default when `use_best_state: true`.
 
 Evaluate an existing model and regenerate charts:
 
