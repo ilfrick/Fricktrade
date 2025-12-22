@@ -100,7 +100,7 @@ brokers:
     client_id: 1
 risk:
   max_daily_loss_pct: 2.0
-  max_position_size_pct: 5.0
+  max_position_size_pct: 25.0
   max_portfolio_leverage: 1.5
   max_short_exposure_pct: 30.0
   max_positions: 20
