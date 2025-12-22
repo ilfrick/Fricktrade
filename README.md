@@ -33,12 +33,18 @@ flowchart LR
         Scan[Dynamic symbol scanner]
         News[News catalyst fetcher]
     end
+    subgraph Models["Model Store"]
+        ModelStore[/data models/]
+    end
     subgraph Core["Trading Loop"]
         Trader[TradingAgent]
         Strat[Strategies<br/>intraday_momentum / pattern_trading / rl_policy]
         Orchestrator[AI Orchestrator]
         Risk[Risk Manager]
         Exec[Execution Engine]
+    end
+    subgraph Training["ML Orchestrator Pretrain"]
+        Pretrain[pretrain-orchestrator]
     end
     subgraph Broker["Broker Layer"]
         Alpaca[Alpaca]
@@ -52,10 +58,13 @@ flowchart LR
     end
 
     YF --> Trader
+    YF --> Pretrain
     Scan --> Trader
     News --> Strat
+    Pretrain --> ModelStore
     Trader --> Strat --> Orchestrator --> Risk --> Exec --> Alpaca
     Exec --> IBKR
+    Orchestrator --> ModelStore
     Trader --> Metrics --> Grafana
     Trader --> Logs
     API <--> Trader

@@ -51,6 +51,12 @@ Web UI:
 docker compose run --rm trader python3 -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
 ```
 
+- Pretrain ML orchestrator:
+
+```bash
+docker compose run --rm trader python3 -m app.main pretrain-orchestrator --config /app/config/config.yaml
+```
+
 - Backtest:
 
 ```bash

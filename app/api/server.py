@@ -337,6 +337,7 @@ def _render_ui() -> str:
     .group-title { font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: #7dd3fc; margin-bottom: 6px; }
     .desc span { color: #cbd5f5; }
     .group-meta { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+    code { background: #111827; color: #e2e8f0; padding: 2px 6px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     input { width: 100%; padding: 6px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #1f2937; background: #0b1220; color: #e2e8f0; }
     select { width: 100%; padding: 6px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #1f2937; background: #0b1220; color: #e2e8f0; }
   </style>
@@ -353,6 +354,10 @@ def _render_ui() -> str:
       <div class="status" id="status">Loading...</div>
     </section>
     <section class="panel">
+      <div class="group-meta">
+        Orchestrator pretraining runs out-of-band. Use:
+        <code>docker compose run --rm trader python3 -m app.main pretrain-orchestrator --config /app/config/config.yaml</code>
+      </div>
       <input id="filter" placeholder="Filter parameters..." oninput="renderDescriptions()"/>
       <select id="groupFilter" onchange="renderDescriptions()">
         <option value="all">All groups</option>
