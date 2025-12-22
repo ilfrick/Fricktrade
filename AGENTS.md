@@ -126,6 +126,7 @@ docker compose run --rm api
 - Learning config lives under `learning` (enable policy, guardrail mode, feature set, and optional online updates). `learning.device: auto` uses CUDA if available.
 - Pattern Trading config lives under `pattern_trading` and is enabled via `strategy.name: pattern_trading`.
 - Multi-strategy config uses `strategy.names` with `strategy.combine` set to `priority` or `vote` (enabled by default in `config/config.yaml`).
+- AI strategy orchestration uses `orchestrator.*` to score strategies per symbol and select the top candidates each cycle.
 - Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
 - Models and reports are stored in `./models` via the Docker volume.
 - `learning.training.resume` controls whether training resumes from an existing model or starts fresh.
@@ -138,7 +139,7 @@ docker compose run --rm api
 - Data directory is `/data` inside containers (mapped to `./data` on host).
 - `data.interval` and `data.lookback_days` are clamped for yfinance intraday limits.
 - `data.session_gain_mode` controls session gain calculation (`gap` or `session`).
-- Dynamic symbol scanning is configured under `data.dynamic_symbols` (Alpaca snapshot-based scanner) and enabled by default.
+- Dynamic symbol scanning is configured under `data.dynamic_symbols` (Alpaca snapshot-based scanner), enabled by default, refreshes every 5 minutes, and supports cash-aware filtering with `cash_aware`.
 - Alerts are defined in `prometheus/alerts.yml` and a dedicated Grafana dashboard is provisioned for alerting/health.
 - Alertmanager handles email notifications via `alertmanager/alertmanager.yml`.
 - `market.open_mode` chooses whether any or all configured venues must be open to trade.

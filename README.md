@@ -146,11 +146,14 @@ data:
     enabled: true
     provider: alpaca
     feed: iex
-    refresh_minutes: 15
+    refresh_minutes: 5
     universe: alpaca_active
+    cash_aware: true
+    cash_buffer_pct: 95
 ```
 
 The scanner applies `pattern_trading.selection.*` filters to Alpaca snapshots (price, volume, gain, spread, catalyst) and replaces the active symbols list when candidates are found.
+When `cash_aware: true`, the scanner also caps the maximum price using current cash and `risk.max_position_size_pct` so the list adapts to low-fund scenarios.
 
 ## Logging & Alerts
 
@@ -168,6 +171,22 @@ Available strategy names:
 - `intraday_momentum`
 - `pattern_trading`
 - `rl_policy` (requires `learning.enabled: true`)
+
+## AI Strategy Orchestrator
+
+The AI orchestrator scores each strategy against the current market context and selects the top candidates per symbol.
+Enable it under `orchestrator.*` in `config/config.yaml`:
+
+```yaml
+orchestrator:
+  enabled: true
+  mode: select
+  top_k: 2
+  min_score: 0.0
+```
+
+Weights live under `orchestrator.strategy_weights` and include `momentum`, `trend`, `volatility`, `relative_volume`,
+`session_gain_pct`, `spread`, and `catalyst`.
 
 Evaluate an existing model and regenerate charts:
 

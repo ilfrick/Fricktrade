@@ -25,6 +25,7 @@ from app.data.scanner import ScanFilters, load_universe, scan_symbols
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.utils.market import is_market_open
 from app.utils.restart import should_restart
+from app.agents.orchestrator import StrategyOrchestrator
 
 
 class TradingAgent:
@@ -44,6 +45,7 @@ class TradingAgent:
         self._news_cache_at: datetime | None = None
         self._strategy_names = self._resolve_strategy_names()
         self._combine_mode = cfg["strategy"].get("combine", "priority")
+        self._orchestrator = StrategyOrchestrator(cfg.get("orchestrator", {}))
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
         self._broker_name = self._resolve_broker_name()
@@ -125,8 +127,9 @@ class TradingAgent:
             SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
             logging.info("Skipping %s: open orders pending", symbol)
             return None
+        names, weights = self._orchestrator.select(self._strategy_names, market_state)
         signals = []
-        for name in self._strategy_names:
+        for name in names:
             strategy = self._get_strategy(symbol, name)
             if not strategy:
                 continue
@@ -137,7 +140,7 @@ class TradingAgent:
                 continue
             signal["name"] = name
             signals.append(signal)
-        action, reduce_pct = self._combine_signals(signals)
+        action, reduce_pct = self._combine_signals(signals, weights, order=names)
         guardrail = self._get_guardrail(symbol)
         if guardrail:
             guard_action = guardrail.generate_signal(market_state).get("action", "hold")
@@ -247,7 +250,12 @@ class TradingAgent:
             return "ibkr"
         return "alpaca"
 
-    def _combine_signals(self, signals: list[dict]) -> tuple[str, float]:
+    def _combine_signals(
+        self,
+        signals: list[dict],
+        weights: dict[str, float] | None = None,
+        order: list[str] | None = None,
+    ) -> tuple[str, float]:
         if not signals:
             return "hold", 1.0
         for signal in signals:
@@ -255,18 +263,30 @@ class TradingAgent:
                 return "exit", 1.0
         mode = self._combine_mode
         if mode == "priority":
-            for name in self._strategy_names:
+            order = order or self._strategy_names
+            for name in order:
                 for signal in signals:
                     if signal.get("name") == name:
                         action = signal.get("action", "hold")
                         reduce_pct = float(signal.get("reduce_pct", 1.0))
                         return action, reduce_pct
             return "hold", 1.0
-        buys = [s for s in signals if s.get("action") == "buy"]
-        sells = [s for s in signals if s.get("action") == "sell"]
-        if len(buys) == len(sells):
+        weights = weights or {}
+        buy_score = 0.0
+        sell_score = 0.0
+        sells = []
+        for signal in signals:
+            action = signal.get("action")
+            name = signal.get("name")
+            weight = float(weights.get(name, 1.0))
+            if action == "buy":
+                buy_score += weight
+            elif action == "sell":
+                sell_score += weight
+                sells.append(signal)
+        if buy_score == sell_score:
             return "hold", 1.0
-        if len(buys) > len(sells):
+        if buy_score > sell_score:
             return "buy", 1.0
         reduce_pct = max(float(s.get("reduce_pct", 1.0)) for s in sells) if sells else 1.0
         return "sell", reduce_pct
@@ -309,7 +329,7 @@ class TradingAgent:
             BROKER_ACTIVE.labels(broker=self._broker_name).set(1)
             self._update_account_metrics()
             self._refresh_news_cache(symbols)
-            self._refresh_dynamic_symbols()
+            self._refresh_dynamic_symbols(portfolio)
             symbols = self._symbols
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
@@ -348,7 +368,7 @@ class TradingAgent:
         )
         self._news_cache_at = now
 
-    def _refresh_dynamic_symbols(self) -> None:
+    def _refresh_dynamic_symbols(self, portfolio: dict) -> None:
         dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})
         if not dyn_cfg.get("enabled", False):
             return
@@ -371,9 +391,12 @@ class TradingAgent:
             return
 
         filters_cfg = self.cfg.get("pattern_trading", {}).get("selection", {})
+        price_min = float(filters_cfg.get("price_min", 1.0))
+        price_max = float(filters_cfg.get("price_max", 20.0))
+        price_max = self._apply_cash_cap(price_min, price_max, portfolio, dyn_cfg)
         filters = ScanFilters(
-            price_min=float(filters_cfg.get("price_min", 1.0)),
-            price_max=float(filters_cfg.get("price_max", 20.0)),
+            price_min=price_min,
+            price_max=price_max,
             relative_volume_min=float(filters_cfg.get("relative_volume_min", 2.0)),
             premarket_gain_min_pct=float(filters_cfg.get("premarket_gain_min_pct", 5.0)),
             min_shares_traded=float(filters_cfg.get("min_shares_traded", 1_000_000)),
@@ -406,6 +429,29 @@ class TradingAgent:
         if candidates:
             self._symbols = candidates
         self._dynamic_symbols_at = now
+
+    def _apply_cash_cap(self, price_min: float, price_max: float, portfolio: dict, dyn_cfg: dict) -> float:
+        if not dyn_cfg.get("cash_aware", True):
+            return price_max
+        try:
+            cash = float(portfolio.get("cash", 0.0) or 0.0)
+            equity = float(portfolio.get("equity", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return price_max
+        if cash <= 0 or equity <= 0:
+            return price_max
+        max_pos_pct = float(self.cfg.get("risk", {}).get("max_position_size_pct", 0.0))
+        target_value = equity * (max_pos_pct / 100.0)
+        cash_cap = min(cash, target_value)
+        buffer_pct = float(dyn_cfg.get("cash_buffer_pct", 95.0))
+        cap = cash_cap * max(buffer_pct, 0.0) / 100.0
+        if cap <= 0:
+            return price_max
+        capped = min(price_max, cap)
+        if capped < price_min:
+            logging.info("Dynamic symbols cash cap %.2f below price_min %.2f; keeping price_max %.2f", cap, price_min, price_max)
+            return price_max
+        return capped
 
     def _enrich_market_state(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         equity = float(portfolio.get("equity", 0.0) or 0.0)

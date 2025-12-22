@@ -109,15 +109,46 @@ risk:
   trailing_stop_pct: 2.0
   circuit_breaker_drawdown_pct: 5.0
 strategy:
-  name: intraday_momentum
-  names: [intraday_momentum, pattern_trading, rl_policy]
-  combine: priority
+  name: rl_policy
+  names:
+  - intraday_momentum
+  - pattern_trading
+  - rl_policy
+  combine: vote
   params:
     lookback_minutes: 30
     entry_threshold_pct: 0.8
     exit_threshold_pct: 0.4
     position_horizon_minutes: 90
     allow_shorts: true
+orchestrator:
+  enabled: true
+  mode: select
+  top_k: 2
+  min_score: 0.0
+  normalize_scores: true
+  strategy_weights:
+    intraday_momentum:
+      momentum: 1.0
+      trend: 0.8
+      volatility: -0.2
+      relative_volume: 0.5
+      spread: -0.3
+      catalyst: 0.4
+    pattern_trading:
+      momentum: 0.8
+      trend: 1.0
+      volatility: -0.4
+      relative_volume: 0.7
+      spread: -0.4
+      catalyst: 0.6
+    rl_policy:
+      momentum: 0.2
+      trend: 0.2
+      volatility: 0.2
+      relative_volume: 0.2
+      spread: -0.1
+      catalyst: 0.1
 learning:
   enabled: true
   model_path: /app/models/ppo_policy.zip
@@ -170,10 +201,10 @@ backtest:
 data:
   provider: yfinance
   symbols:
-    - AAPL
-    - GOOGL
-    - TSLA
-    - MSFT
+  - AAPL
+  - GOOGL
+  - TSLA
+  - MSFT
   interval: 1m
   lookback_days: 7
   session_gain_mode: gap
@@ -181,10 +212,12 @@ data:
     enabled: true
     provider: alpaca
     feed: iex
-    refresh_minutes: 15
+    refresh_minutes: 5
     max_symbols: 50
     max_universe: 500
     universe: alpaca_active
+    cash_aware: true
+    cash_buffer_pct: 95
   start: ''
   end: ''
   proxy: ''
@@ -217,7 +250,7 @@ data:
     interval: 1d
     rate_limit_seconds: 15
 news:
-  enabled: false
+  enabled: true
   provider: alpaca
   base_url: https://data.alpaca.markets
   api_key: ${ALPACA_API_KEY}
@@ -236,14 +269,16 @@ pattern_trading:
     strict_spread: false
     require_catalyst: true
   pattern:
-    ma_periods: [9, 20]
+    ma_periods:
+    - 9
+    - 20
     pullback_max_retrace_pct: 50
   entry:
     breakout_lookback_bars: 20
     volume_confirm_mult: 1.5
   risk:
     stop_loss_pct: 0.05
-    partial_take_profit_pct: 0.10
+    partial_take_profit_pct: 0.1
     trailing_stop_pct: 0.02
 execution:
   open_orders:
