@@ -134,7 +134,7 @@ Session gain is configurable via `data.session_gain_mode`:
 
 ## Dynamic Symbols (Alpaca Scanner)
 
-Enable dynamic scanning to let the agent adapt the traded symbol list based on pattern filters:
+Dynamic scanning is enabled by default to let the agent adapt the traded symbol list based on pattern filters:
 
 ```yaml
 data:

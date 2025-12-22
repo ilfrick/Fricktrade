@@ -174,7 +174,7 @@ data:
   lookback_days: 7
   session_gain_mode: gap
   dynamic_symbols:
-    enabled: false
+    enabled: true
     provider: alpaca
     feed: iex
     refresh_minutes: 15
