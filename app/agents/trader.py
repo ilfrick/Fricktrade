@@ -463,6 +463,32 @@ class TradingAgent:
             catalyst_map=catalyst_map,
             max_symbols=max_symbols,
         )
+        if not candidates:
+            fallback_cfg = dyn_cfg.get("fallback", {})
+            if fallback_cfg.get("enabled", False):
+                logging.info("Dynamic symbols fallback enabled; relaxing filters.")
+                fallback_filters = ScanFilters(
+                    price_min=price_min,
+                    price_max=price_max,
+                    relative_volume_min=float(fallback_cfg.get("relative_volume_min", 0.5)),
+                    premarket_gain_min_pct=float(fallback_cfg.get("premarket_gain_min_pct", 0.0)),
+                    min_shares_traded=float(fallback_cfg.get("min_shares_traded", 100_000)),
+                    max_spread_pct=float(fallback_cfg.get("max_spread_pct", 2.0)),
+                    require_catalyst=bool(fallback_cfg.get("require_catalyst", False)),
+                    strict_spread=bool(fallback_cfg.get("strict_spread", False)),
+                )
+                fallback_catalysts = self._news_cache if fallback_filters.require_catalyst else {}
+                candidates = scan_symbols(
+                    universe,
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    feed=feed,
+                    filters=fallback_filters,
+                    catalyst_map=fallback_catalysts,
+                    max_symbols=max_symbols,
+                )
+                if candidates:
+                    logging.info("Dynamic symbols fallback found %d candidates.", len(candidates))
         if candidates:
             self._symbols = candidates
         self._dynamic_symbols_at = now

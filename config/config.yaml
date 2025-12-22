@@ -231,6 +231,13 @@ data:
     universe: alpaca_active
     cash_aware: true
     cash_buffer_pct: 95
+    fallback:
+      enabled: true
+      relative_volume_min: 0.5
+      premarket_gain_min_pct: 0.0
+      min_shares_traded: 100000
+      max_spread_pct: 2.0
+      require_catalyst: false
   start: ''
   end: ''
   proxy: ''

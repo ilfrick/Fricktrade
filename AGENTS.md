@@ -140,7 +140,7 @@ docker compose run --rm api
 - Data directory is `/data` inside containers (mapped to `./data` on host).
 - `data.interval` and `data.lookback_days` are clamped for yfinance intraday limits.
 - `data.session_gain_mode` controls session gain calculation (`gap` or `session`).
-- Dynamic symbol scanning is configured under `data.dynamic_symbols` (Alpaca snapshot-based scanner), enabled by default, refreshes every 5 minutes, and supports cash-aware filtering with `cash_aware`.
+- Dynamic symbol scanning is configured under `data.dynamic_symbols` (Alpaca snapshot-based scanner), enabled by default, refreshes every 5 minutes, supports cash-aware filtering with `cash_aware`, and can relax filters via `data.dynamic_symbols.fallback`.
 - Alerts are defined in `prometheus/alerts.yml` and a dedicated Grafana dashboard is provisioned for alerting/health.
 - Alertmanager handles email notifications via `alertmanager/alertmanager.yml`.
 - `market.open_mode` chooses whether any or all configured venues must be open to trade.
