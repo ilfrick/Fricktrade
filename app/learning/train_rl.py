@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import DummyVecEnv
+
+from app.learning.data import load_csv_data
+from app.learning.env import TradingEnv
+from app.learning.evaluate import evaluate_model
+
+
+def train_from_config(cfg: dict, resume: bool = False) -> str:
+    learning_cfg = cfg.get("learning", {})
+    training_cfg = learning_cfg.get("training", {})
+    model_path = learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
+    device = learning_cfg.get("device", "auto")
+    feature_config = learning_cfg.get("features", {})
+
+    data_dir = training_cfg.get("data_dir", cfg["backtest"]["data_dir"])
+    interval = training_cfg.get("interval", cfg["data"].get("interval"))
+    window_size = learning_cfg.get("window_size", 50)
+    timesteps = int(training_cfg.get("timesteps", 200_000))
+    eval_split = float(training_cfg.get("eval_split", 0.2))
+
+    datasets = load_csv_data(data_dir, interval=interval)
+    envs = []
+    eval_sets = []
+    for df in datasets:
+        split_idx = int(len(df) * (1.0 - eval_split))
+        train_df = df.iloc[:split_idx] if split_idx > 0 else df
+        eval_df = df.iloc[split_idx:] if split_idx > 0 else df
+        envs.append(
+            lambda data=train_df: TradingEnv(
+                data=data,
+                window_size=window_size,
+                initial_cash=training_cfg.get("initial_cash", cfg["backtest"]["initial_cash"]),
+                commission_pct=training_cfg.get("commission_pct", cfg["backtest"]["commission_pct"]),
+                slippage_bps=training_cfg.get("slippage_bps", cfg["backtest"]["slippage_bps"]),
+                feature_config=feature_config,
+            )
+        )
+        eval_sets.append(eval_df)
+    vec_env = DummyVecEnv(envs)
+
+    if resume and Path(model_path).exists():
+        model = PPO.load(model_path, env=vec_env, device=device)
+    else:
+        model = PPO("MlpPolicy", vec_env, verbose=1, device=device)
+    logging.info("Starting RL training for %d timesteps", timesteps)
+    model.learn(total_timesteps=timesteps)
+
+    output_path = Path(model_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    model.save(str(output_path))
+    logging.info("Saved model to %s", output_path)
+
+    report_path = training_cfg.get("report_path", "/app/models/training_report.json")
+    report_plot_dir = training_cfg.get("report_plot_dir", "/app/models/reports")
+    evaluate_model(
+        model=model,
+        datasets=eval_sets,
+        window_size=window_size,
+        training_cfg=training_cfg,
+        report_path=report_path,
+        feature_config=feature_config,
+        plot_dir=report_plot_dir,
+    )
+    return str(output_path)

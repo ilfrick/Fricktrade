@@ -89,6 +89,99 @@ If Yahoo blocks the container, set a proxy and slow down requests in `config/con
 docker compose run --rm trader python -m app.main backtest --config /app/config/config.yaml
 ```
 
+## Learning (RL)
+
+Train a PPO policy on local OHLCV data:
+
+```bash
+docker compose run --rm trader python -m app.main train --config /app/config/config.yaml
+```
+
+Enable learning in `config/config.yaml` by setting `learning.enabled: true`. A rule-based guardrail is configurable under `learning.guardrail`.
+Training produces a report at `learning.training.report_path` with return, Sharpe, and drawdown metrics, plus charts in `learning.training.report_plot_dir`.
+Models and reports are persisted under `./models` on the host.
+
+Evaluate an existing model and regenerate charts:
+
+```bash
+docker compose run --rm trader python -m app.main evaluate --config /app/config/config.yaml
+```
+
+### Online Updates
+
+Run online updates in a separate process:
+
+```bash
+docker compose run --rm learner
+```
+
+### Data Ingestion
+
+Pull data from configured sources (`yfinance`, `stooq`, `alphavantage`):
+
+```bash
+docker compose run --rm trader python -m app.main ingest --config /app/config/config.yaml
+```
+
+### Config Reference (Learning + Data)
+
+```yaml
+learning:
+  enabled: false
+  model_path: "/app/models/ppo_policy.zip"
+  device: "auto"
+  window_size: 50
+  features:
+    include_returns: true
+    sma_periods: [5, 20]
+    ema_periods: [10]
+    rsi_periods: [14]
+  guardrail:
+    enabled: true
+    mode: "confirm"
+    params:
+      lookback_minutes: 30
+      entry_threshold_pct: 0.8
+      exit_threshold_pct: 0.4
+      allow_shorts: true
+  online:
+    enabled: false
+    update_interval_minutes: 60
+    timesteps: 1000
+    eval_split: 0.1
+  training:
+    data_dir: "/data"
+    interval: "1m"
+    timesteps: 200000
+    initial_cash: 100000
+    commission_pct: 0.05
+    slippage_bps: 2
+    eval_split: 0.2
+    report_path: "/app/models/training_report.json"
+    report_plot_dir: "/app/models/reports"
+
+data:
+  output_dir: "/data"
+  sources:
+    - provider: yfinance
+      enabled: true
+      symbols: ["ENI.MI", "ISP.MI"]
+      interval: "1m"
+      lookback_days: 7
+      rate_limit_seconds: 2
+    - provider: stooq
+      enabled: false
+      symbols: ["eni", "pkn"]
+      interval: "1d"
+      rate_limit_seconds: 2
+    - provider: alphavantage
+      enabled: false
+      api_key: "${ALPHAVANTAGE_API_KEY}"
+      symbols: ["AAPL", "MSFT"]
+      interval: "1d"
+      rate_limit_seconds: 15
+```
+
 ### GPU Backtesting (CUDA)
 
 ```bash

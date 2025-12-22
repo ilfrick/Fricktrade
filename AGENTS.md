@@ -8,6 +8,7 @@ This repo contains a Python intraday trading agent for EU equities (Borsa Italia
 - Core loop: `app/agents/trader.py` + `app/strategies/intraday_momentum.py` + `app/execution/executor.py` + `app/risk/manager.py`.
 - Broker adapters: `app/brokers/alpaca.py`, `app/brokers/ibkr.py`, abstract base in `app/brokers/base.py`.
 - Backtesting: `app/backtest/engine.py` uses `backtrader` and a simple SMA strategy.
+- Learning (RL): `app/learning/` for env, data loading, training, and online updates; `app/strategies/rl_policy.py` for inference.
 - Data download: `app/data/downloader.py` uses `yfinance` with retry and rate limiting.
 - API: `app/api/server.py` (FastAPI) with `/health` and `/config`.
 - Metrics: `app/monitoring/metrics.py` exposes Prometheus counters/gauges.
@@ -53,6 +54,30 @@ docker compose run --rm trader python -m app.main backtest --config /app/config/
 docker compose run --rm trader python -m app.main trade --config /app/config/config.yaml
 ```
 
+- Train RL policy (offline):
+
+```bash
+docker compose run --rm trader python -m app.main train --config /app/config/config.yaml
+```
+
+- Evaluate policy and regenerate charts:
+
+```bash
+docker compose run --rm trader python -m app.main evaluate --config /app/config/config.yaml
+```
+
+- Online updates (separate process):
+
+```bash
+docker compose run --rm learner
+```
+
+- Ingest data from configured sources:
+
+```bash
+docker compose run --rm trader python -m app.main ingest --config /app/config/config.yaml
+```
+
 - Start API:
 
 ```bash
@@ -68,6 +93,10 @@ docker compose run --rm api
 ## Configuration Notes
 
 - Risk and strategy parameters live in `config/config.yaml`.
+- Learning config lives under `learning` (enable policy, guardrail mode, feature set, and optional online updates).
+- Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
+- Models and reports are stored in `./models` via the Docker volume.
+- Data ingestion sources are configured under `data.sources`.
 - Alpaca keys come from `ALPACA_API_KEY` / `ALPACA_API_SECRET` in `.env`.
 - `brokers.ibkr.enabled` controls IBKR adapter selection. If `false`, Alpaca is used.
 - Data directory is `/data` inside containers (mapped to `./data` on host).

@@ -44,6 +44,40 @@ strategy:
     position_horizon_minutes: 90
     allow_shorts: true
 
+learning:
+  enabled: false
+  model_path: "/app/models/ppo_policy.zip"
+  device: "auto"
+  window_size: 50
+  features:
+    include_returns: true
+    sma_periods: [5, 20]
+    ema_periods: [10]
+    rsi_periods: [14]
+  guardrail:
+    enabled: true
+    mode: "confirm"
+    params:
+      lookback_minutes: 30
+      entry_threshold_pct: 0.8
+      exit_threshold_pct: 0.4
+      allow_shorts: true
+  online:
+    enabled: false
+    update_interval_minutes: 60
+    timesteps: 1000
+    eval_split: 0.1
+  training:
+    data_dir: "/data"
+    interval: "1m"
+    timesteps: 200000
+    initial_cash: 100000
+    commission_pct: 0.05
+    slippage_bps: 2
+    eval_split: 0.2
+    report_path: "/app/models/training_report.json"
+    report_plot_dir: "/app/models/reports"
+
 backtest:
   data_dir: "/data"
   start: "2023-01-01"
@@ -66,6 +100,33 @@ data:
   end: ""
   proxy: ""
   rate_limit_seconds: 2
+  output_dir: "/data"
+  sources:
+    - provider: yfinance
+      enabled: true
+      symbols:
+        - "ENI.MI"
+        - "ISP.MI"
+        - "UCG.MI"
+        - "ENEL.MI"
+      interval: "1m"
+      lookback_days: 7
+      rate_limit_seconds: 2
+    - provider: stooq
+      enabled: false
+      symbols:
+        - "eni"
+        - "pkn"
+      interval: "1d"
+      rate_limit_seconds: 2
+    - provider: alphavantage
+      enabled: false
+      api_key: "${ALPHAVANTAGE_API_KEY}"
+      symbols:
+        - "AAPL"
+        - "MSFT"
+      interval: "1d"
+      rate_limit_seconds: 15
 
 monitoring:
   prometheus_port: 8001

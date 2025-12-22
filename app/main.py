@@ -10,16 +10,21 @@ from app.brokers.alpaca import AlpacaBroker
 from app.brokers.ibkr import IBKRBroker
 from app.backtest.engine import run_backtest
 from app.data.downloader import download_yfinance
+from app.data.ingestion import ingest_from_config
+from app.learning.train_rl import train_from_config
+from app.learning.evaluate import evaluate_from_config
 from app.monitoring.metrics import start_metrics_server
 from app.utils.config import load_config
 from app.utils.logging import setup_logging
 
 
-def _market_state_from_yf(symbol: str, lookback: int):
-    data = yf.download(tickers=symbol, period=f"{lookback}d", interval="1m", auto_adjust=True, progress=False)
+def _market_state_from_yf(symbol: str, lookback: int, interval: str):
+    data = yf.download(tickers=symbol, period=f"{lookback}d", interval=interval, auto_adjust=True, progress=False)
     prices = data["Close"].tolist()[-lookback:]
+    volumes = data["Volume"].tolist()[-lookback:] if "Volume" in data else []
     return {
         "prices": prices,
+        "volumes": volumes,
         "qty": 1,
         "exposure_pct": 1.0,
         "short_exposure_pct": 0.0,
@@ -51,9 +56,22 @@ def main():
     trade_parser = sub.add_parser("trade")
     backtest_parser = sub.add_parser("backtest")
     download_parser = sub.add_parser("download")
+    ingest_parser = sub.add_parser("ingest")
     api_parser = sub.add_parser("api")
+    train_parser = sub.add_parser("train")
+    online_parser = sub.add_parser("online-train")
+    eval_parser = sub.add_parser("evaluate")
 
-    for parser_item in (trade_parser, backtest_parser, download_parser, api_parser):
+    for parser_item in (
+        trade_parser,
+        backtest_parser,
+        download_parser,
+        ingest_parser,
+        api_parser,
+        train_parser,
+        online_parser,
+        eval_parser,
+    ):
         parser_item.add_argument("--config", default="/app/config/config.yaml")
 
     download_parser.add_argument("--symbols", nargs="*", default=[])
@@ -80,6 +98,11 @@ def main():
         logging.info("Download complete")
         return
 
+    if args.cmd == "ingest":
+        files = ingest_from_config(cfg)
+        logging.info("Ingested %d files", len(files))
+        return
+
     if args.cmd == "backtest":
         result = run_backtest(
             cfg["backtest"]["data_dir"],
@@ -98,11 +121,31 @@ def main():
         uvicorn.run("app.api.server:app", host="0.0.0.0", port=8000, reload=False)
         return
 
+    if args.cmd == "train":
+        model_path = train_from_config(cfg)
+        logging.info("Training complete. Model saved to %s", model_path)
+        return
+
+    if args.cmd == "online-train":
+        from app.learning.online_update import run_online_updates
+
+        run_online_updates(cfg)
+        return
+
+    if args.cmd == "evaluate":
+        report = evaluate_from_config(cfg)
+        logging.info("Evaluation complete. Avg return %.2f%%", report["average"]["return_pct"])
+        return
+
     if args.cmd == "trade":
         broker = _build_broker(cfg)
         agent = TradingAgent(broker, cfg)
         symbol = cfg["data"]["symbols"][0]
-        agent.loop(symbol, lambda s: _market_state_from_yf(s, cfg["data"]["lookback_days"]), 60)
+        agent.loop(
+            symbol,
+            lambda s: _market_state_from_yf(s, cfg["data"]["lookback_days"], cfg["data"]["interval"]),
+            60,
+        )
         return
 
     parser.print_help()

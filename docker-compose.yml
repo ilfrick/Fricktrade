@@ -10,6 +10,7 @@ services:
     volumes:
       - ./config:/app/config
       - ./data:/data
+      - ./models:/app/models
     command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "trade"]
     ports:
       - "8001:8001"
@@ -26,6 +27,19 @@ services:
     command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "api"]
     ports:
       - "8002:8000"
+    restart: unless-stopped
+
+  learner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config
+      - ./data:/data
+      - ./models:/app/models
+    command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "online-train"]
     restart: unless-stopped
 
   prometheus:
