@@ -26,7 +26,7 @@ from app.data.scanner import ScanFilters, load_universe, scan_symbols
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.utils.market import is_market_open
 from app.utils.restart import should_restart
-from app.agents.orchestrator import StrategyOrchestrator
+from app.agents.orchestrator import StrategyOrchestrator, MLStrategyOrchestrator
 
 
 class TradingAgent:
@@ -46,13 +46,24 @@ class TradingAgent:
         self._news_cache_at: datetime | None = None
         self._strategy_names = self._resolve_strategy_names()
         self._combine_mode = cfg["strategy"].get("combine", "priority")
-        self._orchestrator = StrategyOrchestrator(cfg.get("orchestrator", {}))
+        orchestrator_cfg = cfg.get("orchestrator", {})
+        if orchestrator_cfg.get("ml", {}).get("enabled", False):
+            self._orchestrator = MLStrategyOrchestrator(orchestrator_cfg)
+        else:
+            self._orchestrator = StrategyOrchestrator(orchestrator_cfg)
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
         self._broker_name = self._resolve_broker_name()
         self._dynamic_symbols_at: datetime | None = None
         self._symbols: list[str] = []
         self._orchestrator_state: dict[str, dict[str, object]] = {}
+        if isinstance(self._orchestrator, MLStrategyOrchestrator):
+            self._orchestrator.bootstrap(
+                self._strategy_names,
+                self._build_strategy,
+                self._strategy_params,
+                cfg.get("data", {}),
+            )
 
     def _build_strategy(self, name: str, params: dict):
         if name == "rl_policy":
@@ -129,12 +140,8 @@ class TradingAgent:
             SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
             logging.info("Skipping %s: open orders pending", symbol)
             return None
-        self._update_orchestrator(symbol, market_state)
-        names, weights = self._orchestrator.select(self._strategy_names, market_state)
-        for name in self._strategy_names:
-            ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
         signals = []
-        for name in names:
+        for name in self._strategy_names:
             strategy = self._get_strategy(symbol, name)
             if not strategy:
                 continue
@@ -145,7 +152,16 @@ class TradingAgent:
                 continue
             signal["name"] = name
             signals.append(signal)
-        action, reduce_pct = self._combine_signals(signals, weights, order=names)
+        self._update_orchestrator(symbol, market_state)
+        if isinstance(self._orchestrator, MLStrategyOrchestrator):
+            names, weights = self._orchestrator.select(self._strategy_names, market_state, signals)
+        else:
+            names, weights = self._orchestrator.select(self._strategy_names, market_state)
+        for name in self._strategy_names:
+            ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
+        self._record_orchestrator(symbol, signals, market_state)
+        filtered_signals = [signal for signal in signals if signal.get("name") in names]
+        action, reduce_pct = self._combine_signals(filtered_signals, weights, order=names)
         guardrail = self._get_guardrail(symbol)
         if guardrail:
             guard_action = guardrail.generate_signal(market_state).get("action", "hold")
@@ -177,8 +193,6 @@ class TradingAgent:
                 logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
             return None
         market_state["qty"] = qty
-
-        self._record_orchestrator(symbol, signals, market_state)
 
         if not self.risk.can_open_trade(
             exposure_pct=market_state.get("exposure_pct", 0.0),
@@ -356,6 +370,9 @@ class TradingAgent:
             time.sleep(interval_seconds)
 
     def _update_orchestrator(self, symbol: str, market_state: dict) -> None:
+        if isinstance(self._orchestrator, MLStrategyOrchestrator):
+            self._orchestrator.update(symbol, market_state)
+            return
         state = self._orchestrator_state.get(symbol)
         if not state:
             return
@@ -374,6 +391,9 @@ class TradingAgent:
         self._orchestrator_state.pop(symbol, None)
 
     def _record_orchestrator(self, symbol: str, signals: list[dict], market_state: dict) -> None:
+        if isinstance(self._orchestrator, MLStrategyOrchestrator):
+            self._orchestrator.record(symbol, signals, market_state)
+            return
         decisions = {s.get("name"): s.get("action") for s in signals if s.get("name")}
         if not decisions:
             return

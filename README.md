@@ -194,25 +194,24 @@ orchestrator:
   mode: select
   top_k: 2
   min_score: 0.0
-  learning:
+  ml:
     enabled: true
-    learning_rate: 0.1
-    min_bias: -1.0
-    max_bias: 1.0
-    decay: 0.02
-    min_price_move_pct: 0.05
-    state_path: /data/orchestrator_state.json
-    save_interval_seconds: 300
-    use_best_state: true
-    best_state_path: /data/orchestrator_state_best.json
-    best_score_path: /data/orchestrator_best_score.json
-    score_ema_alpha: 0.1
+    device: auto
+    model_path: /data/orchestrator_model.pt
+    best_model_path: /data/orchestrator_model_best.pt
+    use_best_model: true
+    pretrain:
+      enabled: true
+      lookback_days: 30
+      interval: 5m
 ```
 
-Weights live under `orchestrator.strategy_weights` and include `momentum`, `trend`, `volatility`, `relative_volume`,
-`session_gain_pct`, `spread`, and `catalyst`.
-Learning updates a per-strategy bias based on the next price move after each decision and persists it in `state_path`.
-The best-performing bias set is checkpointed to `best_state_path` and loaded by default when `use_best_state: true`.
+ML mode trains per-bar to maximize PnL using rewards based on the next price move. It maintains a replay buffer,
+updates the model each bar, and checkpoints the best-performing model automatically. Pretraining pulls fresh
+historical data via yfinance to warm start the policy.
+
+Weights for the rule-based fallback live under `orchestrator.strategy_weights` and include `momentum`, `trend`,
+`volatility`, `relative_volume`, `session_gain_pct`, `spread`, and `catalyst`.
 
 Evaluate an existing model and regenerate charts:
 
