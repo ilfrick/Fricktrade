@@ -1,9 +1,10 @@
 global:
-  smtp_smarthost: "mail.housefz.com:465"
+  smtp_smarthost: "mail.housefz.com:587"
   smtp_from: "alerts@example.com"
   smtp_auth_username: "autotrader"
   smtp_auth_password: "8TVGFJ5d7pGUsmU"
   smtp_require_tls: true
+  smtp_hello: "mail.housefz.com"
 
 route:
   receiver: "email-notifications"
