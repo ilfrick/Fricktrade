@@ -119,6 +119,21 @@ Run online updates in a separate process:
 docker compose run --rm learner
 ```
 
+GPU online updates (requires NVIDIA Docker runtime):
+
+```bash
+docker compose --profile gpu up -d learner-gpu
+```
+
+To verify GPU visibility inside the container:
+
+```bash
+docker compose exec -T learner-gpu python3 - <<'PY'
+import torch
+print(torch.cuda.is_available(), torch.cuda.get_device_name(0))
+PY
+```
+
 ### Data Ingestion
 
 Pull data from configured sources (`yfinance`, `stooq`, `alphavantage`):

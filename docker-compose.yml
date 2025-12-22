@@ -42,6 +42,28 @@ services:
     command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "online-train"]
     restart: unless-stopped
 
+  learner-gpu:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gpu
+    profiles: ["gpu"]
+    env_file:
+      - .env
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./config:/app/config
+      - ./data:/data
+      - ./models:/app/models
+    command: ["python3", "-m", "app.main", "--config", "/app/config/config.yaml", "online-train"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]
+    restart: unless-stopped
+
   calendar-updater:
     build:
       context: .

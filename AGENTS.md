@@ -74,6 +74,21 @@ docker compose run --rm trader python -m app.main evaluate --config /app/config/
 docker compose run --rm learner
 ```
 
+- GPU online updates (requires NVIDIA Docker runtime):
+
+```bash
+docker compose --profile gpu up -d learner-gpu
+```
+
+GPU check:
+
+```bash
+docker compose exec -T learner-gpu python3 - <<'PY'
+import torch
+print(torch.cuda.is_available(), torch.cuda.get_device_name(0))
+PY
+```
+
 - Holiday calendar refresh (one-off):
 
 ```bash
