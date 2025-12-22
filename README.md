@@ -254,6 +254,8 @@ Grafana auto-provisions a dashboard with:
 - Trades total
 - Trades rate by symbol/side
 - Cumulative trades by symbol
+- Active symbols (from config)
+- Account equity, cash, invested
 - PnL %
 - Drawdown %
 

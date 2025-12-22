@@ -138,6 +138,7 @@ docker compose run --rm api
 - Backtest engine loads the first matching CSV in `backtest.data_dir`.
 - API `/config` masks Alpaca keys before returning.
 - Grafana auto-provisions the "Autotrader Overview" dashboard with trade counts/rates, PnL, and drawdown.
+- Dashboard also shows active symbols and account equity/cash/invested from broker account data.
 
 ## Extending the Codebase
 

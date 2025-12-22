@@ -2,7 +2,15 @@ import logging
 import time
 
 from app.execution.executor import ExecutionEngine
-from app.monitoring.metrics import TRADES, PNL, DRAWDOWN
+from app.monitoring.metrics import (
+    TRADES,
+    PNL,
+    DRAWDOWN,
+    ACCOUNT_TOTAL,
+    ACCOUNT_CASH,
+    ACCOUNT_INVESTED,
+    SYMBOL_ACTIVE,
+)
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.rl_policy import RLPolicyStrategy
@@ -100,9 +108,37 @@ class TradingAgent:
             TRADES.labels(symbol=symbol, side=action).inc()
         return order_id
 
+    def _update_account_metrics(self) -> None:
+        try:
+            account = self.broker.get_account()
+        except Exception as exc:
+            logging.warning("Account metrics update failed: %s", exc)
+            return
+        total = cash = None
+        if isinstance(account, dict):
+            if "equity" in account:
+                total = account.get("equity")
+                cash = account.get("cash")
+            elif "NetLiquidation" in account:
+                total = account.get("NetLiquidation")
+                cash = account.get("TotalCashValue")
+        try:
+            total_val = float(total) if total is not None else None
+            cash_val = float(cash) if cash is not None else None
+        except (TypeError, ValueError):
+            return
+        if total_val is None or cash_val is None:
+            return
+        ACCOUNT_TOTAL.set(total_val)
+        ACCOUNT_CASH.set(cash_val)
+        ACCOUNT_INVESTED.set(total_val - cash_val)
+
     def loop(self, symbol: str | list[str], market_data_provider, interval_seconds: int = 60):
         symbols = symbol if isinstance(symbol, list) else [symbol]
         while True:
+            for sym in symbols:
+                SYMBOL_ACTIVE.labels(symbol=sym).set(1)
+            self._update_account_metrics()
             market_open = is_market_open(self.cfg)
             if market_open != self._last_market_open:
                 state = "open" if market_open else "closed"
