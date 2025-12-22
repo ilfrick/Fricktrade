@@ -141,6 +141,7 @@ def main():
             cfg["backtest"]["initial_cash"],
             cfg["backtest"]["commission_pct"],
             interval=cfg["data"].get("interval"),
+            use_gpu=cfg["backtest"].get("use_gpu", True),
         )
         logging.info("Backtest result: %s", result)
         return

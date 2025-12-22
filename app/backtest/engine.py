@@ -41,7 +41,12 @@ def run_backtest(
     initial_cash: float,
     commission_pct: float,
     interval: str | None = None,
+    use_gpu: bool = True,
 ) -> dict:
+    gpu_available = cp is not None
+    gpu_enabled = bool(use_gpu) and gpu_available
+    if use_gpu and not gpu_available:
+        logging.warning("GPU requested for backtest but CuPy is unavailable.")
     cerebro = bt.Cerebro()
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.setcommission(commission=commission_pct / 100.0)
@@ -103,7 +108,7 @@ def run_backtest(
         "start_value": start_value,
         "end_value": end_value,
         "return_pct": (end_value - start_value) / start_value * 100.0,
-        "gpu_enabled": cp is not None,
+        "gpu_enabled": gpu_enabled,
     }
 
 
