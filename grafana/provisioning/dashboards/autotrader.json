@@ -336,6 +336,33 @@
         },
         "overrides": []
       }
+    },
+    {
+      "type": "table",
+      "title": "Orchestrator Strategies",
+      "gridPos": {
+        "x": 6,
+        "y": 30,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "orchestrator_strategy_active",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

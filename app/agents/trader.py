@@ -14,6 +14,7 @@ from app.monitoring.metrics import (
     ACCOUNT_INVESTED,
     SYMBOL_ACTIVE,
     STRATEGY_ACTIVE,
+    ORCHESTRATOR_STRATEGY_ACTIVE,
     OPEN_ORDERS,
     BROKER_ACTIVE,
 )
@@ -130,6 +131,8 @@ class TradingAgent:
             return None
         self._update_orchestrator(symbol, market_state)
         names, weights = self._orchestrator.select(self._strategy_names, market_state)
+        for name in self._strategy_names:
+            ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
         signals = []
         for name in names:
             strategy = self._get_strategy(symbol, name)
