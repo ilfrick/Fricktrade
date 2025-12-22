@@ -162,6 +162,8 @@ data:
   provider: yfinance
   symbols:
   - AAPL
+  - GOOGL
+  - TSLA
   - MSFT
   interval: 1m
   lookback_days: 7
@@ -175,6 +177,8 @@ data:
     enabled: true
     symbols:
     - AAPL
+    - GOOGL
+    - TSLA
     - MSFT
     interval: 1m
     lookback_days: 7
