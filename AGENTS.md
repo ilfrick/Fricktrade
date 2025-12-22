@@ -135,6 +135,7 @@ docker compose run --rm api
 - `data.interval` and `data.lookback_days` are clamped for yfinance intraday limits.
 - `data.session_gain_mode` controls session gain calculation (`gap` or `session`).
 - Dynamic symbol scanning is configured under `data.dynamic_symbols` (Alpaca snapshot-based scanner) and enabled by default.
+- Alerts are defined in `prometheus/alerts.yml` and a dedicated Grafana dashboard is provisioned for alerting/health.
 - `market.open_mode` chooses whether any or all configured venues must be open to trade.
 - `market.venues[].holidays` is refreshed by `calendar-updater` (or can be edited manually).
 - `calendar-updater` refreshes holiday calendars weekly from online sources (NYSE, Nasdaq, Italy public holidays).

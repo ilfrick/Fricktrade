@@ -148,6 +148,11 @@ data:
 
 The scanner applies `pattern_trading.selection.*` filters to Alpaca snapshots (price, volume, gain, spread, catalyst) and replaces the active symbols list when candidates are found.
 
+## Logging & Alerts
+
+Log files are written to `logging.file_path` (default `/data/logs/trader.log`) with rotation settings under `logging.max_bytes` and `logging.backup_count`.
+Prometheus alert rules live in `prometheus/alerts.yml`, and Grafana provisions an “Autotrader Alerts & Logs” dashboard for active alerts and error metrics.
+
 ## Multi-Strategy Mode
 
 Set `strategy.names` to a list of strategies and choose how to combine them:

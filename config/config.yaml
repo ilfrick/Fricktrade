@@ -3,6 +3,10 @@ app:
   env: prod
   timezone: Europe/Rome
   log_level: INFO
+logging:
+  file_path: /data/logs/trader.log
+  max_bytes: 5000000
+  backup_count: 5
 market:
   venue: Multi
   default_currency: EUR

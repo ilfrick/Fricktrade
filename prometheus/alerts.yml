@@ -1,0 +1,27 @@
+groups:
+  - name: autotrader
+    rules:
+      - alert: TraderDown
+        expr: up{job="autotrader"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Trader metrics endpoint down"
+          description: "Prometheus cannot scrape trader metrics."
+      - alert: OrderFailures
+        expr: increase(orders_skipped_total{reason="order_failed"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Order failures detected"
+          description: "Order failures observed in the last 15 minutes."
+      - alert: OpenOrdersStuck
+        expr: max_over_time(open_orders[30m]) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Open orders stuck"
+          description: "Open orders present for over 30 minutes."

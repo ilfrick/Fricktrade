@@ -154,7 +154,13 @@ def main():
 
     args = parser.parse_args()
     cfg = load_config(args.config)
-    setup_logging(cfg["app"]["log_level"])
+    log_cfg = cfg.get("logging", {})
+    setup_logging(
+        cfg["app"]["log_level"],
+        file_path=log_cfg.get("file_path"),
+        max_bytes=int(log_cfg.get("max_bytes", 5_000_000)),
+        backup_count=int(log_cfg.get("backup_count", 5)),
+    )
 
     start_metrics_server(cfg["monitoring"]["prometheus_port"])
 

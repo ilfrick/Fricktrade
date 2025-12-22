@@ -143,6 +143,9 @@ _DESCRIPTIONS = {
     "execution.open_orders.enabled": "Enable periodic open-order checks.",
     "execution.open_orders.interval_seconds": "Open-order refresh interval in seconds.",
     "execution.open_orders.skip_if_pending": "Skip new signals if an order is pending for the symbol.",
+    "logging.file_path": "Log file path (rotating).",
+    "logging.max_bytes": "Log rotation size in bytes.",
+    "logging.backup_count": "Number of rotated log files to retain.",
     "monitoring.prometheus_port": "Prometheus metrics port.",
     "monitoring.metrics_path": "Metrics path.",
 }
