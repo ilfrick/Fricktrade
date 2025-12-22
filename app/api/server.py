@@ -91,7 +91,7 @@ _DESCRIPTIONS = {
     "orchestrator.ml.pretrain.max_samples": "Max training samples for ML orchestrator pretrain.",
     "orchestrator.ml.pretrain.epochs": "ML orchestrator pretrain epochs.",
     "orchestrator.ml.pretrain.warmup_bars": "Warmup bars before generating samples.",
-    "orchestrator.ml.pretrain.symbols_source": "Symbol source for pretrain (data or dynamic).",
+    "orchestrator.ml.pretrain.symbols_source": "Symbol source for pretrain (data or alpaca_active_random).",
     "orchestrator.ml.pretrain.timeout_seconds": "Timeout per yfinance pretrain download.",
     "orchestrator.ml.pretrain.retries": "Retries per yfinance pretrain download.",
     "orchestrator.learning.enabled": "Enable learning for orchestrator bias updates.",

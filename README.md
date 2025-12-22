@@ -264,6 +264,15 @@ Pretraining runs out-of-band by default (`orchestrator.ml.pretrain.in_trader: fa
 docker compose run --rm trader python3 -m app.main pretrain-orchestrator --config /app/config/config.yaml
 ```
 
+To pretrain with randomly selected Alpaca symbols, set:
+
+```yaml
+orchestrator:
+  ml:
+    pretrain:
+      symbols_source: alpaca_active_random
+```
+
 Weights for the rule-based fallback live under `orchestrator.strategy_weights` and include `momentum`, `trend`,
 `volatility`, `relative_volume`, `session_gain_pct`, `spread`, and `catalyst`.
 
