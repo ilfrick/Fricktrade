@@ -1,6 +1,6 @@
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest
-from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
+from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
 
 from app.brokers.base import Broker
 
@@ -28,7 +28,10 @@ class AlpacaBroker(Broker):
         return [pos.dict() if hasattr(pos, "dict") else dict(pos) for pos in positions]
 
     def get_open_orders(self) -> list[dict]:
-        orders = self.client.list_orders(status="open")
+        try:
+            orders = self.client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        except AttributeError:
+            orders = self.client.list_orders(status="open")
         results = []
         for order in orders:
             data = order.dict() if hasattr(order, "dict") else dict(order)
