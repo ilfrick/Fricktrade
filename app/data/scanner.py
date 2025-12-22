@@ -34,36 +34,41 @@ def scan_symbols(
     if not symbols or not api_key or not api_secret:
         return []
     client = StockHistoricalDataClient(api_key, api_secret)
-    snapshots = client.get_stock_snapshot(
-        StockSnapshotRequest(symbol_or_symbols=symbols, feed=_map_feed(feed))
-    )
     results = []
     catalyst_map = catalyst_map or {}
-    for symbol, snap in snapshots.items():
-        price = getattr(getattr(snap, "latest_trade", None), "price", None) or getattr(
-            getattr(snap, "minute_bar", None), "close", None
+    for chunk in _chunked(symbols, 100):
+        snapshots = client.get_stock_snapshot(
+            StockSnapshotRequest(symbol_or_symbols=chunk, feed=_map_feed(feed))
         )
-        if not price:
-            continue
-        daily = getattr(snap, "daily_bar", None)
-        prev = getattr(snap, "prev_daily_bar", None)
-        volume = getattr(daily, "volume", 0.0) or 0.0
-        prev_volume = getattr(prev, "volume", 0.0) or 0.0
-        prev_close = getattr(prev, "close", 0.0) or 0.0
-        rel_vol = (volume / prev_volume) if prev_volume else 0.0
-        gain_pct = ((price - prev_close) / prev_close * 100.0) if prev_close else 0.0
+        for symbol, snap in snapshots.items():
+            price = getattr(getattr(snap, "latest_trade", None), "price", None) or getattr(
+                getattr(snap, "minute_bar", None), "close", None
+            )
+            if not price:
+                continue
+            daily = getattr(snap, "daily_bar", None)
+            prev = getattr(snap, "prev_daily_bar", None)
+            volume = getattr(daily, "volume", 0.0) or 0.0
+            prev_volume = getattr(prev, "volume", 0.0) or 0.0
+            prev_close = getattr(prev, "close", 0.0) or 0.0
+            rel_vol = (volume / prev_volume) if prev_volume else 1.0
+            gain_pct = ((price - prev_close) / prev_close * 100.0) if prev_close else 0.0
 
-        quote = getattr(snap, "latest_quote", None)
-        spread_pct = None
-        if quote and quote.ask_price and quote.bid_price and price:
-            spread_pct = (quote.ask_price - quote.bid_price) / price * 100.0
+            quote = getattr(snap, "latest_quote", None)
+            spread_pct = None
+            if quote and quote.ask_price and quote.bid_price and price:
+                spread_pct = (quote.ask_price - quote.bid_price) / price * 100.0
 
-        if not _passes_filters(filters, price, rel_vol, gain_pct, volume, spread_pct, catalyst_map.get(symbol, False)):
-            continue
-        results.append(symbol)
-        if len(results) >= max_symbols:
-            break
+            if not _passes_filters(filters, price, rel_vol, gain_pct, volume, spread_pct, catalyst_map.get(symbol, False)):
+                continue
+            results.append(symbol)
+            if len(results) >= max_symbols:
+                return results
     return results
+
+
+def _chunked(items: list[str], size: int) -> list[list[str]]:
+    return [items[idx : idx + size] for idx in range(0, len(items), size)]
 
 
 def load_universe(

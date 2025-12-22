@@ -150,9 +150,11 @@ data:
     universe: alpaca_active
     cash_aware: true
     cash_buffer_pct: 95
+    cash_cap_mode: cash
+    cash_max_pct: 100
     fallback:
       enabled: true
-      relative_volume_min: 0.5
+      relative_volume_min: 0.0
       premarket_gain_min_pct: 0.0
       min_shares_traded: 100000
       max_spread_pct: 2.0
@@ -160,7 +162,8 @@ data:
 ```
 
 The scanner applies `pattern_trading.selection.*` filters to Alpaca snapshots (price, volume, gain, spread, catalyst) and replaces the active symbols list when candidates are found.
-When `cash_aware: true`, the scanner also caps the maximum price using current cash and `risk.max_position_size_pct` so the list adapts to low-fund scenarios.
+When `cash_aware: true`, the scanner caps the maximum price using available cash. Set `cash_cap_mode: risk`
+to also respect `risk.max_position_size_pct`.
 If no candidates match the main filters, the optional `fallback` block relaxes filters to keep an affordable symbol list.
 
 ## Logging & Alerts

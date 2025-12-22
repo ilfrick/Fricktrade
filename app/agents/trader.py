@@ -503,9 +503,13 @@ class TradingAgent:
             return price_max
         if cash <= 0 or equity <= 0:
             return price_max
-        max_pos_pct = float(self.cfg.get("risk", {}).get("max_position_size_pct", 0.0))
-        target_value = equity * (max_pos_pct / 100.0)
-        cash_cap = min(cash, target_value)
+        cash_mode = str(dyn_cfg.get("cash_cap_mode", "cash")).lower()
+        cash_max_pct = float(dyn_cfg.get("cash_max_pct", 100.0))
+        cash_cap = cash * max(cash_max_pct, 0.0) / 100.0
+        if cash_mode == "risk":
+            max_pos_pct = float(self.cfg.get("risk", {}).get("max_position_size_pct", 0.0))
+            target_value = equity * (max_pos_pct / 100.0)
+            cash_cap = min(cash_cap, target_value)
         buffer_pct = float(dyn_cfg.get("cash_buffer_pct", 95.0))
         cap = cash_cap * max(buffer_pct, 0.0) / 100.0
         if cap <= 0:

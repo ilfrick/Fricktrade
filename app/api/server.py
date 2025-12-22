@@ -125,6 +125,8 @@ _DESCRIPTIONS = {
     "data.dynamic_symbols.universe": "Universe source (alpaca_active or comma-separated list).",
     "data.dynamic_symbols.cash_aware": "Limit symbols to those affordable with current cash.",
     "data.dynamic_symbols.cash_buffer_pct": "Reserve cash buffer percentage for affordability filter.",
+    "data.dynamic_symbols.cash_cap_mode": "Cash cap mode: cash (only available cash) or risk (min cash and risk max position).",
+    "data.dynamic_symbols.cash_max_pct": "Max percent of cash allowed when capping symbol prices.",
     "data.dynamic_symbols.fallback.enabled": "Enable relaxed filters when the main scan yields no symbols.",
     "data.dynamic_symbols.fallback.relative_volume_min": "Fallback minimum relative volume.",
     "data.dynamic_symbols.fallback.premarket_gain_min_pct": "Fallback minimum premarket gain percent.",
