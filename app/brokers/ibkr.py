@@ -15,6 +15,18 @@ class IBKRBroker(Broker):
         summary = self.ib.accountSummary()
         return {s.tag: s.value for s in summary}
 
+    def get_positions(self) -> list[dict]:
+        positions = []
+        for pos in self.ib.positions():
+            positions.append(
+                {
+                    "symbol": pos.contract.symbol,
+                    "qty": float(pos.position),
+                    "avg_cost": float(pos.avgCost),
+                }
+            )
+        return positions
+
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         contract = Stock(symbol, "SMART", "EUR")
         order = MarketOrder("BUY" if side.lower() == "buy" else "SELL", qty)

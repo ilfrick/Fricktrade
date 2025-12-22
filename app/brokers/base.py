@@ -11,6 +11,10 @@ class Broker(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_positions(self) -> list[dict]:
+        raise NotImplementedError
+
+    @abstractmethod
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         raise NotImplementedError
 

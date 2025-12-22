@@ -7,6 +7,7 @@ An intraday trading agent with shorting support, Alpaca + IBKR integration, conf
 - Intraday strategy engine with shorting support
 - Broker adapters: Alpaca (paper/live) + Interactive Brokers (paper/live)
 - Risk manager with configurable limits and circuit breakers
+- Cash-aware position sizing based on broker equity/cash and exposure caps
 - Backtesting on locally downloaded data
 - Data download via yfinance (US and EU tickers supported)
 - Prometheus metrics + Grafana dashboard
@@ -250,6 +251,7 @@ docker compose run --rm trader python -m app.main trade --config /app/config/con
 ```
 
 The trader iterates over every symbol listed in `data.symbols` each cycle. Trading is paused when all configured markets are closed.
+Orders are sized based on available cash and the configured risk caps (`risk.max_position_size_pct`, `risk.max_short_exposure_pct`).
 
 ## Monitoring
 

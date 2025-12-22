@@ -20,6 +20,13 @@ class AlpacaBroker(Broker):
         account = self.client.get_account()
         return account.dict()
 
+    def get_positions(self) -> list[dict]:
+        try:
+            positions = self.client.get_all_positions()
+        except AttributeError:
+            positions = self.client.list_positions()
+        return [pos.dict() if hasattr(pos, "dict") else dict(pos) for pos in positions]
+
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         order_req = MarketOrderRequest(
             symbol=symbol,

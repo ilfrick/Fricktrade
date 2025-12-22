@@ -137,7 +137,7 @@ docker compose run --rm api
 - Trading loop pulls prices from yfinance in `app/main.py` for live trade mode, iterating over every symbol in `data.symbols` each cycle.
 - Trading is paused when all configured markets are closed.
 - Strategy emits `buy`, `sell`, `exit`, or `hold`; `exit` closes the position.
-- Risk checks are basic thresholds only; no PnL accounting is wired into execution.
+- Risk checks are threshold-based and order sizing is cash-aware using broker equity/cash plus exposure caps.
 - Backtest engine loads the first matching CSV in `backtest.data_dir`.
 - API `/config` masks Alpaca keys before returning; `/config/update` accepts YAML updates and `/restart` triggers a graceful container restart.
 - Grafana auto-provisions the "Autotrader Overview" dashboard with trade counts/rates, PnL, and drawdown.

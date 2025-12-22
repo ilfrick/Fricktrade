@@ -28,6 +28,7 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str):
             "exposure_pct": 1.0,
             "short_exposure_pct": 0.0,
             "leverage": 1.0,
+            "last_price": None,
         }
     if getattr(data.columns, "nlevels", 1) > 1:
         data = data.copy()
@@ -43,6 +44,7 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str):
             "exposure_pct": 1.0,
             "short_exposure_pct": 0.0,
             "leverage": 1.0,
+            "last_price": None,
         }
     close = data["Close"]
     volume = data["Volume"] if "Volume" in data else None
@@ -52,6 +54,7 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str):
         volume = volume.iloc[:, 0]
     prices = close.iloc[-lookback:].tolist()
     volumes = volume.iloc[-lookback:].tolist() if volume is not None else []
+    last_price = prices[-1] if prices else None
     return {
         "prices": prices,
         "volumes": volumes,
@@ -59,6 +62,7 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str):
         "exposure_pct": 1.0,
         "short_exposure_pct": 0.0,
         "leverage": 1.0,
+        "last_price": last_price,
     }
 
 
