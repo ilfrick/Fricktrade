@@ -5,6 +5,7 @@ from datetime import datetime
 from app.execution.executor import ExecutionEngine
 from app.monitoring.metrics import (
     TRADES,
+    SKIPPED_ORDERS,
     PNL,
     DRAWDOWN,
     ACCOUNT_TOTAL,
@@ -107,11 +108,16 @@ class TradingAgent:
             prices = market_state.get("prices", [])
             last_price = prices[-1] if prices else None
         if last_price is None:
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="no_price").inc()
+            logging.info("Skipping %s for %s: no price available", action, symbol)
             return None
 
         portfolio = market_state.get("portfolio", {})
-        qty = self._size_order(action, last_price, portfolio, symbol)
+        qty, skip_reason = self._size_order(action, last_price, portfolio, symbol)
         if qty <= 0:
+            if skip_reason:
+                SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=skip_reason).inc()
+                logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
             return None
         market_state["qty"] = qty
 
@@ -120,6 +126,8 @@ class TradingAgent:
             short_exposure_pct=market_state.get("short_exposure_pct", 0.0),
             leverage=market_state.get("leverage", 1.0),
         ):
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="risk_block").inc()
+            logging.info("Skipping %s for %s: risk limits exceeded", action, symbol)
             return None
 
         order_id = self.executor.execute(symbol, action, qty=qty)
@@ -127,9 +135,9 @@ class TradingAgent:
             TRADES.labels(symbol=symbol, side=action).inc()
         return order_id
 
-    def _size_order(self, action: str, last_price: float, portfolio: dict, symbol: str) -> int:
+    def _size_order(self, action: str, last_price: float, portfolio: dict, symbol: str) -> tuple[int, str | None]:
         if last_price <= 0:
-            return 0
+            return 0, "no_price"
         equity = float(portfolio.get("equity", 0.0) or 0.0)
         cash = float(portfolio.get("cash", 0.0) or 0.0)
         positions = portfolio.get("positions", {})
@@ -141,23 +149,29 @@ class TradingAgent:
 
         if action == "buy":
             if equity <= 0 or cash <= 0:
-                return 0
+                return 0, "insufficient_cash"
             target_value = equity * (max_pos_pct / 100.0)
             remaining_value = max(0.0, target_value - max(current_value, 0.0))
+            if remaining_value <= 0:
+                return 0, "position_limit"
             allowed_value = min(remaining_value, cash)
-            return int(allowed_value // last_price)
+            if allowed_value < last_price:
+                return 0, "insufficient_cash"
+            return int(allowed_value // last_price), None
 
         if action == "sell":
             if current_qty > 0:
-                return int(current_qty)
+                return int(current_qty), None
             if not allow_shorts or equity <= 0:
-                return 0
+                return 0, "short_limit"
             short_limit = equity * (max_short_pct / 100.0)
             current_short = float(portfolio.get("short_exposure", 0.0) or 0.0)
             remaining_value = max(0.0, short_limit - current_short)
-            return int(remaining_value // last_price)
+            if remaining_value < last_price:
+                return 0, "short_limit"
+            return int(remaining_value // last_price), None
 
-        return 0
+        return 0, "unsupported"
 
     def _update_account_metrics(self) -> None:
         try:

@@ -263,6 +263,7 @@ Grafana auto-provisions a dashboard with:
 - Cumulative trades by symbol
 - Active symbols (from config)
 - Account equity, cash, invested
+- Skipped orders by reason (e.g., insufficient cash, risk limits)
 - PnL %
 - Drawdown %
 

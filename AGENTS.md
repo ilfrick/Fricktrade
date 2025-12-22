@@ -141,7 +141,7 @@ docker compose run --rm api
 - Backtest engine loads the first matching CSV in `backtest.data_dir`.
 - API `/config` masks Alpaca keys before returning; `/config/update` accepts YAML updates and `/restart` triggers a graceful container restart.
 - Grafana auto-provisions the "Autotrader Overview" dashboard with trade counts/rates, PnL, and drawdown.
-- Dashboard also shows active symbols and account equity/cash/invested from broker account data.
+- Dashboard also shows active symbols and account equity/cash/invested from broker account data. Skipped orders are available via `orders_skipped_total` metrics.
 
 ## Extending the Codebase
 
