@@ -67,6 +67,7 @@ Key knobs:
 - `strategy.params.*`
 
 You manage strategy and risk by editing `config/config.yaml` and restarting the trader container, or use the web UI.
+Multi-strategy mode is available via `strategy.names` (e.g. `["intraday_momentum", "pattern_trading", "rl_policy"]`) with `strategy.combine: priority|vote`.
 The `api` service exposes:
 - Web UI at `http://localhost:18081/ui`
 - Read-only config at `http://localhost:18081/config`
@@ -126,6 +127,17 @@ News catalysts use Alpaca’s news API by default (configure in `news.*`). If ne
 Session gain is configurable via `data.session_gain_mode`:
 - `gap`: compare current price to prior close
 - `session`: compare to session open
+
+## Multi-Strategy Mode
+
+Set `strategy.names` to a list of strategies and choose how to combine them:
+- `strategy.combine: priority` uses the first non-hold signal in the list order.
+- `strategy.combine: vote` picks the majority action across strategies.
+
+Available strategy names:
+- `intraday_momentum`
+- `pattern_trading`
+- `rl_policy` (requires `learning.enabled: true`)
 
 Evaluate an existing model and regenerate charts:
 

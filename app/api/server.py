@@ -48,6 +48,8 @@ _DESCRIPTIONS = {
     "risk.trailing_stop_pct": "Trailing stop percentage.",
     "risk.circuit_breaker_drawdown_pct": "Circuit breaker drawdown percentage.",
     "strategy.name": "Strategy name to use.",
+    "strategy.names": "List of strategy names for multi-strategy mode (e.g., intraday_momentum, pattern_trading, rl_policy).",
+    "strategy.combine": "How to combine strategies: priority or vote.",
     "strategy.params.lookback_minutes": "Momentum lookback window in minutes.",
     "strategy.params.entry_threshold_pct": "Entry threshold percentage.",
     "strategy.params.exit_threshold_pct": "Exit threshold percentage.",

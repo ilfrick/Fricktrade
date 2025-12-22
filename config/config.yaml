@@ -106,6 +106,8 @@ risk:
   circuit_breaker_drawdown_pct: 5.0
 strategy:
   name: intraday_momentum
+  names: []
+  combine: priority
   params:
     lookback_minutes: 30
     entry_threshold_pct: 0.8

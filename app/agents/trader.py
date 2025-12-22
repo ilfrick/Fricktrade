@@ -31,30 +31,34 @@ class TradingAgent:
         self.learning_cfg = cfg.get("learning", {})
         params = cfg["strategy"]["params"]
         self._strategy_params = params
-        self._strategy_by_symbol: dict[str, object] = {}
+        self._strategy_by_symbol: dict[str, dict[str, object]] = {}
         self._guardrail_by_symbol: dict[str, object] = {}
         self.executor = ExecutionEngine(broker)
         self._last_market_open = None
         self._started_at = datetime.utcnow()
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
+        self._strategy_names = self._resolve_strategy_names()
+        self._combine_mode = cfg["strategy"].get("combine", "priority")
 
-    def _build_strategy(self, params: dict):
-        if self.learning_cfg.get("enabled"):
-            model_path = self._select_model_path()
-            window_size = int(self.learning_cfg.get("window_size", 50))
-            device = self.learning_cfg.get("device", "auto")
-            feature_config = self.learning_cfg.get("features", {})
-            try:
-                return RLPolicyStrategy(
-                    model_path,
-                    window_size=window_size,
-                    device=device,
-                    feature_config=feature_config,
-                )
-            except FileNotFoundError as exc:
-                logging.warning("RL model unavailable, falling back to rule-based strategy: %s", exc)
-        if self.cfg["strategy"].get("name") == "pattern_trading":
+    def _build_strategy(self, name: str, params: dict):
+        if name == "rl_policy":
+            if self.learning_cfg.get("enabled"):
+                model_path = self._select_model_path()
+                window_size = int(self.learning_cfg.get("window_size", 50))
+                device = self.learning_cfg.get("device", "auto")
+                feature_config = self.learning_cfg.get("features", {})
+                try:
+                    return RLPolicyStrategy(
+                        model_path,
+                        window_size=window_size,
+                        device=device,
+                        feature_config=feature_config,
+                    )
+                except FileNotFoundError as exc:
+                    logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
+            return None
+        if name == "pattern_trading":
             return PatternTradingStrategy(self.cfg.get("pattern_trading", {}))
         return IntradayMomentumStrategy(
             params["lookback_minutes"],
@@ -82,10 +86,15 @@ class TradingAgent:
             guard_params.get("allow_shorts", params["allow_shorts"]),
         )
 
-    def _get_strategy(self, symbol: str):
+    def _get_strategy(self, symbol: str, name: str):
         if symbol not in self._strategy_by_symbol:
-            self._strategy_by_symbol[symbol] = self._build_strategy(self._strategy_params)
-        return self._strategy_by_symbol[symbol]
+            self._strategy_by_symbol[symbol] = {}
+        if name not in self._strategy_by_symbol[symbol]:
+            strategy = self._build_strategy(name, self._strategy_params)
+            if strategy is None:
+                return None
+            self._strategy_by_symbol[symbol][name] = strategy
+        return self._strategy_by_symbol[symbol][name]
 
     def _get_guardrail(self, symbol: str):
         if symbol not in self._guardrail_by_symbol:
@@ -103,9 +112,19 @@ class TradingAgent:
         return action
 
     def run_once(self, symbol: str, market_state: dict):
-        strategy = self._get_strategy(symbol)
-        signal = strategy.generate_signal(market_state)
-        action = signal.get("action", "hold")
+        signals = []
+        for name in self._strategy_names:
+            strategy = self._get_strategy(symbol, name)
+            if not strategy:
+                continue
+            try:
+                signal = strategy.generate_signal(market_state)
+            except Exception as exc:
+                logging.warning("Strategy %s failed for %s: %s", name, symbol, exc)
+                continue
+            signal["name"] = name
+            signals.append(signal)
+        action, reduce_pct = self._combine_signals(signals)
         guardrail = self._get_guardrail(symbol)
         if guardrail:
             guard_action = guardrail.generate_signal(market_state).get("action", "hold")
@@ -128,7 +147,6 @@ class TradingAgent:
 
         portfolio = market_state.get("portfolio", {})
         if action == "sell":
-            reduce_pct = float(signal.get("reduce_pct", 1.0))
             qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, reduce_pct=reduce_pct)
         else:
             qty, skip_reason = self._size_order(action, last_price, portfolio, symbol)
@@ -198,6 +216,38 @@ class TradingAgent:
             return int(remaining_value // last_price), None
 
         return 0, "unsupported"
+
+    def _resolve_strategy_names(self) -> list[str]:
+        cfg = self.cfg.get("strategy", {})
+        names = cfg.get("names")
+        if isinstance(names, list) and names:
+            return [str(name) for name in names]
+        name = cfg.get("name", "intraday_momentum")
+        return [str(name)]
+
+    def _combine_signals(self, signals: list[dict]) -> tuple[str, float]:
+        if not signals:
+            return "hold", 1.0
+        for signal in signals:
+            if signal.get("action") == "exit":
+                return "exit", 1.0
+        mode = self._combine_mode
+        if mode == "priority":
+            for name in self._strategy_names:
+                for signal in signals:
+                    if signal.get("name") == name:
+                        action = signal.get("action", "hold")
+                        reduce_pct = float(signal.get("reduce_pct", 1.0))
+                        return action, reduce_pct
+            return "hold", 1.0
+        buys = [s for s in signals if s.get("action") == "buy"]
+        sells = [s for s in signals if s.get("action") == "sell"]
+        if len(buys) == len(sells):
+            return "hold", 1.0
+        if len(buys) > len(sells):
+            return "buy", 1.0
+        reduce_pct = max(float(s.get("reduce_pct", 1.0)) for s in sells) if sells else 1.0
+        return "sell", reduce_pct
 
     def _update_account_metrics(self) -> None:
         try:
