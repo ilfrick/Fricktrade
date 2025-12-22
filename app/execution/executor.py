@@ -1,3 +1,5 @@
+import logging
+
 from app.brokers.base import Broker
 
 
@@ -7,9 +9,17 @@ class ExecutionEngine:
 
     def execute(self, symbol: str, action: str, qty: float) -> str | None:
         if action == "buy":
-            return self.broker.place_order(symbol, "buy", qty, "market")
+            try:
+                return self.broker.place_order(symbol, "buy", qty, "market")
+            except Exception as exc:
+                logging.warning("Order failed (buy %s qty=%s): %s", symbol, qty, exc)
+                return None
         if action == "sell":
-            return self.broker.place_order(symbol, "sell", qty, "market")
+            try:
+                return self.broker.place_order(symbol, "sell", qty, "market")
+            except Exception as exc:
+                logging.warning("Order failed (sell %s qty=%s): %s", symbol, qty, exc)
+                return None
         if action == "exit":
             self.broker.close_position(symbol)
             return None

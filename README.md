@@ -297,6 +297,7 @@ Grafana auto-provisions a dashboard with:
 - Account equity, cash, invested
 - Skipped orders by reason (e.g., insufficient cash, risk limits)
 - Open orders by symbol/side
+- Active broker (alpaca or ibkr)
 - PnL %
 - Drawdown %
 

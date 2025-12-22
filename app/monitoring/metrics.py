@@ -14,6 +14,7 @@ ACCOUNT_INVESTED = Gauge("account_invested", "Account invested value")
 SYMBOL_ACTIVE = Gauge("symbol_active", "Configured trading symbols", ["symbol"])
 STRATEGY_ACTIVE = Gauge("strategy_active", "Configured trading strategies", ["strategy"])
 OPEN_ORDERS = Gauge("open_orders", "Open orders", ["symbol", "side"])
+BROKER_ACTIVE = Gauge("broker_active", "Active broker", ["broker"])
 
 
 def start_metrics_server(port: int):

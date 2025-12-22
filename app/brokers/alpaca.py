@@ -28,10 +28,7 @@ class AlpacaBroker(Broker):
         return [pos.dict() if hasattr(pos, "dict") else dict(pos) for pos in positions]
 
     def get_open_orders(self) -> list[dict]:
-        try:
-            orders = self.client.get_orders(status="open")
-        except AttributeError:
-            orders = self.client.list_orders(status="open")
+        orders = self.client.list_orders(status="open")
         results = []
         for order in orders:
             data = order.dict() if hasattr(order, "dict") else dict(order)

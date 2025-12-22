@@ -309,6 +309,33 @@
         },
         "overrides": []
       }
+    },
+    {
+      "type": "table",
+      "title": "Active Broker",
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "broker_active",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

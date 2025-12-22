@@ -15,6 +15,7 @@ from app.monitoring.metrics import (
     SYMBOL_ACTIVE,
     STRATEGY_ACTIVE,
     OPEN_ORDERS,
+    BROKER_ACTIVE,
 )
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
@@ -44,6 +45,7 @@ class TradingAgent:
         self._combine_mode = cfg["strategy"].get("combine", "priority")
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
+        self._broker_name = self._resolve_broker_name()
 
     def _build_strategy(self, name: str, params: dict):
         if name == "rl_policy":
@@ -177,6 +179,8 @@ class TradingAgent:
         order_id = self.executor.execute(symbol, action, qty=qty)
         if order_id and action in ("buy", "sell"):
             TRADES.labels(symbol=symbol, side=action).inc()
+        elif action in ("buy", "sell"):
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_failed").inc()
         return order_id
 
     def _size_order(
@@ -233,6 +237,12 @@ class TradingAgent:
             return [str(name) for name in names]
         name = cfg.get("name", "intraday_momentum")
         return [str(name)]
+
+    def _resolve_broker_name(self) -> str:
+        brokers_cfg = self.cfg.get("brokers", {})
+        if brokers_cfg.get("ibkr", {}).get("enabled", False):
+            return "ibkr"
+        return "alpaca"
 
     def _combine_signals(self, signals: list[dict]) -> tuple[str, float]:
         if not signals:
@@ -294,6 +304,7 @@ class TradingAgent:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             for name in self._strategy_names:
                 STRATEGY_ACTIVE.labels(strategy=name).set(1)
+            BROKER_ACTIVE.labels(broker=self._broker_name).set(1)
             self._update_account_metrics()
             self._refresh_news_cache(symbols)
             self._refresh_open_orders_cache(symbols)
