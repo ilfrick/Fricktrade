@@ -314,7 +314,8 @@ def _render_ui() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Autotrader Config</title>
   <style>
-    body { font-family: ui-sans-serif, system-ui; margin: 0; background: #0f172a; color: #e2e8f0; }
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap');
+    body { font-family: "Space Grotesk", ui-sans-serif, system-ui; margin: 0; background: #0f172a; color: #e2e8f0; }
     header { padding: 16px 24px; background: #111827; border-bottom: 1px solid #1f2937; }
     main { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; padding: 16px 24px; }
     textarea { width: 100%; height: 72vh; background: #0b1220; color: #e2e8f0; border: 1px solid #1f2937; border-radius: 8px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
@@ -323,9 +324,14 @@ def _render_ui() -> str:
     button { background: #2563eb; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
     button.secondary { background: #334155; }
     .status { margin-top: 8px; font-size: 12px; color: #94a3b8; }
-    .desc { font-size: 12px; line-height: 1.4; border-bottom: 1px solid #1f2937; padding: 6px 0; }
+    .desc { font-size: 12px; line-height: 1.4; padding: 6px 0; display: grid; grid-template-columns: minmax(180px, 0.9fr) 1.1fr; gap: 12px; }
     .desc b { color: #e2e8f0; display: block; }
+    .group { margin-top: 12px; border-top: 1px solid #1f2937; padding-top: 10px; }
+    .group-title { font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: #7dd3fc; margin-bottom: 6px; }
+    .desc span { color: #cbd5f5; }
+    .group-meta { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
     input { width: 100%; padding: 6px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #1f2937; background: #0b1220; color: #e2e8f0; }
+    select { width: 100%; padding: 6px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #1f2937; background: #0b1220; color: #e2e8f0; }
   </style>
 </head>
 <body>
@@ -341,11 +347,44 @@ def _render_ui() -> str:
     </section>
     <section class="panel">
       <input id="filter" placeholder="Filter parameters..." oninput="renderDescriptions()"/>
+      <select id="groupFilter" onchange="renderDescriptions()">
+        <option value="all">All groups</option>
+      </select>
       <div id="descriptions"></div>
     </section>
   </main>
   <script>
     let descriptions = {};
+    const groupOrder = [
+      "market",
+      "brokers",
+      "strategy",
+      "orchestrator",
+      "learning",
+      "risk",
+      "execution",
+      "data",
+      "news",
+      "backtest",
+      "logging",
+      "monitoring",
+      "other"
+    ];
+    const groupLabels = {
+      market: "Market Schedule & Gate",
+      brokers: "Broker Adapters",
+      strategy: "Strategy Engine",
+      orchestrator: "AI Orchestrator",
+      learning: "RL Policy & Guardrails",
+      risk: "Risk Management",
+      execution: "Execution & Orders",
+      data: "Data Ingestion & Feeds",
+      news: "News & Catalysts",
+      backtest: "Backtesting",
+      logging: "Logging & Alerts",
+      monitoring: "Monitoring",
+      other: "Other"
+    };
     async function loadConfig() {
       const res = await fetch('/config/raw');
       const data = await res.json();
@@ -356,18 +395,41 @@ def _render_ui() -> str:
       const res = await fetch('/config/schema');
       const data = await res.json();
       descriptions = data.descriptions || {};
+      const groupSelect = document.getElementById('groupFilter');
+      groupOrder.forEach(group => {
+        const option = document.createElement('option');
+        option.value = group;
+        option.textContent = groupLabels[group] || group;
+        groupSelect.appendChild(option);
+      });
       renderDescriptions();
     }
     function renderDescriptions() {
       const filter = document.getElementById('filter').value.toLowerCase();
+      const groupFilter = document.getElementById('groupFilter').value;
       const container = document.getElementById('descriptions');
       container.innerHTML = '';
-      Object.keys(descriptions).sort().forEach(key => {
-        if (filter && !key.toLowerCase().includes(filter)) return;
-        const div = document.createElement('div');
-        div.className = 'desc';
-        div.innerHTML = `<b>${key}</b>${descriptions[key]}`;
-        container.appendChild(div);
+      const grouped = {};
+      Object.keys(descriptions).forEach(key => {
+        const group = key.split('.')[0] || 'other';
+        if (!grouped[group]) grouped[group] = [];
+        grouped[group].push(key);
+      });
+      groupOrder.forEach(group => {
+        if (groupFilter !== 'all' && groupFilter !== group) return;
+        const keys = (grouped[group] || []).sort();
+        const filteredKeys = keys.filter(key => !filter || key.toLowerCase().includes(filter));
+        if (!filteredKeys.length) return;
+        const section = document.createElement('div');
+        section.className = 'group';
+        section.innerHTML = `<div class="group-title">${groupLabels[group] || group}</div><div class="group-meta">${filteredKeys.length} parameters</div>`;
+        filteredKeys.forEach(key => {
+          const div = document.createElement('div');
+          div.className = 'desc';
+          div.innerHTML = `<b>${key}</b><span>${descriptions[key]}</span>`;
+          section.appendChild(div);
+        });
+        container.appendChild(section);
       });
     }
     async function applyConfig() {
