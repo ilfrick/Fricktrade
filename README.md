@@ -152,6 +152,7 @@ The scanner applies `pattern_trading.selection.*` filters to Alpaca snapshots (p
 
 Log files are written to `logging.file_path` (default `/data/logs/trader.log`) with rotation settings under `logging.max_bytes` and `logging.backup_count`.
 Prometheus alert rules live in `prometheus/alerts.yml`, and Grafana provisions an “Autotrader Alerts & Logs” dashboard for active alerts and error metrics.
+Email alerting is configured via Alertmanager (`alertmanager/alertmanager.yml`) and runs on port `9093`.
 
 ## Multi-Strategy Mode
 

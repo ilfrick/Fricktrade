@@ -9,3 +9,8 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["trader:8001"]
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]

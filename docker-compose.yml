@@ -91,6 +91,14 @@ services:
       - "0.0.0.0:9090:9090"
     restart: unless-stopped
 
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    ports:
+      - "0.0.0.0:9093:9093"
+    restart: unless-stopped
+
   grafana:
     image: grafana/grafana-oss:11.1.4
     environment:
