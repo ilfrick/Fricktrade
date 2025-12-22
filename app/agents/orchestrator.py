@@ -39,9 +39,12 @@ class OrchestratorConfig:
 @dataclass
 class MLOrchestratorConfig:
     enabled: bool = False
+    model_type: str = "lstm"
     device: str = "auto"
     hidden_dim: int = 64
     dropout: float = 0.1
+    num_layers: int = 1
+    seq_len: int = 20
     model_path: str = "/data/orchestrator_model.pt"
     best_model_path: str = "/data/orchestrator_model_best.pt"
     use_best_model: bool = True
@@ -251,9 +254,12 @@ class MLStrategyOrchestrator:
         self._min_score = float(cfg.get("min_score", 0.0))
         self.cfg = MLOrchestratorConfig(
             enabled=bool(ml_cfg.get("enabled", False)),
+            model_type=str(ml_cfg.get("model_type", "lstm")),
             device=str(ml_cfg.get("device", "auto")),
             hidden_dim=int(ml_cfg.get("hidden_dim", 64)),
             dropout=float(ml_cfg.get("dropout", 0.1)),
+            num_layers=int(ml_cfg.get("num_layers", 1)),
+            seq_len=int(ml_cfg.get("seq_len", 20)),
             model_path=str(ml_cfg.get("model_path", "/data/orchestrator_model.pt")),
             best_model_path=str(ml_cfg.get("best_model_path", "/data/orchestrator_model_best.pt")),
             use_best_model=bool(ml_cfg.get("use_best_model", True)),
@@ -286,6 +292,7 @@ class MLStrategyOrchestrator:
         self._strategy_names: list[str] = []
         self._buffer: deque[tuple[torch.Tensor, torch.Tensor]] = deque(maxlen=self.cfg.buffer_size)
         self._last_state: dict[str, dict[str, object]] = {}
+        self._feature_history: dict[str, deque[list[float]]] = {}
         self._last_saved_at: float | None = None
         self._score_ema: float | None = None
         self._best_score: float | None = None
@@ -306,6 +313,7 @@ class MLStrategyOrchestrator:
 
     def select(
         self,
+        symbol: str,
         strategy_names: list[str],
         market_state: dict,
         signals: list[dict] | None = None,
@@ -314,7 +322,8 @@ class MLStrategyOrchestrator:
             return strategy_names, {name: 1.0 for name in strategy_names}
         self._ensure_model(strategy_names)
         features = _feature_vector(market_state)
-        scores = self._predict(features)
+        sequence = self._update_sequence(symbol, features)
+        scores = self._predict(sequence)
         if random.random() < self.cfg.epsilon:
             shuffled = strategy_names[:]
             random.shuffle(shuffled)
@@ -349,7 +358,8 @@ class MLStrategyOrchestrator:
         if last_price is None:
             return
         features = _feature_vector(market_state)
-        self._last_state[symbol] = {"features": features, "actions": actions, "price": last_price}
+        sequence = self._update_sequence(symbol, features)
+        self._last_state[symbol] = {"features": sequence, "actions": actions, "price": last_price}
 
     def update(self, symbol: str, market_state: dict) -> None:
         if not self.cfg.enabled:
@@ -389,23 +399,38 @@ class MLStrategyOrchestrator:
         self._strategy_names = strategy_names
         self._input_dim = len(_feature_vector({}))
         self._output_dim = len(strategy_names)
-        self._model = _MLP(self._input_dim, self._output_dim, self.cfg.hidden_dim, self.cfg.dropout).to(self._device)
+        if self.cfg.model_type == "lstm":
+            self._model = _LSTMModel(
+                self._input_dim,
+                self._output_dim,
+                self.cfg.hidden_dim,
+                self.cfg.num_layers,
+                self.cfg.dropout,
+            ).to(self._device)
+        else:
+            self._model = _MLP(self._input_dim, self._output_dim, self.cfg.hidden_dim, self.cfg.dropout).to(
+                self._device
+            )
         self._optimizer = torch.optim.AdamW(
             self._model.parameters(),
             lr=self.cfg.learning_rate,
             weight_decay=self.cfg.weight_decay,
         )
 
-    def _predict(self, features: list[float]) -> dict[str, float]:
+    def _predict(self, features: list[float] | list[list[float]]) -> dict[str, float]:
         if not self._model:
             return {name: 0.0 for name in self._strategy_names}
-        vec = torch.tensor(features, dtype=torch.float32, device=self._device).unsqueeze(0)
+        vec = torch.tensor(features, dtype=torch.float32, device=self._device)
+        if vec.dim() == 1:
+            vec = vec.unsqueeze(0)
+        if vec.dim() == 2 and self.cfg.model_type == "lstm":
+            vec = vec.unsqueeze(0)
         self._model.eval()
         with torch.no_grad():
             scores = self._model(vec).squeeze(0).cpu().tolist()
         return {name: float(score) for name, score in zip(self._strategy_names, scores)}
 
-    def _enqueue(self, features: list[float] | None, rewards: dict[str, float]) -> None:
+    def _enqueue(self, features: list[float] | list[list[float]] | None, rewards: dict[str, float]) -> None:
         if features is None or not rewards:
             return
         target = [rewards.get(name, 0.0) for name in self._strategy_names]
@@ -482,7 +507,7 @@ class MLStrategyOrchestrator:
         try:
             self._model.load_state_dict(torch.load(path, map_location=self._device))
             return True
-        except OSError:
+        except (OSError, RuntimeError):
             return False
 
     def _load_best_score(self) -> None:
@@ -538,6 +563,7 @@ class MLStrategyOrchestrator:
             if len(prices) < 3:
                 continue
             warmup = min(self.cfg.pretrain_warmup_bars, len(prices) - 2)
+            seq = deque(maxlen=self.cfg.seq_len)
             for idx in range(warmup, len(prices) - 1):
                 window_prices = prices[max(0, idx - warmup) : idx + 1]
                 window_volumes = volumes[max(0, idx - warmup) : idx + 1] if volumes else []
@@ -552,6 +578,10 @@ class MLStrategyOrchestrator:
                     "lows": window_lows,
                     "last_price": window_prices[-1] if window_prices else None,
                 }
+                seq.append(_feature_vector(market_state))
+                sequence = list(seq)
+                if len(sequence) < self.cfg.seq_len:
+                    sequence = _pad_sequence(sequence, self.cfg.seq_len, self._input_dim or len(sequence[-1]))
                 signals = []
                 for name, strategy in strategies.items():
                     if strategy is None:
@@ -572,7 +602,8 @@ class MLStrategyOrchestrator:
                         rewards[name] = -move_pct
                     else:
                         rewards[name] = 0.0
-                self._enqueue(_feature_vector(market_state), rewards)
+                features = sequence if self.cfg.model_type == "lstm" else _feature_vector(market_state)
+                self._enqueue(features, rewards)
                 samples += 1
                 if samples >= self.cfg.pretrain_max_samples:
                     break
@@ -580,6 +611,17 @@ class MLStrategyOrchestrator:
                 break
         for _ in range(max(1, self.cfg.pretrain_epochs)):
             self._train()
+
+    def _update_sequence(self, symbol: str, features: list[float]) -> list[list[float]]:
+        history = self._feature_history.get(symbol)
+        if history is None:
+            history = deque(maxlen=self.cfg.seq_len)
+            self._feature_history[symbol] = history
+        history.append(features)
+        sequence = list(history)
+        if len(sequence) < self.cfg.seq_len:
+            sequence = _pad_sequence(sequence, self.cfg.seq_len, len(features))
+        return sequence
 
 
 class _MLP(nn.Module):
@@ -597,6 +639,29 @@ class _MLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
+
+
+class _LSTMModel(nn.Module):
+    def __init__(self, input_dim: int, output_dim: int, hidden_dim: int, num_layers: int, dropout: float):
+        super().__init__()
+        self.lstm = nn.LSTM(
+            input_dim,
+            hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0,
+        )
+        self.head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        output, _ = self.lstm(x)
+        last = output[:, -1, :]
+        return self.head(last)
 
 def _extract_features(market_state: dict) -> dict[str, float]:
     prices = market_state.get("prices") or []
@@ -657,3 +722,11 @@ def _last_price(market_state: dict) -> float | None:
         return last_price
     prices = market_state.get("prices", [])
     return prices[-1] if prices else None
+
+
+def _pad_sequence(sequence: list[list[float]], target_len: int, feature_dim: int) -> list[list[float]]:
+    if len(sequence) >= target_len:
+        return sequence
+    pad = [0.0] * feature_dim
+    needed = target_len - len(sequence)
+    return [pad for _ in range(needed)] + sequence

@@ -129,9 +129,12 @@ orchestrator:
   normalize_scores: true
   ml:
     enabled: true
+    model_type: lstm
     device: auto
     hidden_dim: 64
     dropout: 0.1
+    num_layers: 1
+    seq_len: 20
     model_path: /data/orchestrator_model.pt
     best_model_path: /data/orchestrator_model_best.pt
     use_best_model: true

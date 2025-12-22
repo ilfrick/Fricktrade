@@ -196,6 +196,7 @@ orchestrator:
   min_score: 0.0
   ml:
     enabled: true
+    model_type: lstm
     device: auto
     model_path: /data/orchestrator_model.pt
     best_model_path: /data/orchestrator_model_best.pt
@@ -206,7 +207,8 @@ orchestrator:
       interval: 5m
 ```
 
-ML mode trains per-bar to maximize PnL using rewards based on the next price move. It maintains a replay buffer,
+ML mode trains per-bar to maximize PnL using rewards based on the next price move. The default LSTM model uses
+a rolling sequence of market features for each symbol. It maintains a replay buffer,
 updates the model each bar, and checkpoints the best-performing model automatically. Pretraining pulls fresh
 historical data via yfinance to warm start the policy.
 

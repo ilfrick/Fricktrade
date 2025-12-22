@@ -154,7 +154,7 @@ class TradingAgent:
             signals.append(signal)
         self._update_orchestrator(symbol, market_state)
         if isinstance(self._orchestrator, MLStrategyOrchestrator):
-            names, weights = self._orchestrator.select(self._strategy_names, market_state, signals)
+            names, weights = self._orchestrator.select(symbol, self._strategy_names, market_state, signals)
         else:
             names, weights = self._orchestrator.select(self._strategy_names, market_state)
         for name in self._strategy_names:

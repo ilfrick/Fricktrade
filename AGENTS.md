@@ -126,7 +126,7 @@ docker compose run --rm api
 - Learning config lives under `learning` (enable policy, guardrail mode, feature set, and optional online updates). `learning.device: auto` uses CUDA if available.
 - Pattern Trading config lives under `pattern_trading` and is enabled via `strategy.name: pattern_trading`.
 - Multi-strategy config uses `strategy.names` with `strategy.combine` set to `priority` or `vote` (enabled by default in `config/config.yaml`).
-- AI strategy orchestration uses `orchestrator.*` to score strategies per symbol and select the top candidates each cycle. ML mode (`orchestrator.ml.enabled`) trains per bar with replay buffer + best-model checkpoints.
+- AI strategy orchestration uses `orchestrator.*` to score strategies per symbol and select the top candidates each cycle. ML mode (`orchestrator.ml.enabled`) trains per bar with replay buffer + best-model checkpoints; default model is LSTM with `orchestrator.ml.seq_len`.
 - Orchestrator learning persists per-strategy bias updates under `orchestrator.learning.state_path`, and checkpoints the best biases to `orchestrator.learning.best_state_path` for default loading.
 - Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
 - Models and reports are stored in `./models` via the Docker volume.
