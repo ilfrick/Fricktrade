@@ -51,6 +51,7 @@ class TradingAgent:
         self._broker_name = self._resolve_broker_name()
         self._dynamic_symbols_at: datetime | None = None
         self._symbols: list[str] = []
+        self._orchestrator_state: dict[str, dict[str, object]] = {}
 
     def _build_strategy(self, name: str, params: dict):
         if name == "rl_policy":
@@ -127,6 +128,7 @@ class TradingAgent:
             SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
             logging.info("Skipping %s: open orders pending", symbol)
             return None
+        self._update_orchestrator(symbol, market_state)
         names, weights = self._orchestrator.select(self._strategy_names, market_state)
         signals = []
         for name in names:
@@ -172,6 +174,8 @@ class TradingAgent:
                 logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
             return None
         market_state["qty"] = qty
+
+        self._record_orchestrator(symbol, signals, market_state)
 
         if not self.risk.can_open_trade(
             exposure_pct=market_state.get("exposure_pct", 0.0),
@@ -347,6 +351,36 @@ class TradingAgent:
                 self._enrich_market_state(market_state, portfolio, sym)
                 self.run_once(sym, market_state)
             time.sleep(interval_seconds)
+
+    def _update_orchestrator(self, symbol: str, market_state: dict) -> None:
+        state = self._orchestrator_state.get(symbol)
+        if not state:
+            return
+        last_price = state.get("last_price")
+        if last_price is None:
+            return
+        current_price = market_state.get("last_price")
+        if current_price is None:
+            prices = market_state.get("prices", [])
+            current_price = prices[-1] if prices else None
+        if current_price is None:
+            return
+        decisions = state.get("decisions", {})
+        if isinstance(decisions, dict):
+            self._orchestrator.update_biases(decisions, float(last_price), float(current_price))
+        self._orchestrator_state.pop(symbol, None)
+
+    def _record_orchestrator(self, symbol: str, signals: list[dict], market_state: dict) -> None:
+        decisions = {s.get("name"): s.get("action") for s in signals if s.get("name")}
+        if not decisions:
+            return
+        last_price = market_state.get("last_price")
+        if last_price is None:
+            prices = market_state.get("prices", [])
+            last_price = prices[-1] if prices else None
+        if last_price is None:
+            return
+        self._orchestrator_state[symbol] = {"decisions": decisions, "last_price": last_price}
 
     def _refresh_news_cache(self, symbols: list[str]) -> None:
         news_cfg = self.cfg.get("news", {})

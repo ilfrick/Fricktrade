@@ -183,10 +183,20 @@ orchestrator:
   mode: select
   top_k: 2
   min_score: 0.0
+  learning:
+    enabled: true
+    learning_rate: 0.1
+    min_bias: -1.0
+    max_bias: 1.0
+    decay: 0.02
+    min_price_move_pct: 0.05
+    state_path: /data/orchestrator_state.json
+    save_interval_seconds: 300
 ```
 
 Weights live under `orchestrator.strategy_weights` and include `momentum`, `trend`, `volatility`, `relative_volume`,
 `session_gain_pct`, `spread`, and `catalyst`.
+Learning updates a per-strategy bias based on the next price move after each decision and persists it in `state_path`.
 
 Evaluate an existing model and regenerate charts:
 

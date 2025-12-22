@@ -127,6 +127,7 @@ docker compose run --rm api
 - Pattern Trading config lives under `pattern_trading` and is enabled via `strategy.name: pattern_trading`.
 - Multi-strategy config uses `strategy.names` with `strategy.combine` set to `priority` or `vote` (enabled by default in `config/config.yaml`).
 - AI strategy orchestration uses `orchestrator.*` to score strategies per symbol and select the top candidates each cycle.
+- Orchestrator learning persists per-strategy bias updates under `orchestrator.learning.state_path`.
 - Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
 - Models and reports are stored in `./models` via the Docker volume.
 - `learning.training.resume` controls whether training resumes from an existing model or starts fresh.
