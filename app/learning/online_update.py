@@ -3,8 +3,10 @@ from __future__ import annotations
 import copy
 import logging
 import time
+from datetime import datetime
 
 from app.learning.train_rl import train_from_config
+from app.utils.restart import should_restart
 
 
 def run_online_updates(cfg: dict) -> None:
@@ -19,7 +21,11 @@ def run_online_updates(cfg: dict) -> None:
     eval_split = float(online_cfg.get("eval_split", 0.1))
     resume = bool(learning_cfg.get("training", {}).get("resume", True))
 
+    started_at = datetime.utcnow()
     while True:
+        if should_restart(started_at):
+            logging.info("Restart requested; exiting online updates.")
+            break
         loop_cfg = copy.deepcopy(cfg)
         loop_cfg.setdefault("learning", {}).setdefault("training", {})
         loop_cfg["learning"]["training"]["timesteps"] = timesteps

@@ -10,7 +10,7 @@ This repo contains a Python intraday trading agent for US and EU equities (NYSE,
 - Backtesting: `app/backtest/engine.py` uses `backtrader` and a simple SMA strategy.
 - Learning (RL): `app/learning/` for env, data loading, training, and online updates; `app/strategies/rl_policy.py` for inference.
 - Data download: `app/data/downloader.py` uses `yfinance` with retry and rate limiting.
-- API: `app/api/server.py` (FastAPI) with `/health` and `/config`.
+- API: `app/api/server.py` (FastAPI) with `/health`, `/config`, `/config/raw`, `/config/update`, `/restart`, and `/ui`.
 - Metrics: `app/monitoring/metrics.py` exposes Prometheus counters/gauges.
 - Runtime config: `config/config.yaml` (supports `${ENV_VAR}` interpolation).
 - Market-hours gating: `app/utils/market.py` checks NYSE, Nasdaq, and Borsa Italiana based on `market.venues`.
@@ -35,6 +35,9 @@ Services:
 - `prometheus`: metrics scrape.
 - `grafana`: dashboards (mapped to host port `3002`).
 - `calendar-updater`: weekly holiday refresh (configurable).
+
+Web UI:
+- `http://localhost:18081/ui` to edit YAML config, see parameter descriptions, and request a restart.
 
 ## Useful Commands
 
@@ -136,7 +139,7 @@ docker compose run --rm api
 - Strategy emits `buy`, `sell`, `exit`, or `hold`; `exit` closes the position.
 - Risk checks are basic thresholds only; no PnL accounting is wired into execution.
 - Backtest engine loads the first matching CSV in `backtest.data_dir`.
-- API `/config` masks Alpaca keys before returning.
+- API `/config` masks Alpaca keys before returning; `/config/update` accepts YAML updates and `/restart` triggers a graceful container restart.
 - Grafana auto-provisions the "Autotrader Overview" dashboard with trade counts/rates, PnL, and drawdown.
 - Dashboard also shows active symbols and account equity/cash/invested from broker account data.
 

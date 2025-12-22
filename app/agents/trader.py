@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime
 
 from app.execution.executor import ExecutionEngine
 from app.monitoring.metrics import (
@@ -15,6 +16,7 @@ from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.utils.market import is_market_open
+from app.utils.restart import should_restart
 
 
 class TradingAgent:
@@ -29,6 +31,7 @@ class TradingAgent:
         self._guardrail_by_symbol: dict[str, object] = {}
         self.executor = ExecutionEngine(broker)
         self._last_market_open = None
+        self._started_at = datetime.utcnow()
 
     def _build_strategy(self, params: dict):
         if self.learning_cfg.get("enabled"):
@@ -136,6 +139,9 @@ class TradingAgent:
     def loop(self, symbol: str | list[str], market_data_provider, interval_seconds: int = 60):
         symbols = symbol if isinstance(symbol, list) else [symbol]
         while True:
+            if should_restart(self._started_at):
+                logging.info("Restart requested; exiting trading loop.")
+                raise SystemExit(0)
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             self._update_account_metrics()

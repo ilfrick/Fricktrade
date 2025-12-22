@@ -64,8 +64,13 @@ Key knobs:
 - `risk.circuit_breaker_drawdown_pct`
 - `strategy.params.*`
 
-You manage strategy and risk by editing `config/config.yaml` and restarting the trader container.
-The `api` service exposes a read-only config endpoint at `http://localhost:18081/config` for UI tooling.
+You manage strategy and risk by editing `config/config.yaml` and restarting the trader container, or use the web UI.
+The `api` service exposes:
+- Web UI at `http://localhost:18081/ui`
+- Read-only config at `http://localhost:18081/config`
+- YAML config at `http://localhost:18081/config/raw`
+- Config update endpoint at `http://localhost:18081/config/update` (POST JSON: `{ "yaml": "..." }`)
+- Restart endpoint at `http://localhost:18081/restart`
 
 ## Notes on Markets and Brokers
 
