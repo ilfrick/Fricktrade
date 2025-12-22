@@ -146,6 +146,9 @@ If Yahoo blocks the container, set a proxy and slow down requests in `config/con
 
 ## Backtesting
 
+Backtesting defaults to `backtest.mode: agent`, which runs the actual trading logic (strategies + orchestrator +
+risk + sizing) on CSV data. Set `backtest.mode: sma` to use the legacy SMA baseline.
+
 ```bash
 docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml
 ```

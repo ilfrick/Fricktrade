@@ -9,6 +9,7 @@ from app.agents.trader import TradingAgent
 from app.brokers.alpaca import AlpacaBroker
 from app.brokers.ibkr import IBKRBroker
 from app.backtest.engine import run_backtest
+from app.backtest.agent_engine import run_agent_backtest
 from app.data.downloader import download_yfinance
 from app.data.ingestion import ingest_from_config
 from app.learning.train_rl import train_from_config
@@ -189,16 +190,21 @@ def main():
         return
 
     if args.cmd == "backtest":
-        result = run_backtest(
-            cfg["backtest"]["data_dir"],
-            cfg["backtest"]["start"],
-            cfg["backtest"]["end"],
-            cfg["backtest"]["initial_cash"],
-            cfg["backtest"]["commission_pct"],
-            interval=cfg["data"].get("interval"),
-            use_gpu=cfg["backtest"].get("use_gpu", True),
-        )
-        logging.info("Backtest result: %s", result)
+        mode = cfg.get("backtest", {}).get("mode", "agent")
+        if mode == "agent":
+            result = run_agent_backtest(cfg)
+            logging.info("Agent backtest result: %s", result.__dict__)
+        else:
+            result = run_backtest(
+                cfg["backtest"]["data_dir"],
+                cfg["backtest"]["start"],
+                cfg["backtest"]["end"],
+                cfg["backtest"]["initial_cash"],
+                cfg["backtest"]["commission_pct"],
+                interval=cfg["data"].get("interval"),
+                use_gpu=cfg["backtest"].get("use_gpu", True),
+            )
+            logging.info("Backtest result: %s", result)
         return
 
     if args.cmd == "api":

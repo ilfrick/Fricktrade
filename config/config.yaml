@@ -249,6 +249,7 @@ backtest:
   commission_pct: 0.05
   slippage_bps: 2
   use_gpu: true
+  mode: agent
 data:
   provider: yfinance
   symbols:
