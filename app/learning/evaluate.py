@@ -126,7 +126,7 @@ def evaluate_model(
 def evaluate_from_config(cfg: dict) -> dict:
     learning_cfg = cfg.get("learning", {})
     training_cfg = learning_cfg.get("training", {})
-    model_path = learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
+    model_path = _select_model_path(learning_cfg)
     device = _resolve_device(learning_cfg.get("device", "auto"))
     feature_config = learning_cfg.get("features", {})
 
@@ -164,3 +164,11 @@ def _resolve_device(device: str) -> str:
     except Exception:
         return "cpu"
     return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _select_model_path(learning_cfg: dict) -> str:
+    model_path = learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
+    if not learning_cfg.get("use_best_model", True):
+        return model_path
+    best_path = learning_cfg.get("best_model_path", "/app/models/ppo_policy_best.zip")
+    return best_path if Path(best_path).exists() else model_path

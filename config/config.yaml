@@ -115,6 +115,8 @@ strategy:
 learning:
   enabled: true
   model_path: /app/models/ppo_policy.zip
+  best_model_path: /app/models/ppo_policy_best.zip
+  use_best_model: true
   device: auto
   window_size: 50
   features:
@@ -149,6 +151,7 @@ learning:
     eval_split: 0.2
     resume: true
     report_path: /app/models/training_report.json
+    best_report_path: /app/models/training_report_best.json
     report_plot_dir: /app/models/reports
 backtest:
   data_dir: /data

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import shutil
 from pathlib import Path
 
 from stable_baselines3 import PPO
@@ -15,6 +17,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     learning_cfg = cfg.get("learning", {})
     training_cfg = learning_cfg.get("training", {})
     model_path = learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
+    best_model_path = learning_cfg.get("best_model_path", "/app/models/ppo_policy_best.zip")
     device = _resolve_device(learning_cfg.get("device", "auto"))
     feature_config = learning_cfg.get("features", {})
 
@@ -61,7 +64,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
 
     report_path = training_cfg.get("report_path", "/app/models/training_report.json")
     report_plot_dir = training_cfg.get("report_plot_dir", "/app/models/reports")
-    evaluate_model(
+    report = evaluate_model(
         model=model,
         datasets=eval_sets,
         window_size=window_size,
@@ -70,6 +73,15 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
         feature_config=feature_config,
         plot_dir=report_plot_dir,
     )
+    best_report_path = training_cfg.get("best_report_path", "/app/models/training_report_best.json")
+    if _is_better_report(report, best_report_path):
+        best_model_file = Path(best_model_path)
+        best_model_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(model_path, best_model_file)
+        best_report_file = Path(best_report_path)
+        best_report_file.parent.mkdir(parents=True, exist_ok=True)
+        best_report_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        logging.info("Updated best model: %s", best_model_file)
     return str(output_path)
 
 
@@ -81,3 +93,18 @@ def _resolve_device(device: str) -> str:
     except Exception:
         return "cpu"
     return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _is_better_report(report: dict, best_report_path: str) -> bool:
+    avg = report.get("average", {})
+    score = (float(avg.get("sharpe", 0.0)), float(avg.get("return_pct", 0.0)))
+    best_file = Path(best_report_path)
+    if not best_file.exists():
+        return True
+    try:
+        best = json.loads(best_file.read_text(encoding="utf-8"))
+    except Exception:
+        return True
+    best_avg = best.get("average", {})
+    best_score = (float(best_avg.get("sharpe", 0.0)), float(best_avg.get("return_pct", 0.0)))
+    return score > best_score

@@ -110,6 +110,7 @@ Enable learning in `config/config.yaml` by setting `learning.enabled: true`. A r
 Training produces a report at `learning.training.report_path` with return, Sharpe, and drawdown metrics, plus charts in `learning.training.report_plot_dir`.
 Models and reports are persisted under `./models` on the host.
 Use `learning.training.resume: true` to reuse an existing model on restart, or set it to `false` to retrain from scratch.
+The trainer writes a best-performing copy to `learning.best_model_path` when evaluation metrics improve; the trader loads it by default unless `learning.use_best_model: false`.
 
 Evaluate an existing model and regenerate charts:
 

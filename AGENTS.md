@@ -123,6 +123,7 @@ docker compose run --rm api
 - Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
 - Models and reports are stored in `./models` via the Docker volume.
 - `learning.training.resume` controls whether training resumes from an existing model or starts fresh.
+- `learning.use_best_model` selects the best model copy (from `learning.best_model_path`) if available.
 - Data ingestion sources are configured under `data.sources`.
 - Alpaca keys come from `ALPACA_API_KEY` / `ALPACA_API_SECRET` in `.env`.
 - `brokers.ibkr.enabled` controls IBKR adapter selection. If `false`, Alpaca is used.

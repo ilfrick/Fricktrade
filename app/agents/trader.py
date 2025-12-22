@@ -1,6 +1,7 @@
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 
 from app.execution.executor import ExecutionEngine
 from app.monitoring.metrics import (
@@ -36,7 +37,7 @@ class TradingAgent:
 
     def _build_strategy(self, params: dict):
         if self.learning_cfg.get("enabled"):
-            model_path = self.learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
+            model_path = self._select_model_path()
             window_size = int(self.learning_cfg.get("window_size", 50))
             device = self.learning_cfg.get("device", "auto")
             feature_config = self.learning_cfg.get("features", {})
@@ -55,6 +56,13 @@ class TradingAgent:
             params["exit_threshold_pct"],
             params["allow_shorts"],
         )
+
+    def _select_model_path(self) -> str:
+        model_path = self.learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
+        if not self.learning_cfg.get("use_best_model", True):
+            return model_path
+        best_path = self.learning_cfg.get("best_model_path", "/app/models/ppo_policy_best.zip")
+        return best_path if Path(best_path).exists() else model_path
 
     def _build_guardrail(self, params: dict):
         guard_cfg = self.learning_cfg.get("guardrail", {})
