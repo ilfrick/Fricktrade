@@ -138,7 +138,7 @@
       }
     },
     {
-      "type": "stat",
+      "type": "table",
       "title": "Active Strategies",
       "gridPos": {
         "x": 6,
@@ -153,21 +153,13 @@
         }
       ],
       "options": {
-        "colorMode": "none",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "__name__",
-          "values": false
-        },
-        "textMode": "name"
+        "showHeader": true
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "none"
+          "custom": {
+            "align": "auto"
+          }
         },
         "overrides": []
       }
@@ -292,6 +284,28 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Open Orders",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum by (symbol, side) (open_orders)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
         },
         "overrides": []
       }

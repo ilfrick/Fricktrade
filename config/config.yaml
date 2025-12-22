@@ -233,6 +233,11 @@ pattern_trading:
     stop_loss_pct: 0.05
     partial_take_profit_pct: 0.10
     trailing_stop_pct: 0.02
+execution:
+  open_orders:
+    enabled: true
+    interval_seconds: 30
+    skip_if_pending: true
 monitoring:
   prometheus_port: 8001
   metrics_path: /metrics

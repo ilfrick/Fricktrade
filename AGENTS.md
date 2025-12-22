@@ -128,6 +128,7 @@ docker compose run --rm api
 - `learning.use_best_model` selects the best model copy (from `learning.best_model_path`) if available.
 - Data ingestion sources are configured under `data.sources`.
 - News catalysts (for Pattern Trading) are configured under `news` (default Alpaca news API).
+- Open-order tracking is configured under `execution.open_orders`.
 - Alpaca keys come from `ALPACA_API_KEY` / `ALPACA_API_SECRET` in `.env`.
 - `brokers.ibkr.enabled` controls IBKR adapter selection. If `false`, Alpaca is used.
 - Data directory is `/data` inside containers (mapped to `./data` on host).

@@ -14,6 +14,7 @@ from app.monitoring.metrics import (
     ACCOUNT_INVESTED,
     SYMBOL_ACTIVE,
     STRATEGY_ACTIVE,
+    OPEN_ORDERS,
 )
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
@@ -41,6 +42,8 @@ class TradingAgent:
         self._news_cache_at: datetime | None = None
         self._strategy_names = self._resolve_strategy_names()
         self._combine_mode = cfg["strategy"].get("combine", "priority")
+        self._open_orders_cache: list[dict] = []
+        self._open_orders_at: datetime | None = None
 
     def _build_strategy(self, name: str, params: dict):
         if name == "rl_policy":
@@ -113,6 +116,10 @@ class TradingAgent:
         return action
 
     def run_once(self, symbol: str, market_state: dict):
+        if self._has_pending_order(symbol):
+            SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
+            logging.info("Skipping %s: open orders pending", symbol)
+            return None
         signals = []
         for name in self._strategy_names:
             strategy = self._get_strategy(symbol, name)
@@ -190,6 +197,7 @@ class TradingAgent:
         max_pos_pct = float(self.cfg["risk"]["max_position_size_pct"])
         max_short_pct = float(self.cfg["risk"]["max_short_exposure_pct"])
         allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
+        cash = max(0.0, cash - self._reserved_cash(symbol, last_price))
 
         if action == "buy":
             if equity <= 0 or cash <= 0:
@@ -288,6 +296,7 @@ class TradingAgent:
                 STRATEGY_ACTIVE.labels(strategy=name).set(1)
             self._update_account_metrics()
             self._refresh_news_cache(symbols)
+            self._refresh_open_orders_cache(symbols)
             market_open = is_market_open(self.cfg)
             if market_open != self._last_market_open:
                 state = "open" if market_open else "closed"
@@ -338,6 +347,7 @@ class TradingAgent:
         market_state["leverage"] = (gross_exposure / equity) if equity else 1.0
         market_state["portfolio"] = portfolio
         market_state["catalyst"] = self._news_cache.get(symbol, False)
+        market_state["open_orders"] = self._open_orders_cache
 
     def _get_portfolio_snapshot(self) -> dict:
         account = self.broker.get_account()
@@ -388,3 +398,63 @@ class TradingAgent:
             "gross_exposure": gross_exposure,
             "short_exposure": short_exposure,
         }
+
+    def _refresh_open_orders_cache(self, symbols: list[str]) -> None:
+        exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
+        if not exec_cfg.get("enabled", True):
+            self._open_orders_cache = []
+            self._open_orders_at = None
+            self._reset_open_orders_metrics(symbols)
+            return
+        now = datetime.utcnow()
+        interval_seconds = int(exec_cfg.get("interval_seconds", 30))
+        if self._open_orders_at and (now - self._open_orders_at).total_seconds() < interval_seconds:
+            return
+        try:
+            self._open_orders_cache = self.broker.get_open_orders()
+        except Exception as exc:
+            logging.warning("Open orders snapshot failed: %s", exc)
+            self._open_orders_cache = []
+        self._open_orders_at = now
+        self._update_open_orders_metrics(symbols)
+
+    def _update_open_orders_metrics(self, symbols: list[str]) -> None:
+        self._reset_open_orders_metrics(symbols)
+        counts: dict[tuple[str, str], int] = {}
+        for order in self._open_orders_cache:
+            symbol = order.get("symbol")
+            side = (order.get("side") or "").lower()
+            if not symbol or side not in {"buy", "sell"}:
+                continue
+            key = (symbol, side)
+            counts[key] = counts.get(key, 0) + 1
+        for (symbol, side), count in counts.items():
+            OPEN_ORDERS.labels(symbol=symbol, side=side).set(count)
+
+    def _reset_open_orders_metrics(self, symbols: list[str]) -> None:
+        for symbol in symbols:
+            for side in ("buy", "sell"):
+                OPEN_ORDERS.labels(symbol=symbol, side=side).set(0)
+
+    def _has_pending_order(self, symbol: str) -> bool:
+        exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
+        if not exec_cfg.get("skip_if_pending", True):
+            return False
+        for order in self._open_orders_cache:
+            if order.get("symbol") == symbol:
+                return True
+        return False
+
+    def _reserved_cash(self, symbol: str, last_price: float) -> float:
+        reserved = 0.0
+        for order in self._open_orders_cache:
+            if order.get("symbol") != symbol:
+                continue
+            side = (order.get("side") or "").lower()
+            if side != "buy":
+                continue
+            qty = float(order.get("qty") or 0.0)
+            limit_price = order.get("limit_price")
+            price = float(limit_price) if limit_price else float(last_price)
+            reserved += qty * price
+        return reserved

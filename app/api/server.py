@@ -133,6 +133,9 @@ _DESCRIPTIONS = {
     "pattern_trading.risk.stop_loss_pct": "Stop loss percent below entry.",
     "pattern_trading.risk.partial_take_profit_pct": "Partial take profit percent.",
     "pattern_trading.risk.trailing_stop_pct": "Trailing stop percent.",
+    "execution.open_orders.enabled": "Enable periodic open-order checks.",
+    "execution.open_orders.interval_seconds": "Open-order refresh interval in seconds.",
+    "execution.open_orders.skip_if_pending": "Skip new signals if an order is pending for the symbol.",
     "monitoring.prometheus_port": "Prometheus metrics port.",
     "monitoring.metrics_path": "Metrics path.",
 }

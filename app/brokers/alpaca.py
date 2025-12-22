@@ -27,6 +27,24 @@ class AlpacaBroker(Broker):
             positions = self.client.list_positions()
         return [pos.dict() if hasattr(pos, "dict") else dict(pos) for pos in positions]
 
+    def get_open_orders(self) -> list[dict]:
+        try:
+            orders = self.client.get_orders(status="open")
+        except AttributeError:
+            orders = self.client.list_orders(status="open")
+        results = []
+        for order in orders:
+            data = order.dict() if hasattr(order, "dict") else dict(order)
+            results.append(
+                {
+                    "symbol": data.get("symbol"),
+                    "side": data.get("side"),
+                    "qty": float(data.get("qty") or 0.0),
+                    "limit_price": data.get("limit_price"),
+                }
+            )
+        return results
+
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         order_req = MarketOrderRequest(
             symbol=symbol,
@@ -38,4 +56,8 @@ class AlpacaBroker(Broker):
         return order.id
 
     def close_position(self, symbol: str) -> None:
-        self.client.close_position(symbol)
+        try:
+            self.client.close_position(symbol)
+        except Exception:
+            # Ignore if position does not exist.
+            return

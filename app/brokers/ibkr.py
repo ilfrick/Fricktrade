@@ -27,6 +27,23 @@ class IBKRBroker(Broker):
             )
         return positions
 
+    def get_open_orders(self) -> list[dict]:
+        orders = []
+        for trade in self.ib.trades():
+            order = trade.order
+            status = trade.orderStatus.status
+            if status not in {"Submitted", "PreSubmitted"}:
+                continue
+            orders.append(
+                {
+                    "symbol": trade.contract.symbol,
+                    "side": "buy" if order.action.upper() == "BUY" else "sell",
+                    "qty": float(order.totalQuantity),
+                    "limit_price": getattr(order, "lmtPrice", None),
+                }
+            )
+        return orders
+
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         contract = Stock(symbol, "SMART", "EUR")
         order = MarketOrder("BUY" if side.lower() == "buy" else "SELL", qty)

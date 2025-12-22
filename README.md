@@ -114,6 +114,10 @@ Models and reports are persisted under `./models` on the host.
 Use `learning.training.resume: true` to reuse an existing model on restart, or set it to `false` to retrain from scratch.
 The trainer writes a best-performing copy to `learning.best_model_path` when evaluation metrics improve; the trader loads it by default unless `learning.use_best_model: false`.
 
+## Open Orders Awareness
+
+The trader periodically fetches open orders and will skip new signals for symbols with pending orders (configurable via `execution.open_orders.*`). Pending buy orders are also treated as reserved cash for sizing.
+
 ## Pattern Trading Mode
 
 Enable Pattern Trading by setting `strategy.name: pattern_trading` and configure:
@@ -292,6 +296,7 @@ Grafana auto-provisions a dashboard with:
 - Active symbols (from config)
 - Account equity, cash, invested
 - Skipped orders by reason (e.g., insufficient cash, risk limits)
+- Open orders by symbol/side
 - PnL %
 - Drawdown %
 
