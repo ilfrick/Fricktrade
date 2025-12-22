@@ -138,12 +138,47 @@
       }
     },
     {
-      "type": "table",
-      "title": "Symbols Traded",
+      "type": "stat",
+      "title": "Active Strategies",
       "gridPos": {
         "x": 6,
         "y": 5,
-        "w": 18,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "expr": "strategy_active",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "__name__",
+          "values": false
+        },
+        "textMode": "name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Symbols Traded",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
         "h": 5
       },
       "targets": [

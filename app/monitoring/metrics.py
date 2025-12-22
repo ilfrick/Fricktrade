@@ -12,6 +12,7 @@ ACCOUNT_TOTAL = Gauge("account_total", "Account total equity")
 ACCOUNT_CASH = Gauge("account_cash", "Account available cash")
 ACCOUNT_INVESTED = Gauge("account_invested", "Account invested value")
 SYMBOL_ACTIVE = Gauge("symbol_active", "Configured trading symbols", ["symbol"])
+STRATEGY_ACTIVE = Gauge("strategy_active", "Configured trading strategies", ["strategy"])
 
 
 def start_metrics_server(port: int):

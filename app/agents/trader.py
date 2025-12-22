@@ -13,6 +13,7 @@ from app.monitoring.metrics import (
     ACCOUNT_CASH,
     ACCOUNT_INVESTED,
     SYMBOL_ACTIVE,
+    STRATEGY_ACTIVE,
 )
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
@@ -283,6 +284,8 @@ class TradingAgent:
             portfolio = self._get_portfolio_snapshot()
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
+            for name in self._strategy_names:
+                STRATEGY_ACTIVE.labels(strategy=name).set(1)
             self._update_account_metrics()
             self._refresh_news_cache(symbols)
             market_open = is_market_open(self.cfg)
