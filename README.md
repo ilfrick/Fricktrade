@@ -286,3 +286,28 @@ gh repo create Autotrader --private --source . --remote origin --push
 ## Disclaimer
 
 This software is for research/education. You are responsible for compliance with regulations, broker requirements, and all trading risk.
+
+## Holiday Calendars
+
+Per-venue holidays are stored under `market.venues[].holidays` in `config/config.yaml`. A `calendar-updater`
+service refreshes these lists weekly (configurable) from online sources:
+
+- NYSE: `https://www.nyse.com/markets/hours-calendars`
+- Nasdaq: `https://www.nasdaqtrader.com/Trader.aspx?id=Calendar`
+- Borsa Italiana: `https://date.nager.at` (Italy public holidays + Good Friday)
+
+Update interval and horizon are controlled by:
+
+```yaml
+market:
+  holiday_update:
+    enabled: true
+    interval_days: 7
+    years_ahead: 1
+```
+
+One-off refresh:
+
+```bash
+docker compose run --rm calendar-updater python -m app.utils.holiday_update --config /app/config/config.yaml --once
+```

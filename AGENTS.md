@@ -34,6 +34,7 @@ Services:
 - `api`: FastAPI config/health (mapped to host port `18081`).
 - `prometheus`: metrics scrape.
 - `grafana`: dashboards (mapped to host port `3002`).
+- `calendar-updater`: weekly holiday refresh (configurable).
 
 ## Useful Commands
 
@@ -73,6 +74,12 @@ docker compose run --rm trader python -m app.main evaluate --config /app/config/
 docker compose run --rm learner
 ```
 
+- Holiday calendar refresh (one-off):
+
+```bash
+docker compose run --rm calendar-updater python -m app.utils.holiday_update --config /app/config/config.yaml --once
+```
+
 - Ingest data from configured sources:
 
 ```bash
@@ -104,7 +111,8 @@ docker compose run --rm api
 - Data directory is `/data` inside containers (mapped to `./data` on host).
 - `data.interval` and `data.lookback_days` are clamped for yfinance intraday limits.
 - `market.open_mode` chooses whether any or all configured venues must be open to trade.
-- `market.venues[].holidays` is empty by default; populate per market.
+- `market.venues[].holidays` is refreshed by `calendar-updater` (or can be edited manually).
+- `calendar-updater` refreshes holiday calendars weekly from online sources (NYSE, Nasdaq, Italy public holidays).
 
 ## Behavior Details
 

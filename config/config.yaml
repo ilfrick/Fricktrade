@@ -3,43 +3,97 @@ app:
   env: prod
   timezone: Europe/Rome
   log_level: INFO
-
 market:
   venue: Multi
   default_currency: EUR
   open_mode: any
+  holiday_update:
+    enabled: true
+    interval_days: 7
+    years_ahead: 1
   venues:
-    - name: BorsaItaliana
-      timezone: Europe/Rome
-      trading_hours:
-        open: "09:00"
-        close: "17:30"
-      holidays: []
-    - name: NYSE
-      timezone: America/New_York
-      trading_hours:
-        open: "09:30"
-        close: "16:00"
-      holidays: []
-    - name: Nasdaq
-      timezone: America/New_York
-      trading_hours:
-        open: "09:30"
-        close: "16:00"
-      holidays: []
-
+  - name: BorsaItaliana
+    timezone: Europe/Rome
+    trading_hours:
+      open: 09:00
+      close: '17:30'
+    holidays:
+    - '2025-01-01'
+    - '2025-01-06'
+    - '2025-04-18'
+    - '2025-04-20'
+    - '2025-04-21'
+    - '2025-04-25'
+    - '2025-05-01'
+    - '2025-06-02'
+    - '2025-06-09'
+    - '2025-08-15'
+    - '2025-11-01'
+    - '2025-12-08'
+    - '2025-12-25'
+    - '2025-12-26'
+    - '2026-01-01'
+    - '2026-01-06'
+    - '2026-04-03'
+    - '2026-04-05'
+    - '2026-04-06'
+    - '2026-04-25'
+    - '2026-05-01'
+    - '2026-05-25'
+    - '2026-06-02'
+    - '2026-08-15'
+    - '2026-10-04'
+    - '2026-11-01'
+    - '2026-12-08'
+    - '2026-12-25'
+    - '2026-12-26'
+  - name: NYSE
+    timezone: America/New_York
+    trading_hours:
+      open: 09:30
+      close: '16:00'
+    holidays:
+    - '2025-01-01'
+    - '2025-01-20'
+    - '2025-02-17'
+    - '2025-04-18'
+    - '2025-05-26'
+    - '2025-06-19'
+    - '2025-09-01'
+    - '2026-01-01'
+    - '2026-01-19'
+    - '2026-02-16'
+    - '2026-04-03'
+    - '2026-05-25'
+    - '2026-06-19'
+    - '2026-09-07'
+  - name: Nasdaq
+    timezone: America/New_York
+    trading_hours:
+      open: 09:30
+      close: '16:00'
+    holidays:
+    - '2025-01-01'
+    - '2025-01-20'
+    - '2025-02-17'
+    - '2025-04-18'
+    - '2025-05-26'
+    - '2025-06-19'
+    - '2025-07-04'
+    - '2025-09-01'
+    - '2025-11-27'
+    - '2025-12-25'
 brokers:
   alpaca:
     enabled: true
-    base_url: "https://paper-api.alpaca.markets"
-    api_key: "${ALPACA_API_KEY}"
-    api_secret: "${ALPACA_API_SECRET}"
+    base_url: https://paper-api.alpaca.markets
+    api_key: ${ALPACA_API_KEY}
+    api_secret: ${ALPACA_API_SECRET}
   ibkr:
     enabled: false
-    host: "127.0.0.1"
+    host: 127.0.0.1
     port: 7497
     client_id: 1
-
 risk:
   max_daily_loss_pct: 2.0
   max_position_size_pct: 5.0
@@ -50,29 +104,31 @@ risk:
   hard_stop_pct: 4.0
   trailing_stop_pct: 2.0
   circuit_breaker_drawdown_pct: 5.0
-
 strategy:
-  name: "intraday_momentum"
+  name: intraday_momentum
   params:
     lookback_minutes: 30
     entry_threshold_pct: 0.8
     exit_threshold_pct: 0.4
     position_horizon_minutes: 90
     allow_shorts: true
-
 learning:
   enabled: true
-  model_path: "/app/models/ppo_policy.zip"
-  device: "auto"
+  model_path: /app/models/ppo_policy.zip
+  device: auto
   window_size: 50
   features:
     include_returns: true
-    sma_periods: [5, 20]
-    ema_periods: [10]
-    rsi_periods: [14]
+    sma_periods:
+    - 5
+    - 20
+    ema_periods:
+    - 10
+    rsi_periods:
+    - 14
   guardrail:
     enabled: true
-    mode: "confirm"
+    mode: confirm
     params:
       lookback_minutes: 30
       entry_threshold_pct: 0.8
@@ -84,63 +140,60 @@ learning:
     timesteps: 1000
     eval_split: 0.1
   training:
-    data_dir: "/data"
-    interval: "1m"
+    data_dir: /data
+    interval: 1m
     timesteps: 200000
     initial_cash: 100000
     commission_pct: 0.05
     slippage_bps: 2
     eval_split: 0.2
     resume: true
-    report_path: "/app/models/training_report.json"
-    report_plot_dir: "/app/models/reports"
-
+    report_path: /app/models/training_report.json
+    report_plot_dir: /app/models/reports
 backtest:
-  data_dir: "/data"
-  start: "2025-12-11"
-  end: "2025-12-19"
+  data_dir: /data
+  start: '2025-12-11'
+  end: '2025-12-19'
   initial_cash: 100000
   commission_pct: 0.05
   slippage_bps: 2
   use_gpu: true
-
 data:
   provider: yfinance
   symbols:
-    - "AAPL"
-    - "MSFT"
-  interval: "1m"
+  - AAPL
+  - MSFT
+  interval: 1m
   lookback_days: 7
-  start: ""
-  end: ""
-  proxy: ""
+  start: ''
+  end: ''
+  proxy: ''
   rate_limit_seconds: 2
-  output_dir: "/data"
+  output_dir: /data
   sources:
-    - provider: yfinance
-      enabled: true
-      symbols:
-        - "AAPL"
-        - "MSFT"
-      interval: "1m"
-      lookback_days: 7
-      rate_limit_seconds: 2
-    - provider: stooq
-      enabled: false
-      symbols:
-        - "eni"
-        - "pkn"
-      interval: "1d"
-      rate_limit_seconds: 2
-    - provider: alphavantage
-      enabled: false
-      api_key: "${ALPHAVANTAGE_API_KEY}"
-      symbols:
-        - "AAPL"
-        - "MSFT"
-      interval: "1d"
-      rate_limit_seconds: 15
-
+  - provider: yfinance
+    enabled: true
+    symbols:
+    - AAPL
+    - MSFT
+    interval: 1m
+    lookback_days: 7
+    rate_limit_seconds: 2
+  - provider: stooq
+    enabled: false
+    symbols:
+    - eni
+    - pkn
+    interval: 1d
+    rate_limit_seconds: 2
+  - provider: alphavantage
+    enabled: false
+    api_key: ${ALPHAVANTAGE_API_KEY}
+    symbols:
+    - AAPL
+    - MSFT
+    interval: 1d
+    rate_limit_seconds: 15
 monitoring:
   prometheus_port: 8001
-  metrics_path: "/metrics"
+  metrics_path: /metrics
