@@ -24,6 +24,7 @@ from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols
 from app.data.scanner import ScanFilters, load_universe, scan_symbols
 from app.strategies.rl_policy import RLPolicyStrategy
+from app.strategies.rl_policy_fees import FeeAwareRLPolicyStrategy
 from app.utils.market import is_market_open
 from app.utils.restart import should_restart
 from app.agents.orchestrator import StrategyOrchestrator, MLStrategyOrchestrator
@@ -81,6 +82,28 @@ class TradingAgent:
                     )
                 except FileNotFoundError as exc:
                     logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
+            return None
+        if name == "rl_policy_fees":
+            if self.learning_cfg.get("enabled"):
+                model_path = self._select_model_path()
+                window_size = int(self.learning_cfg.get("window_size", 50))
+                device = self.learning_cfg.get("device", "auto")
+                feature_config = self.learning_cfg.get("features", {})
+                broker_fees = self.cfg.get("brokers", {}).get(self._broker_name, {}).get("fees", {})
+                fee_guard = self.cfg.get("strategy", {}).get("fee_aware", {})
+                risk_cfg = self.cfg.get("risk", {})
+                try:
+                    return FeeAwareRLPolicyStrategy(
+                        model_path,
+                        window_size=window_size,
+                        device=device,
+                        feature_config=feature_config,
+                        broker_fees=broker_fees,
+                        fee_guard=fee_guard,
+                        risk_cfg=risk_cfg,
+                    )
+                except FileNotFoundError as exc:
+                    logging.warning("RL model unavailable, skipping rl_policy_fees: %s", exc)
             return None
         if name == "pattern_trading":
             return PatternTradingStrategy(self.cfg.get("pattern_trading", {}))

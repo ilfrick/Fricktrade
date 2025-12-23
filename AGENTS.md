@@ -145,6 +145,7 @@ docker compose run --rm api
 - Pattern Trading config lives under `pattern_trading` and is enabled via `strategy.name: pattern_trading`.
 - Multi-strategy config uses `strategy.names` with `strategy.combine` set to `priority` or `vote` (enabled by default in `config/config.yaml`).
 - AI strategy orchestration uses `orchestrator.*` to score strategies per symbol and select the top candidates each cycle. ML mode (`orchestrator.ml.enabled`) trains per bar with replay buffer + best-model checkpoints; default model is LSTM with `orchestrator.ml.seq_len`.
+- Fee-aware RL is available as `rl_policy_fees`, using broker-specific fee config under `brokers.<name>.fees` plus guardrails in `strategy.fee_aware`.
 - Orchestrator pretraining runs out-of-band by default (`orchestrator.ml.pretrain.in_trader: false`); use `python -m app.main pretrain-orchestrator` in Docker to warm-start the model.
 - Orchestrator learning persists per-strategy bias updates under `orchestrator.learning.state_path`, and checkpoints the best biases to `orchestrator.learning.best_state_path` for default loading.
 - Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.

@@ -93,11 +93,23 @@ brokers:
     base_url: https://paper-api.alpaca.markets
     api_key: ${ALPACA_API_KEY}
     api_secret: ${ALPACA_API_SECRET}
+    fees:
+      commission_pct: 0.0
+      per_trade_fee: 0.0
+      per_share_fee: 0.0
+      min_fee: 0.0
+      spread_pct: 0.0
   ibkr:
     enabled: false
     host: 127.0.0.1
     port: 7497
     client_id: 1
+    fees:
+      commission_pct: 0.0
+      per_trade_fee: 0.0
+      per_share_fee: 0.0
+      min_fee: 0.0
+      spread_pct: 0.0
 risk:
   max_daily_loss_pct: 2.0
   max_position_size_pct: 25.0
@@ -113,6 +125,10 @@ strategy:
   names:
   - rl_policy
   combine: vote
+  fee_aware:
+    min_edge_pct: 0.02
+    edge_multiplier: 1.0
+    min_notional: 50.0
   params:
     lookback_minutes: 30
     entry_threshold_pct: 0.8

@@ -231,6 +231,7 @@ Available strategy names:
 - `intraday_momentum`
 - `pattern_trading`
 - `rl_policy` (requires `learning.enabled: true`)
+- `rl_policy_fees` (RL policy with fee-aware guardrail)
 
 ## AI Strategy Orchestrator
 
@@ -299,6 +300,27 @@ orchestrator:
 
 Weights for the rule-based fallback live under `orchestrator.strategy_weights` and include `momentum`, `trend`,
 `volatility`, `relative_volume`, `session_gain_pct`, `spread`, and `catalyst`.
+
+## Fee-Aware RL Strategy
+
+`rl_policy_fees` wraps the RL policy with a fee guardrail based on broker-specific commission settings. Configure
+fees per broker and the guard thresholds:
+
+```yaml
+brokers:
+  alpaca:
+    fees:
+      commission_pct: 0.0
+      per_trade_fee: 0.0
+      per_share_fee: 0.0
+      min_fee: 0.0
+      spread_pct: 0.0
+strategy:
+  fee_aware:
+    min_edge_pct: 0.02
+    edge_multiplier: 1.0
+    min_notional: 50.0
+```
 
 Evaluate an existing model and regenerate charts:
 
