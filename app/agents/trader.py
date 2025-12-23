@@ -57,6 +57,7 @@ class TradingAgent:
         self._broker_name = self._resolve_broker_name()
         self._dynamic_symbols_at: datetime | None = None
         self._symbols: list[str] = []
+        self._symbols_by_strategy: dict[str, list[str]] = {}
         self._orchestrator_state: dict[str, dict[str, object]] = {}
         self._last_trade_at: datetime | None = None
         if isinstance(self._orchestrator, MLStrategyOrchestrator):
@@ -166,6 +167,11 @@ class TradingAgent:
             return None
         signals = []
         for name in self._strategy_names:
+            strategy_symbols = market_state.get("strategy_symbols", {})
+            if isinstance(strategy_symbols, dict):
+                allowed = strategy_symbols.get(name)
+                if isinstance(allowed, list) and allowed and symbol not in allowed:
+                    continue
             strategy = self._get_strategy(symbol, name)
             if not strategy:
                 continue
@@ -382,14 +388,14 @@ class TradingAgent:
                 logging.info("Restart requested; exiting trading loop.")
                 raise SystemExit(0)
             portfolio = self._get_portfolio_snapshot()
-            symbols = self._symbols
+            symbols = self._resolve_active_symbols()
             for name in self._strategy_names:
                 STRATEGY_ACTIVE.labels(strategy=name).set(1)
             BROKER_ACTIVE.labels(broker=self._broker_name).set(1)
             self._update_account_metrics()
             self._refresh_news_cache(symbols)
             self._refresh_dynamic_symbols(portfolio)
-            symbols = self._symbols
+            symbols = self._resolve_active_symbols()
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             self._refresh_open_orders_cache(symbols)
@@ -404,6 +410,7 @@ class TradingAgent:
             for sym in symbols:
                 market_state = market_data_provider(sym)
                 self._enrich_market_state(market_state, portfolio, sym)
+                market_state["strategy_symbols"] = self._symbols_by_strategy
                 self.run_once(sym, market_state)
             time.sleep(interval_seconds)
 
@@ -487,83 +494,37 @@ class TradingAgent:
         if not universe:
             return
 
-        use_pattern_filters = "pattern_trading" in self._strategy_names
-        if use_pattern_filters:
-            filters_cfg = self.cfg.get("pattern_trading", {}).get("selection", {})
-        else:
-            filters_cfg = dyn_cfg.get("filters", {})
-        price_min = float(filters_cfg.get("price_min", 1.0))
-        price_max = float(filters_cfg.get("price_max", 20.0))
-        price_max = self._apply_cash_cap(price_min, price_max, portfolio, dyn_cfg)
-        filters = ScanFilters(
-            price_min=price_min,
-            price_max=price_max,
-            relative_volume_min=float(filters_cfg.get("relative_volume_min", 2.0)),
-            premarket_gain_min_pct=float(filters_cfg.get("premarket_gain_min_pct", 5.0)),
-            min_shares_traded=float(filters_cfg.get("min_shares_traded", 1_000_000)),
-            max_spread_pct=float(filters_cfg.get("max_spread_pct", 1.0)),
-            require_catalyst=bool(filters_cfg.get("require_catalyst", use_pattern_filters)),
-            strict_spread=bool(filters_cfg.get("strict_spread", False)),
-        )
-        max_symbols = int(dyn_cfg.get("max_symbols", 50))
-        feed = dyn_cfg.get("feed", "iex")
-        timeout_seconds = int(dyn_cfg.get("timeout_seconds", 10))
-        retries = int(dyn_cfg.get("retries", 2))
-        catalyst_map = self._news_cache
-        if filters.require_catalyst:
-            catalyst_map = fetch_catalyst_symbols(
-                symbols=universe,
-                provider=self.cfg.get("news", {}).get("provider", "alpaca"),
-                base_url=self.cfg.get("news", {}).get("base_url", "https://data.alpaca.markets"),
-                api_key=self.cfg.get("news", {}).get("api_key", ""),
-                api_secret=self.cfg.get("news", {}).get("api_secret", ""),
-                lookback_hours=int(self.cfg.get("news", {}).get("lookback_hours", 12)),
-                keywords=self.cfg.get("news", {}).get("keywords", []),
-                timeout_seconds=int(self.cfg.get("news", {}).get("timeout_seconds", 10)),
-                retries=int(self.cfg.get("news", {}).get("retries", 2)),
-            )
-        candidates = scan_symbols(
+        self._symbols_by_strategy = {}
+        filters_cfg_default = dyn_cfg.get("filters", {})
+        global_candidates = self._scan_with_filters(
+            portfolio,
+            filters_cfg_default,
+            dyn_cfg,
+            api_key,
+            api_secret,
             universe,
-            api_key=api_key,
-            api_secret=api_secret,
-            feed=feed,
-            filters=filters,
-            catalyst_map=catalyst_map,
-            max_symbols=max_symbols,
-            timeout_seconds=timeout_seconds,
-            retries=retries,
         )
-        if not candidates:
-            fallback_cfg = dyn_cfg.get("fallback", {})
-            if fallback_cfg.get("enabled", False):
-                logging.info("Dynamic symbols fallback enabled; relaxing filters.")
-                fallback_filters = ScanFilters(
-                    price_min=price_min,
-                    price_max=price_max,
-                    relative_volume_min=float(fallback_cfg.get("relative_volume_min", 0.5)),
-                    premarket_gain_min_pct=float(fallback_cfg.get("premarket_gain_min_pct", 0.0)),
-                    min_shares_traded=float(fallback_cfg.get("min_shares_traded", 100_000)),
-                    max_spread_pct=float(fallback_cfg.get("max_spread_pct", 2.0)),
-                    require_catalyst=bool(fallback_cfg.get("require_catalyst", False)),
-                    strict_spread=bool(fallback_cfg.get("strict_spread", False)),
-                )
-                fallback_catalysts = self._news_cache if fallback_filters.require_catalyst else {}
-                candidates = scan_symbols(
-                    universe,
-                    api_key=api_key,
-                    api_secret=api_secret,
-                    feed=feed,
-                    filters=fallback_filters,
-                    catalyst_map=fallback_catalysts,
-                    max_symbols=max_symbols,
-                    timeout_seconds=timeout_seconds,
-                    retries=retries,
-                )
-                if candidates:
-                    logging.info("Dynamic symbols fallback found %d candidates.", len(candidates))
-        if candidates:
-            self._symbols = candidates
+        if global_candidates:
+            self._symbols_by_strategy["__global__"] = global_candidates
+        for name in self._strategy_names:
+            if name == "pattern_trading":
+                filters_cfg = self.cfg.get("pattern_trading", {}).get("selection", {})
+            else:
+                filters_cfg = filters_cfg_default
+            candidates = self._scan_with_filters(
+                portfolio,
+                filters_cfg,
+                dyn_cfg,
+                api_key,
+                api_secret,
+                universe,
+            )
+            if candidates:
+                self._symbols_by_strategy[name] = candidates
+        if self._symbols_by_strategy:
+            self._symbols = self._symbols_by_strategy.get("__global__", self._symbols)
         self._dynamic_symbols_at = now
+        return
 
     def _apply_cash_cap(self, price_min: float, price_max: float, portfolio: dict, dyn_cfg: dict) -> float:
         if not dyn_cfg.get("cash_aware", True):
@@ -591,6 +552,96 @@ class TradingAgent:
             logging.info("Dynamic symbols cash cap %.2f below price_min %.2f; keeping price_max %.2f", cap, price_min, price_max)
             return price_max
         return capped
+
+    def _resolve_active_symbols(self) -> list[str]:
+        if not self._symbols_by_strategy:
+            return self._symbols
+        merged = set()
+        for symbols in self._symbols_by_strategy.values():
+            merged.update(symbols)
+        return list(merged) if merged else self._symbols
+
+    def _scan_with_filters(
+        self,
+        portfolio: dict,
+        filters_cfg: dict,
+        dyn_cfg: dict,
+        api_key: str,
+        api_secret: str,
+        universe: list[str],
+    ) -> list[str]:
+        price_min = float(filters_cfg.get("price_min", 1.0))
+        price_max = float(filters_cfg.get("price_max", 20.0))
+        price_max = self._apply_cash_cap(price_min, price_max, portfolio, dyn_cfg)
+        filters = ScanFilters(
+            price_min=price_min,
+            price_max=price_max,
+            relative_volume_min=float(filters_cfg.get("relative_volume_min", 2.0)),
+            premarket_gain_min_pct=float(filters_cfg.get("premarket_gain_min_pct", 5.0)),
+            min_shares_traded=float(filters_cfg.get("min_shares_traded", 1_000_000)),
+            max_spread_pct=float(filters_cfg.get("max_spread_pct", 1.0)),
+            require_catalyst=bool(filters_cfg.get("require_catalyst", False)),
+            strict_spread=bool(filters_cfg.get("strict_spread", False)),
+        )
+        max_symbols = int(dyn_cfg.get("max_symbols", 50))
+        feed = dyn_cfg.get("feed", "iex")
+        timeout_seconds = int(dyn_cfg.get("timeout_seconds", 10))
+        retries = int(dyn_cfg.get("retries", 2))
+        catalyst_map = {}
+        if filters.require_catalyst:
+            catalyst_map = fetch_catalyst_symbols(
+                symbols=universe,
+                provider=self.cfg.get("news", {}).get("provider", "alpaca"),
+                base_url=self.cfg.get("news", {}).get("base_url", "https://data.alpaca.markets"),
+                api_key=self.cfg.get("news", {}).get("api_key", ""),
+                api_secret=self.cfg.get("news", {}).get("api_secret", ""),
+                lookback_hours=int(self.cfg.get("news", {}).get("lookback_hours", 12)),
+                keywords=self.cfg.get("news", {}).get("keywords", []),
+                timeout_seconds=int(self.cfg.get("news", {}).get("timeout_seconds", 10)),
+                retries=int(self.cfg.get("news", {}).get("retries", 2)),
+            )
+        candidates = scan_symbols(
+            universe,
+            api_key=api_key,
+            api_secret=api_secret,
+            feed=feed,
+            filters=filters,
+            catalyst_map=catalyst_map,
+            max_symbols=max_symbols,
+            timeout_seconds=timeout_seconds,
+            retries=retries,
+        )
+        if candidates:
+            return candidates
+        fallback_cfg = dyn_cfg.get("fallback", {})
+        if not fallback_cfg.get("enabled", False):
+            return []
+        logging.info("Dynamic symbols fallback enabled; relaxing filters.")
+        fallback_filters = ScanFilters(
+            price_min=float(fallback_cfg.get("price_min", price_min)),
+            price_max=float(fallback_cfg.get("price_max", price_max)),
+            relative_volume_min=float(fallback_cfg.get("relative_volume_min", 0.5)),
+            premarket_gain_min_pct=float(fallback_cfg.get("premarket_gain_min_pct", 0.0)),
+            min_shares_traded=float(fallback_cfg.get("min_shares_traded", 100_000)),
+            max_spread_pct=float(fallback_cfg.get("max_spread_pct", 2.0)),
+            require_catalyst=bool(fallback_cfg.get("require_catalyst", False)),
+            strict_spread=bool(fallback_cfg.get("strict_spread", False)),
+        )
+        fallback_catalysts = self._news_cache if fallback_filters.require_catalyst else {}
+        candidates = scan_symbols(
+            universe,
+            api_key=api_key,
+            api_secret=api_secret,
+            feed=feed,
+            filters=fallback_filters,
+            catalyst_map=fallback_catalysts,
+            max_symbols=max_symbols,
+            timeout_seconds=timeout_seconds,
+            retries=retries,
+        )
+        if candidates:
+            logging.info("Dynamic symbols fallback found %d candidates.", len(candidates))
+        return candidates
 
     def _enrich_market_state(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         equity = float(portfolio.get("equity", 0.0) or 0.0)

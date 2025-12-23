@@ -188,7 +188,7 @@ Session gain is configurable via `data.session_gain_mode`:
 ## Dynamic Symbols (Alpaca Scanner)
 
 Dynamic scanning is enabled by default to let the agent adapt the traded symbol list. Pattern strategy filters only
-apply when `pattern_trading` is active; other strategies use `data.dynamic_symbols.filters`.
+apply to the pattern strategy; other strategies use `data.dynamic_symbols.filters`.
 
 ```yaml
 data:
@@ -211,8 +211,8 @@ data:
       require_catalyst: false
 ```
 
-The scanner applies `pattern_trading.selection.*` filters only when `pattern_trading` is active; otherwise it uses
-`data.dynamic_symbols.filters` for price/volume/gain/spread/catalyst checks before replacing the active symbols list.
+The scanner applies `pattern_trading.selection.*` filters only for the pattern strategy; other strategies use
+`data.dynamic_symbols.filters` for price/volume/gain/spread/catalyst checks before replacing their symbol lists.
 When `cash_aware: true`, the scanner caps the maximum price using available cash. Set `cash_cap_mode: risk`
 to also respect `risk.max_position_size_pct`.
 If no candidates match the main filters, the optional `fallback` block relaxes filters to keep an affordable symbol list.

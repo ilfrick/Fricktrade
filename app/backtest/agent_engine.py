@@ -126,6 +126,7 @@ def run_agent_backtest(cfg: dict) -> BacktestResult:
             broker.current_prices[symbol] = market_state["last_price"]
             portfolio = agent._get_portfolio_snapshot()
             agent._enrich_market_state(market_state, portfolio, symbol)
+            market_state["strategy_symbols"] = getattr(agent, "_symbols_by_strategy", {})
             agent.run_once(symbol, market_state)
 
     end_value = broker.get_account()["equity"]
