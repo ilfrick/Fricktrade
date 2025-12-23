@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from app.agents.trader import TradingAgent
+from app.data.downloader import download_alpaca_bars
 
 
 @dataclass
@@ -78,9 +79,15 @@ def run_agent_backtest(cfg: dict) -> BacktestResult:
     backtest_cfg = cfg["backtest"]
     interval = data_cfg.get("interval")
     data_dir = Path(backtest_cfg["data_dir"])
+    symbols_source = str(backtest_cfg.get("symbols_source", "data"))
     symbols = data_cfg.get("symbols", [])
+    if symbols_source == "dynamic":
+        symbols = _resolve_dynamic_symbols(cfg)
     if not symbols:
         raise ValueError("No symbols configured for backtest.")
+
+    if backtest_cfg.get("download_missing_symbols", False):
+        _download_missing_bars(cfg, symbols, interval, data_dir)
 
     frames = {}
     for symbol in symbols:
@@ -163,8 +170,11 @@ def _backtest_cfg_override(cfg: dict) -> dict:
     new_cfg["data"] = dict(cfg["data"])
     new_cfg["news"] = dict(cfg.get("news", {}))
     new_cfg["data"]["dynamic_symbols"] = dict(cfg["data"].get("dynamic_symbols", {}))
-    new_cfg["data"]["dynamic_symbols"]["enabled"] = False
-    new_cfg["news"]["enabled"] = False
+    backtest_cfg = cfg.get("backtest", {})
+    dynamic_enabled = bool(backtest_cfg.get("dynamic_symbols_enabled", False))
+    news_enabled = bool(backtest_cfg.get("news_enabled", False))
+    new_cfg["data"]["dynamic_symbols"]["enabled"] = dynamic_enabled
+    new_cfg["news"]["enabled"] = news_enabled
     new_cfg["execution"] = dict(cfg.get("execution", {}))
     new_cfg["execution"]["open_orders"] = {"enabled": False}
     orchestrator_cfg = dict(cfg.get("orchestrator", {}))
@@ -176,6 +186,47 @@ def _backtest_cfg_override(cfg: dict) -> dict:
     orchestrator_cfg["ml"] = ml_cfg
     new_cfg["orchestrator"] = orchestrator_cfg
     return new_cfg
+
+
+def _resolve_dynamic_symbols(cfg: dict) -> list[str]:
+    data_cfg = cfg.get("data", {})
+    backtest_cfg = cfg.get("backtest", {})
+    symbols = data_cfg.get("symbols", [])
+    if not backtest_cfg.get("dynamic_symbols_enabled", False):
+        return symbols
+    sim_cfg = _backtest_cfg_override(cfg)
+    broker = SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"])
+    agent = TradingAgent(broker, sim_cfg)
+    agent._symbols = symbols or []
+    now = datetime.strptime(backtest_cfg["start"], "%Y-%m-%d")
+    agent._refresh_news_cache(agent._symbols, now=now)
+    portfolio = agent._get_portfolio_snapshot()
+    agent._refresh_dynamic_symbols(portfolio, now=now)
+    return agent._symbols
+
+
+def _download_missing_bars(cfg: dict, symbols: list[str], interval: str, data_dir: Path) -> None:
+    missing = []
+    for symbol in symbols:
+        path = data_dir / f"{symbol.replace('.', '_')}_{interval}.csv"
+        if not path.exists():
+            missing.append(symbol)
+    if not missing:
+        return
+    alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
+    api_key = alpaca_cfg.get("api_key", "")
+    api_secret = alpaca_cfg.get("api_secret", "")
+    backtest_cfg = cfg.get("backtest", {})
+    download_alpaca_bars(
+        missing,
+        interval=interval,
+        out_dir=str(data_dir),
+        api_key=api_key,
+        api_secret=api_secret,
+        start=backtest_cfg.get("start", ""),
+        end=backtest_cfg.get("end", ""),
+        rate_limit_seconds=int(cfg.get("data", {}).get("rate_limit_seconds", 2)),
+    )
 
 
 class _SymbolState:

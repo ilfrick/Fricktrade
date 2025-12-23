@@ -428,12 +428,12 @@ class TradingAgent:
             return
         self._orchestrator_state[symbol] = {"decisions": decisions, "last_price": last_price}
 
-    def _refresh_news_cache(self, symbols: list[str]) -> None:
+    def _refresh_news_cache(self, symbols: list[str], now: datetime | None = None) -> None:
         news_cfg = self.cfg.get("news", {})
         if not news_cfg.get("enabled", False):
             self._news_cache = {}
             return
-        now = datetime.utcnow()
+        now = now or datetime.utcnow()
         ttl_minutes = int(news_cfg.get("cache_minutes", 15))
         if self._news_cache_at and (now - self._news_cache_at).total_seconds() < ttl_minutes * 60:
             return
@@ -450,11 +450,11 @@ class TradingAgent:
         )
         self._news_cache_at = now
 
-    def _refresh_dynamic_symbols(self, portfolio: dict) -> None:
+    def _refresh_dynamic_symbols(self, portfolio: dict, now: datetime | None = None) -> None:
         dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})
         if not dyn_cfg.get("enabled", False):
             return
-        now = datetime.utcnow()
+        now = now or datetime.utcnow()
         refresh_minutes = int(dyn_cfg.get("refresh_minutes", 15))
         if self._dynamic_symbols_at and (now - self._dynamic_symbols_at).total_seconds() < refresh_minutes * 60:
             return
