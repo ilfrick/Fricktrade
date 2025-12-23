@@ -267,6 +267,23 @@ Pretraining runs out-of-band by default (`orchestrator.ml.pretrain.in_trader: fa
 docker compose run --rm trader python3 -m app.main pretrain-orchestrator --config /app/config/config.yaml
 ```
 
+For multi-year 5m pretraining, set the pretrain provider to Alpaca (yfinance intraday is capped at ~60 days):
+
+```yaml
+orchestrator:
+  ml:
+    pretrain:
+      provider: alpaca
+      alpaca_api_key: ${ALPACA_API_KEY}
+      alpaca_api_secret: ${ALPACA_API_SECRET}
+```
+
+To sweep orchestrator hyperparameters and compare against a fixed baseline:
+
+```bash
+docker compose run --rm trader python3 scripts/orchestrator_sweep.py --config /app/config/config.yaml
+```
+
 To pretrain with randomly selected Alpaca symbols, set:
 
 ```yaml
@@ -314,7 +331,7 @@ PY
 
 ### Data Ingestion
 
-Pull data from configured sources (`yfinance`, `stooq`, `alphavantage`):
+Pull data from configured sources (`yfinance`, `alpaca`, `stooq`, `alphavantage`). Alpaca supports multi-year intraday bars.
 
 ```bash
 docker compose run --rm trader python3 -m app.main ingest --config /app/config/config.yaml

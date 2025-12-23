@@ -131,10 +131,10 @@ orchestrator:
     enabled: true
     model_type: lstm
     device: auto
-    hidden_dim: 64
+    hidden_dim: 32
     dropout: 0.1
     num_layers: 1
-    seq_len: 20
+    seq_len: 10
     model_path: /data/orchestrator_model.pt
     best_model_path: /data/orchestrator_model_best.pt
     use_best_model: true
@@ -153,6 +153,9 @@ orchestrator:
     pretrain:
       enabled: true
       in_trader: false
+      provider: alpaca
+      alpaca_api_key: ${ALPACA_API_KEY}
+      alpaca_api_secret: ${ALPACA_API_SECRET}
       lookback_days: 60
       interval: 5m
       window_days: 60
@@ -243,7 +246,7 @@ learning:
     report_plot_dir: /app/models/reports
 backtest:
   data_dir: /data
-  start: '2025-12-11'
+  start: '2025-01-02'
   end: '2025-12-19'
   initial_cash: 100000
   commission_pct: 0.05
@@ -288,7 +291,7 @@ data:
   output_dir: /data
   sources:
   - provider: yfinance
-    enabled: true
+    enabled: false
     symbols:
     - AAPL
     - GOOGL
@@ -297,6 +300,17 @@ data:
     interval: 5m
     lookback_days: 7
     rate_limit_seconds: 2
+  - provider: alpaca
+    enabled: true
+    symbols:
+    - AAPL
+    - GOOGL
+    - TSLA
+    - MSFT
+    interval: 5m
+    start: '2024-12-23'
+    end: '2025-12-22'
+    rate_limit_seconds: 1
   - provider: stooq
     enabled: false
     symbols:

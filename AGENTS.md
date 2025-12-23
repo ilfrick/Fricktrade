@@ -7,7 +7,7 @@ This repo contains a Python intraday trading agent for US and EU equities (NYSE,
 - `app/main.py` is the CLI entrypoint with subcommands: `trade`, `backtest`, `download`, `api`, `train`, `online-train`, `evaluate`, `ingest`.
 - Core loop: `app/agents/trader.py` + `app/strategies/intraday_momentum.py` + `app/execution/executor.py` + `app/risk/manager.py`.
 - Broker adapters: `app/brokers/alpaca.py`, `app/brokers/ibkr.py`, abstract base in `app/brokers/base.py`.
-- Backtesting: `app/backtest/engine.py` uses `backtrader` and a simple SMA strategy.
+- Backtesting: `app/backtest/agent_engine.py` runs the real `TradingAgent` loop on CSVs; legacy SMA lives in `app/backtest/engine.py`.
 - Learning (RL): `app/learning/` for env, data loading, training, and online updates; `app/strategies/rl_policy.py` for inference.
 - Data download: `app/data/downloader.py` uses `yfinance` with retry and rate limiting.
 - API: `app/api/server.py` (FastAPI) with `/health`, `/config`, `/config/raw`, `/config/update`, `/restart`, and `/ui`.
@@ -57,10 +57,22 @@ docker compose run --rm trader python3 -m app.main download --config /app/config
 docker compose run --rm trader python3 -m app.main pretrain-orchestrator --config /app/config/config.yaml
 ```
 
+- Sweep orchestrator hyperparameters:
+
+```bash
+docker compose run --rm trader python3 scripts/orchestrator_sweep.py --config /app/config/config.yaml
+```
+
 - Backtest:
 
 ```bash
 docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml
+```
+
+- Ingest Alpaca multi-year bars (configure `data.sources` first):
+
+```bash
+docker compose run --rm trader python3 -m app.main ingest --config /app/config/config.yaml
 ```
 
 - Trade:
@@ -139,7 +151,7 @@ docker compose run --rm api
 - Models and reports are stored in `./models` via the Docker volume.
 - `learning.training.resume` controls whether training resumes from an existing model or starts fresh.
 - `learning.use_best_model` selects the best model copy (from `learning.best_model_path`) if available.
-- Data ingestion sources are configured under `data.sources`.
+- Data ingestion sources are configured under `data.sources` (supports `yfinance`, `alpaca`, `stooq`, `alphavantage`).
 - News catalysts (for Pattern Trading) are configured under `news` (default Alpaca news API).
 - Open-order tracking is configured under `execution.open_orders`.
 - Alpaca keys come from `ALPACA_API_KEY` / `ALPACA_API_SECRET` in `.env`.

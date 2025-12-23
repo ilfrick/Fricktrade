@@ -1,8 +1,13 @@
 from pathlib import Path
 import logging
 import time
+from datetime import datetime
+
 import pandas as pd
 import yfinance as yf
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 
 def _download_with_retries(
@@ -104,6 +109,81 @@ def download_yfinance(
                 data.columns = level1
             else:
                 data.columns = level0
+        ordered = ["Open", "High", "Low", "Close", "Volume"]
+        if all(col in data.columns for col in ordered):
+            data = data[ordered]
+        file_path = out_path / f"{symbol.replace('.', '_')}_{interval}.csv"
+        data.to_csv(file_path, index_label="Datetime")
+        files.append(file_path)
+        time.sleep(rate_limit_seconds)
+    return files
+
+
+def _alpaca_timeframe(interval: str) -> TimeFrame:
+    if interval.endswith("m"):
+        return TimeFrame(int(interval[:-1]), TimeFrameUnit.Minute)
+    if interval.endswith("h"):
+        return TimeFrame(int(interval[:-1]), TimeFrameUnit.Hour)
+    if interval.endswith("d"):
+        return TimeFrame(int(interval[:-1]), TimeFrameUnit.Day)
+    return TimeFrame(1, TimeFrameUnit.Day)
+
+
+def _parse_dt(value: str) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(value)
+
+
+def download_alpaca_bars(
+    symbols: list[str],
+    interval: str,
+    out_dir: str,
+    api_key: str,
+    api_secret: str,
+    start: str = "",
+    end: str = "",
+    rate_limit_seconds: int = 1,
+) -> list[Path]:
+    if not api_key or not api_secret:
+        logging.warning("Alpaca API credentials missing; skipping download")
+        return []
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    client = StockHistoricalDataClient(api_key, api_secret)
+    timeframe = _alpaca_timeframe(interval)
+    start_dt = _parse_dt(start)
+    end_dt = _parse_dt(end)
+    files = []
+    for symbol in symbols:
+        req = StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=timeframe,
+            start=start_dt,
+            end=end_dt,
+            adjustment="raw",
+        )
+        try:
+            data = client.get_stock_bars(req).df
+        except Exception as exc:
+            logging.warning("Alpaca bars download failed for %s: %s", symbol, exc)
+            time.sleep(rate_limit_seconds)
+            continue
+        if data is None or data.empty:
+            time.sleep(rate_limit_seconds)
+            continue
+        if isinstance(data.index, pd.MultiIndex):
+            data = data.copy()
+            data.index = data.index.get_level_values(-1)
+        data = data.rename(
+            columns={
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "volume": "Volume",
+            }
+        )
         ordered = ["Open", "High", "Low", "Close", "Volume"]
         if all(col in data.columns for col in ordered):
             data = data[ordered]

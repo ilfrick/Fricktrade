@@ -8,7 +8,7 @@ import time
 import pandas as pd
 import requests
 
-from app.data.downloader import download_yfinance
+from app.data.downloader import download_yfinance, download_alpaca_bars
 
 
 def _save_ohlcv(df: pd.DataFrame, out_dir: str, symbol: str, interval: str) -> Path:
@@ -96,6 +96,24 @@ def ingest_from_config(cfg: dict) -> list[Path]:
                     rate_limit_seconds=rate_limit,
                     start=source.get("start", data_cfg.get("start", "")),
                     end=source.get("end", data_cfg.get("end", "")),
+                )
+            )
+            continue
+
+        if provider == "alpaca":
+            alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
+            api_key = source.get("api_key", alpaca_cfg.get("api_key", ""))
+            api_secret = source.get("api_secret", alpaca_cfg.get("api_secret", ""))
+            files.extend(
+                download_alpaca_bars(
+                    symbols,
+                    interval=interval,
+                    out_dir=output_dir,
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    start=source.get("start", data_cfg.get("start", "")),
+                    end=source.get("end", data_cfg.get("end", "")),
+                    rate_limit_seconds=rate_limit,
                 )
             )
             continue

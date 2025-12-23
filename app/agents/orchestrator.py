@@ -65,6 +65,9 @@ class MLOrchestratorConfig:
     score_ema_alpha: float = 0.1
     pretrain_enabled: bool = True
     pretrain_in_trader: bool = False
+    pretrain_provider: str = "yfinance"
+    pretrain_alpaca_api_key: str = ""
+    pretrain_alpaca_api_secret: str = ""
     pretrain_lookback_days: int = 30
     pretrain_interval: str = "5m"
     pretrain_window_days: int = 60
@@ -286,6 +289,9 @@ class MLStrategyOrchestrator:
             score_ema_alpha=float(ml_cfg.get("score_ema_alpha", 0.1)),
             pretrain_enabled=bool(ml_cfg.get("pretrain", {}).get("enabled", True)),
             pretrain_in_trader=bool(ml_cfg.get("pretrain", {}).get("in_trader", False)),
+            pretrain_provider=str(ml_cfg.get("pretrain", {}).get("provider", "yfinance")),
+            pretrain_alpaca_api_key=str(ml_cfg.get("pretrain", {}).get("alpaca_api_key", "")),
+            pretrain_alpaca_api_secret=str(ml_cfg.get("pretrain", {}).get("alpaca_api_secret", "")),
             pretrain_lookback_days=int(ml_cfg.get("pretrain", {}).get("lookback_days", 30)),
             pretrain_interval=str(ml_cfg.get("pretrain", {}).get("interval", "5m")),
             pretrain_window_days=int(ml_cfg.get("pretrain", {}).get("window_days", 60)),
@@ -446,6 +452,7 @@ class MLStrategyOrchestrator:
     def _predict(self, features: list[float] | list[list[float]]) -> dict[str, float]:
         if not self._model:
             return {name: 0.0 for name in self._strategy_names}
+        features = self._normalize_features(features)
         vec = torch.tensor(features, dtype=torch.float32, device=self._device)
         if vec.dim() == 1:
             vec = vec.unsqueeze(0)
@@ -459,6 +466,7 @@ class MLStrategyOrchestrator:
     def _enqueue(self, features: list[float] | list[list[float]] | None, rewards: dict[str, float]) -> None:
         if features is None or not rewards:
             return
+        features = self._normalize_features(features)
         target = [rewards.get(name, 0.0) for name in self._strategy_names]
         x = torch.tensor(features, dtype=torch.float32)
         y = torch.tensor(target, dtype=torch.float32)
@@ -522,6 +530,15 @@ class MLStrategyOrchestrator:
             torch.save(self._model.state_dict(), target)
         except OSError:
             return
+
+    def _normalize_features(self, features: list[float] | list[list[float]]) -> list[float] | list[list[float]]:
+        if self.cfg.model_type != "mlp":
+            return features
+        if not features or not isinstance(features, list):
+            return features
+        if isinstance(features[0], list):
+            return features[-1]
+        return features
 
     def _load_model(self) -> bool:
         model_path = self.cfg.best_model_path if self.cfg.use_best_model else self.cfg.model_path
@@ -780,6 +797,10 @@ def _download_yf(
 
 
 def _iter_pretrain_windows(symbol: str, cfg: MLOrchestratorConfig):
+    provider = cfg.pretrain_provider
+    if provider == "alpaca":
+        yield from _iter_alpaca_pretrain_windows(symbol, cfg)
+        return
     if cfg.pretrain_interval != "5m":
         data = _download_yf(
             symbol,
@@ -795,6 +816,8 @@ def _iter_pretrain_windows(symbol: str, cfg: MLOrchestratorConfig):
     now = datetime.now(timezone.utc)
     end = now
     coverage_days = max(cfg.pretrain_coverage_days, cfg.pretrain_window_days)
+    if str(cfg.pretrain_interval).endswith("m"):
+        coverage_days = min(coverage_days, 59)
     earliest = now - timedelta(days=coverage_days)
     step = max(1, cfg.pretrain_step_days)
     window = max(1, cfg.pretrain_window_days)
@@ -807,6 +830,32 @@ def _iter_pretrain_windows(symbol: str, cfg: MLOrchestratorConfig):
             interval=cfg.pretrain_interval,
             timeout_seconds=cfg.yf_timeout_seconds,
             retries=cfg.yf_retries,
+        )
+        if data is not None:
+            yield data
+        end = end - timedelta(days=step)
+
+
+def _iter_alpaca_pretrain_windows(symbol: str, cfg: MLOrchestratorConfig):
+    api_key = cfg.pretrain_alpaca_api_key
+    api_secret = cfg.pretrain_alpaca_api_secret
+    if not api_key or not api_secret:
+        return
+    now = datetime.now(timezone.utc)
+    end = now
+    coverage_days = max(cfg.pretrain_coverage_days, cfg.pretrain_window_days)
+    earliest = now - timedelta(days=coverage_days)
+    step = max(1, cfg.pretrain_step_days)
+    window = max(1, cfg.pretrain_window_days)
+    while end > earliest:
+        start = end - timedelta(days=window)
+        data = _download_alpaca_bars_range(
+            symbol,
+            start=start,
+            end=end,
+            interval=cfg.pretrain_interval,
+            api_key=api_key,
+            api_secret=api_secret,
         )
         if data is not None:
             yield data
@@ -841,3 +890,56 @@ def _download_yf_range(
                 if attempt >= retries:
                     return None
     return None
+
+
+def _download_alpaca_bars_range(
+    symbol: str,
+    start: datetime,
+    end: datetime,
+    interval: str,
+    api_key: str,
+    api_secret: str,
+):
+    try:
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+    except Exception:
+        return None
+
+    if interval.endswith("m"):
+        timeframe = TimeFrame(int(interval[:-1]), TimeFrameUnit.Minute)
+    elif interval.endswith("h"):
+        timeframe = TimeFrame(int(interval[:-1]), TimeFrameUnit.Hour)
+    elif interval.endswith("d"):
+        timeframe = TimeFrame(int(interval[:-1]), TimeFrameUnit.Day)
+    else:
+        timeframe = TimeFrame(1, TimeFrameUnit.Day)
+
+    client = StockHistoricalDataClient(api_key, api_secret)
+    req = StockBarsRequest(
+        symbol_or_symbols=symbol,
+        timeframe=timeframe,
+        start=start,
+        end=end,
+        adjustment="raw",
+    )
+    try:
+        data = client.get_stock_bars(req).df
+    except Exception:
+        return None
+    if data is None or data.empty:
+        return None
+    if hasattr(data.index, "levels"):
+        data = data.copy()
+        data.index = data.index.get_level_values(-1)
+    data = data.rename(
+        columns={
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume",
+        }
+    )
+    return data
