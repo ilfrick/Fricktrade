@@ -117,13 +117,6 @@ risk:
   max_short_exposure_pct: 30.0
   max_positions: 20
   cooldown_seconds: 30
-  small_account:
-    enabled: true
-    max_equity: 1000
-    min_equity: 20
-    min_cash: 5
-    min_notional: 5
-    cooldown_multiplier: 1
   hard_stop_pct: 4.0
   trailing_stop_pct: 2.0
   circuit_breaker_drawdown_pct: 5.0
