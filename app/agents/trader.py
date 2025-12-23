@@ -58,6 +58,7 @@ class TradingAgent:
         self._dynamic_symbols_at: datetime | None = None
         self._symbols: list[str] = []
         self._orchestrator_state: dict[str, dict[str, object]] = {}
+        self._last_trade_at: datetime | None = None
         if isinstance(self._orchestrator, MLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -217,6 +218,15 @@ class TradingAgent:
             return None
         market_state["qty"] = qty
 
+        now = datetime.utcnow()
+        if self._is_small_account_blocked(market_state):
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="small_account_block").inc()
+            logging.info("Skipping %s for %s: small account guard", action, symbol)
+            return None
+        if self._is_cooldown_active(market_state, now):
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="cooldown").inc()
+            logging.info("Skipping %s for %s: cooldown", action, symbol)
+            return None
         if not self.risk.can_open_trade(
             exposure_pct=market_state.get("exposure_pct", 0.0),
             short_exposure_pct=market_state.get("short_exposure_pct", 0.0),
@@ -229,6 +239,7 @@ class TradingAgent:
         order_id = self.executor.execute(symbol, action, qty=qty)
         if order_id and action in ("buy", "sell"):
             TRADES.labels(symbol=symbol, side=action).inc()
+            self._last_trade_at = now
         elif action in ("buy", "sell"):
             SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_failed").inc()
         return order_id
@@ -256,6 +267,8 @@ class TradingAgent:
         if action == "buy":
             if equity <= 0 or cash <= 0:
                 return 0, "insufficient_cash"
+            if self._is_small_account_min_notional(portfolio, last_price):
+                return 0, "min_notional"
             target_value = equity * (max_pos_pct / 100.0)
             remaining_value = max(0.0, target_value - max(current_value, 0.0))
             if remaining_value <= 0:
@@ -279,6 +292,53 @@ class TradingAgent:
             return int(remaining_value // last_price), None
 
         return 0, "unsupported"
+
+    def _is_small_account_min_notional(self, portfolio: dict, last_price: float) -> bool:
+        cfg = self.cfg.get("risk", {}).get("small_account", {})
+        if not cfg.get("enabled", False):
+            return False
+        equity = float(portfolio.get("equity", 0.0) or 0.0)
+        max_equity = float(cfg.get("max_equity", 0.0))
+        if max_equity > 0 and equity > max_equity:
+            return False
+        min_notional = float(cfg.get("min_notional", 0.0))
+        if min_notional <= 0:
+            return False
+        return last_price < min_notional
+
+    def _is_small_account_blocked(self, market_state: dict) -> bool:
+        cfg = self.cfg.get("risk", {}).get("small_account", {})
+        if not cfg.get("enabled", False):
+            return False
+        portfolio = market_state.get("portfolio", {}) or {}
+        equity = float(portfolio.get("equity", 0.0) or 0.0)
+        cash = float(portfolio.get("cash", 0.0) or 0.0)
+        max_equity = float(cfg.get("max_equity", 0.0))
+        if max_equity > 0 and equity > max_equity:
+            return False
+        min_equity = float(cfg.get("min_equity", 0.0))
+        min_cash = float(cfg.get("min_cash", 0.0))
+        if min_equity > 0 and equity < min_equity:
+            return True
+        if min_cash > 0 and cash < min_cash:
+            return True
+        return False
+
+    def _is_cooldown_active(self, market_state: dict, now: datetime) -> bool:
+        cfg = self.cfg.get("risk", {})
+        cooldown = int(cfg.get("cooldown_seconds", 0))
+        if cooldown <= 0 or not self._last_trade_at:
+            return False
+        multiplier = 1.0
+        small_cfg = cfg.get("small_account", {})
+        if small_cfg.get("enabled", False):
+            portfolio = market_state.get("portfolio", {}) or {}
+            equity = float(portfolio.get("equity", 0.0) or 0.0)
+            max_equity = float(small_cfg.get("max_equity", 0.0))
+            if max_equity > 0 and equity <= max_equity:
+                multiplier = float(small_cfg.get("cooldown_multiplier", 1.0))
+        elapsed = (now - self._last_trade_at).total_seconds()
+        return elapsed < cooldown * max(multiplier, 0.0)
 
     def _resolve_strategy_names(self) -> list[str]:
         cfg = self.cfg.get("strategy", {})

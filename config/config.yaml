@@ -117,6 +117,13 @@ risk:
   max_short_exposure_pct: 30.0
   max_positions: 20
   cooldown_seconds: 120
+  small_account:
+    enabled: true
+    max_equity: 1000
+    min_equity: 50
+    min_cash: 20
+    min_notional: 20
+    cooldown_multiplier: 3
   hard_stop_pct: 4.0
   trailing_stop_pct: 2.0
   circuit_breaker_drawdown_pct: 5.0
@@ -250,7 +257,7 @@ learning:
     data_dir: /data
     interval: 1m
     timesteps: 200000
-    initial_cash: 100000
+    initial_cash: 200
     commission_pct: 0.05
     slippage_bps: 2
     eval_split: 0.2
