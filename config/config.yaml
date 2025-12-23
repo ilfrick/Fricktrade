@@ -120,6 +120,12 @@ risk:
   hard_stop_pct: 4.0
   trailing_stop_pct: 2.0
   circuit_breaker_drawdown_pct: 5.0
+trading_limits:
+  enabled: true
+  allow_shorts: false
+  enforce_account_flags: true
+  blocked_symbols: []
+  blocked_actions: []
 strategy:
   name: rl_policy
   names:
@@ -263,11 +269,12 @@ backtest:
   data_dir: /data
   start: '2025-01-02'
   end: '2025-12-19'
-  initial_cash: 100000
+  initial_cash: 200
   commission_pct: 0.05
   slippage_bps: 2
   use_gpu: true
   mode: agent
+  symbols_source: data_dir
 data:
   provider: yfinance
   symbols:

@@ -36,6 +36,7 @@ class TradingAgent:
         self.broker = broker
         self.risk = RiskManager(cfg["risk"])
         self.learning_cfg = cfg.get("learning", {})
+        self._account_snapshot: dict[str, object] = {}
         params = cfg["strategy"]["params"]
         self._strategy_params = params
         self._strategy_by_symbol: dict[str, dict[str, object]] = {}
@@ -213,6 +214,18 @@ class TradingAgent:
             return None
 
         portfolio = market_state.get("portfolio", {})
+        if self._is_account_blocked():
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="account_blocked").inc()
+            logging.info("Skipping %s for %s: account blocked", action, symbol)
+            return None
+        if self._is_action_blocked(symbol, action):
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="limit_block").inc()
+            logging.info("Skipping %s for %s: limits block action", action, symbol)
+            return None
+        if action == "sell" and not self._can_short(symbol, portfolio):
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="shorting_disabled").inc()
+            logging.info("Skipping %s for %s: shorting disabled", action, symbol)
+            return None
         if action == "sell":
             qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, reduce_pct=reduce_pct)
         else:
@@ -221,6 +234,10 @@ class TradingAgent:
             if skip_reason:
                 SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=skip_reason).inc()
                 logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
+            return None
+        if self._violates_order_limits(symbol, action, qty, last_price):
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_limit").inc()
+            logging.info("Skipping %s for %s: order limits", action, symbol)
             return None
         market_state["qty"] = qty
 
@@ -264,6 +281,9 @@ class TradingAgent:
         max_pos_pct = float(self.cfg["risk"]["max_position_size_pct"])
         max_short_pct = float(self.cfg["risk"]["max_short_exposure_pct"])
         allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
+        limits = self.cfg.get("trading_limits", {})
+        if limits.get("enabled") and not limits.get("allow_shorts", True):
+            allow_shorts = False
         cash = max(0.0, cash - self._reserved_cash(symbol, last_price))
 
         if action == "buy":
@@ -292,6 +312,63 @@ class TradingAgent:
             return int(remaining_value // last_price), None
 
         return 0, "unsupported"
+
+    def _limits_enabled(self) -> bool:
+        return bool(self.cfg.get("trading_limits", {}).get("enabled", False))
+
+    def _is_account_blocked(self) -> bool:
+        if not self._limits_enabled():
+            return False
+        limits = self.cfg.get("trading_limits", {})
+        if not limits.get("enforce_account_flags", True):
+            return False
+        account = self._account_snapshot or {}
+        for key in ("account_blocked", "trading_blocked", "trade_suspended_by_user"):
+            if str(account.get(key, "")).lower() in {"true", "1", "yes"} or account.get(key) is True:
+                return True
+        return False
+
+    def _is_action_blocked(self, symbol: str, action: str) -> bool:
+        if not self._limits_enabled():
+            return False
+        limits = self.cfg.get("trading_limits", {})
+        blocked_symbols = {s.upper() for s in limits.get("blocked_symbols", [])}
+        if symbol.upper() in blocked_symbols:
+            return True
+        blocked_actions = {str(a).lower() for a in limits.get("blocked_actions", [])}
+        return action.lower() in blocked_actions
+
+    def _can_short(self, symbol: str, portfolio: dict) -> bool:
+        limits = self.cfg.get("trading_limits", {})
+        positions = portfolio.get("positions", {})
+        current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
+        if current_qty > 0:
+            return True
+        account = self._account_snapshot or {}
+        shorting_enabled = account.get("shorting_enabled")
+        if shorting_enabled is False:
+            return False
+        if not self._limits_enabled():
+            return True
+        if not limits.get("allow_shorts", True):
+            return False
+        return True
+
+    def _violates_order_limits(self, symbol: str, action: str, qty: int, last_price: float) -> bool:
+        if not self._limits_enabled():
+            return False
+        limits = self.cfg.get("trading_limits", {})
+        max_qty = limits.get("max_order_qty")
+        if max_qty is not None and qty > float(max_qty):
+            return True
+        notional = qty * last_price
+        max_notional = limits.get("max_order_notional")
+        if max_notional is not None and notional > float(max_notional):
+            return True
+        min_notional = limits.get("min_order_notional")
+        if min_notional is not None and notional < float(min_notional):
+            return True
+        return False
 
     def _is_cooldown_active(self, market_state: dict, now: datetime) -> bool:
         cfg = self.cfg.get("risk", {})
@@ -662,6 +739,7 @@ class TradingAgent:
 
     def _get_portfolio_snapshot(self) -> dict:
         account = self.broker.get_account()
+        self._account_snapshot = account if isinstance(account, dict) else {}
         equity = cash = None
         if isinstance(account, dict):
             if "equity" in account:

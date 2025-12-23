@@ -83,6 +83,8 @@ def run_agent_backtest(cfg: dict) -> BacktestResult:
     symbols = data_cfg.get("symbols", [])
     if symbols_source == "dynamic":
         symbols = _resolve_dynamic_symbols(cfg)
+    if symbols_source == "data_dir":
+        symbols = _symbols_from_data_dir(data_dir, interval)
     if not symbols:
         raise ValueError("No symbols configured for backtest.")
 
@@ -136,6 +138,22 @@ def run_agent_backtest(cfg: dict) -> BacktestResult:
         return_pct=(end_value - start_value) / start_value * 100.0,
         trades=broker.trades,
     )
+
+
+def _symbols_from_data_dir(data_dir: Path, interval: str | None) -> list[str]:
+    if not interval:
+        return []
+    pattern = f"*_{interval}.csv"
+    symbols = []
+    for path in data_dir.glob(pattern):
+        name = path.stem
+        suffix = f"_{interval}"
+        if not name.endswith(suffix):
+            continue
+        symbol = name[: -len(suffix)]
+        if symbol:
+            symbols.append(symbol.replace("_", "."))
+    return sorted(set(symbols))
 
 
 def _load_csv(path: Path) -> pd.DataFrame:
