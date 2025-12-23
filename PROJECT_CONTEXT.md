@@ -30,6 +30,17 @@ can reload context quickly. Keep it updated when the setup changes.
 - Case 3: both RL policies enabled
 - Keep tracked configs unchanged; use temporary config copies for each run when possible.
 
+## Dev AI Filter (Dynamic Symbols)
+- Replaced heuristic scanner with AI filter (`app/data/ai_filter.py`) that scores the full Alpaca US universe.
+- AI filter trains on Alpaca historical bars (IEX feed) and stores model at `/data/ai_symbol_filter.pt`.
+- `config/config.yaml` uses `data.dynamic_symbols.ai_filter.*` and `data.symbols: []` (no default symbols).
+
+## Dev Backtest Data
+- Backtests use `/data` CSVs and `backtest.symbols_source: data_dir`.
+- Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
+
 ## Recent Tasks
 - Created dev worktree on `master` under `/path/to/Autotrader/dev`.
 - Live worktree remains on `v1.0`.
+- Added broker-aware shorting guard and dev trading limits.
+- Added AI filter for dynamic symbol selection in dev.
