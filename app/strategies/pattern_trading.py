@@ -54,7 +54,11 @@ class PatternTradingStrategy(Strategy):
         spread_pct = market_state.get("spread_pct")
         catalyst = market_state.get("catalyst", False)
 
-        if not (selection["price_min"] <= price <= selection["price_max"]):
+        price_min = selection.get("price_min", 0.0)
+        price_max = selection.get("price_max")
+        if price < price_min:
+            return False
+        if price_max is not None and price > price_max:
             return False
         if rel_vol < selection["relative_volume_min"]:
             return False

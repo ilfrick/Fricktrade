@@ -223,6 +223,7 @@ data:
 
 The scanner applies `pattern_trading.selection.*` filters only for the pattern strategy; other strategies use
 `data.dynamic_symbols.filters` for price/volume/gain/spread/catalyst checks before replacing their symbol lists.
+Maximum price is no longer capped by config; it is derived solely from available cash via `cash_aware`.
 When `cash_aware: true`, the scanner caps the maximum price using available cash. Set `cash_cap_mode: risk`
 to also respect `risk.max_position_size_pct`.
 If no candidates match the main filters, the optional `fallback` block relaxes filters to keep an affordable symbol list.

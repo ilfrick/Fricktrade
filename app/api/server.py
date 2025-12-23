@@ -173,7 +173,6 @@ _DESCRIPTIONS = {
     "data.dynamic_symbols.provider": "Dynamic symbol provider (alpaca).",
     "data.dynamic_symbols.feed": "Alpaca data feed (iex or sip).",
     "data.dynamic_symbols.filters.price_min": "Dynamic scanner min price (non-pattern strategies).",
-    "data.dynamic_symbols.filters.price_max": "Dynamic scanner max price (non-pattern strategies).",
     "data.dynamic_symbols.filters.relative_volume_min": "Dynamic scanner minimum relative volume.",
     "data.dynamic_symbols.filters.premarket_gain_min_pct": "Dynamic scanner minimum premarket/session gain percent.",
     "data.dynamic_symbols.filters.min_shares_traded": "Dynamic scanner minimum shares traded.",

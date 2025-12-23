@@ -571,8 +571,7 @@ class TradingAgent:
         universe: list[str],
     ) -> list[str]:
         price_min = float(filters_cfg.get("price_min", 1.0))
-        price_max = float(filters_cfg.get("price_max", 20.0))
-        price_max = self._apply_cash_cap(price_min, price_max, portfolio, dyn_cfg)
+        price_max = self._apply_cash_cap(price_min, float("inf"), portfolio, dyn_cfg)
         filters = ScanFilters(
             price_min=price_min,
             price_max=price_max,
