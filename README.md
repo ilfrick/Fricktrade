@@ -527,3 +527,17 @@ One-off refresh:
 ```bash
 docker compose run --rm calendar-updater python -m app.utils.holiday_update --config /app/config/config.yaml --once
 ```
+
+## History
+
+Recent changes (newest first):
+- RL-only live strategy selection (`strategy.names: [rl_policy]`) after backtests showed RL-only outperformed multi-strategy runs.
+- Added Alpaca historical ingestion for multi-year 5m data and wired ML orchestrator pretrain to use Alpaca data.
+- Added agent-aligned backtest engine so the real trading loop (strategy + orchestrator + risk + execution) is tested.
+- Added ML orchestrator (LSTM default) with online training, best-model checkpointing, and out-of-band pretraining.
+- Added dynamic symbol scanning with cash-aware caps and fallback filters.
+- Added web UI config editor and Grafana dashboards for active broker, strategies, orders, and account metrics.
+
+Highest positive impact (testing/live trading):
+- RL-only strategy in agent backtest: +25.76% return, 12 trades on the full-year run.
+- Best-model loading for RL (`learning.use_best_model: true`) keeps the highest-evaluated model in live runs.

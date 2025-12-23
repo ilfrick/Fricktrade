@@ -188,3 +188,17 @@ docker compose run --rm api
 No automated tests are present. For changes, prefer manual checks via:
 - `python -m app.main backtest` in Docker.
 - `/health` and `/config` endpoints via the `api` service.
+
+## History
+
+Recent changes (newest first):
+- Switched live strategy selection to RL-only based on backtest performance.
+- Added Alpaca historical ingestion for multi-year intraday data and ML pretrain support.
+- Added agent-aligned backtest engine for realistic strategy/orchestrator/risk testing.
+- Introduced ML orchestrator (LSTM default) with online training and best-model checkpoints.
+- Added dynamic symbol scanning with cash-aware caps and fallback filters.
+- Added web UI config editor and Grafana dashboards for broker/strategy/account visibility.
+
+Highest positive impact (testing/live trading):
+- RL-only backtest returned +25.76% with 12 trades on the full-year run.
+- Best-model loading keeps the strongest evaluated RL policy in live trading.
