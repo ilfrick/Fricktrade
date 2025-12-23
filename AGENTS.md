@@ -153,6 +153,8 @@ docker compose run --rm api
 - `learning.training.resume` controls whether training resumes from an existing model or starts fresh.
 - `learning.use_best_model` selects the best model copy (from `learning.best_model_path`) if available.
 - Data ingestion sources are configured under `data.sources` (supports `yfinance`, `alpaca`, `stooq`, `alphavantage`).
+- Dynamic scanner filters are configured under `data.dynamic_symbols.filters`, while `pattern_trading.selection` only
+  affects the pattern strategy.
 - News catalysts (for Pattern Trading) are configured under `news` (default Alpaca news API).
 - Open-order tracking is configured under `execution.open_orders`.
 - Alpaca keys come from `ALPACA_API_KEY` / `ALPACA_API_SECRET` in `.env`.

@@ -487,7 +487,11 @@ class TradingAgent:
         if not universe:
             return
 
-        filters_cfg = self.cfg.get("pattern_trading", {}).get("selection", {})
+        use_pattern_filters = "pattern_trading" in self._strategy_names
+        if use_pattern_filters:
+            filters_cfg = self.cfg.get("pattern_trading", {}).get("selection", {})
+        else:
+            filters_cfg = dyn_cfg.get("filters", {})
         price_min = float(filters_cfg.get("price_min", 1.0))
         price_max = float(filters_cfg.get("price_max", 20.0))
         price_max = self._apply_cash_cap(price_min, price_max, portfolio, dyn_cfg)
@@ -498,7 +502,7 @@ class TradingAgent:
             premarket_gain_min_pct=float(filters_cfg.get("premarket_gain_min_pct", 5.0)),
             min_shares_traded=float(filters_cfg.get("min_shares_traded", 1_000_000)),
             max_spread_pct=float(filters_cfg.get("max_spread_pct", 1.0)),
-            require_catalyst=bool(filters_cfg.get("require_catalyst", True)),
+            require_catalyst=bool(filters_cfg.get("require_catalyst", use_pattern_filters)),
             strict_spread=bool(filters_cfg.get("strict_spread", False)),
         )
         max_symbols = int(dyn_cfg.get("max_symbols", 50))

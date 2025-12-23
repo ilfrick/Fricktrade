@@ -291,6 +291,15 @@ data:
     cash_max_pct: 100
     timeout_seconds: 10
     retries: 2
+    filters:
+      price_min: 0.2
+      price_max: 20.0
+      relative_volume_min: 1.0
+      premarket_gain_min_pct: 1.0
+      min_shares_traded: 100000
+      max_spread_pct: 1.0
+      strict_spread: false
+      require_catalyst: false
     fallback:
       enabled: true
       relative_volume_min: 0.0
