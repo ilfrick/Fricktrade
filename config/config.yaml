@@ -116,14 +116,14 @@ risk:
   max_portfolio_leverage: 1.5
   max_short_exposure_pct: 30.0
   max_positions: 20
-  cooldown_seconds: 120
+  cooldown_seconds: 30
   small_account:
     enabled: true
     max_equity: 1000
-    min_equity: 50
-    min_cash: 20
-    min_notional: 20
-    cooldown_multiplier: 3
+    min_equity: 20
+    min_cash: 5
+    min_notional: 5
+    cooldown_multiplier: 1
   hard_stop_pct: 4.0
   trailing_stop_pct: 2.0
   circuit_breaker_drawdown_pct: 5.0
@@ -133,8 +133,8 @@ strategy:
   - rl_policy
   combine: vote
   fee_aware:
-    min_edge_pct: 0.02
-    edge_multiplier: 1.0
+    min_edge_pct: 0.005
+    edge_multiplier: 0.5
     min_notional: 50.0
   params:
     lookback_minutes: 30
@@ -289,7 +289,7 @@ data:
     provider: alpaca
     feed: iex
     refresh_minutes: 5
-    max_symbols: 50
+    max_symbols: 150
     max_universe: 500
     universe: alpaca_active
     cash_aware: true
@@ -360,14 +360,14 @@ news:
   retries: 2
 pattern_trading:
   selection:
-    price_min: 1.0
+    price_min: 0.2
     price_max: 20.0
-    relative_volume_min: 2.0
-    premarket_gain_min_pct: 5.0
-    min_shares_traded: 1000000
+    relative_volume_min: 1.0
+    premarket_gain_min_pct: 1.0
+    min_shares_traded: 100000
     max_spread_pct: 1.0
     strict_spread: false
-    require_catalyst: true
+    require_catalyst: false
   pattern:
     ma_periods:
     - 9
