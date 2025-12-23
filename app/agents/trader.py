@@ -36,6 +36,7 @@ class TradingAgent:
         self.broker = broker
         self.risk = RiskManager(cfg["risk"])
         self.learning_cfg = cfg.get("learning", {})
+        self._account_snapshot: dict[str, object] = {}
         params = cfg["strategy"]["params"]
         self._strategy_params = params
         self._strategy_by_symbol: dict[str, dict[str, object]] = {}
@@ -282,6 +283,9 @@ class TradingAgent:
             if current_qty > 0:
                 qty = int(current_qty * max(min(reduce_pct, 1.0), 0.0))
                 return (qty, None) if qty > 0 else (0, "position_limit")
+            account = self._account_snapshot or {}
+            if account.get("shorting_enabled") is False:
+                return 0, "short_limit"
             if not allow_shorts or equity <= 0:
                 return 0, "short_limit"
             short_limit = equity * (max_short_pct / 100.0)
@@ -663,6 +667,7 @@ class TradingAgent:
 
     def _get_portfolio_snapshot(self) -> dict:
         account = self.broker.get_account()
+        self._account_snapshot = account if isinstance(account, dict) else {}
         equity = cash = None
         if isinstance(account, dict):
             if "equity" in account:
