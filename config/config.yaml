@@ -111,8 +111,6 @@ risk:
 strategy:
   name: rl_policy
   names:
-  - intraday_momentum
-  - pattern_trading
   - rl_policy
   combine: vote
   params:
