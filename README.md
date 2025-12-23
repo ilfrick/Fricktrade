@@ -30,21 +30,26 @@ An intraday trading agent with shorting support, Alpaca + IBKR integration, conf
 flowchart LR
     subgraph Data["Market Data & Scanning"]
         YF[yfinance live data]
+        AlpacaBars[Alpaca historical bars]
         Scan[Dynamic symbol scanner]
         News[News catalyst fetcher]
     end
     subgraph Models["Model Store"]
-        ModelStore[/data models/]
+        ModelStore[/data + /app/models/]
     end
     subgraph Core["Trading Loop"]
         Trader[TradingAgent]
-        Strat[Strategies<br/>intraday_momentum / pattern_trading / rl_policy]
-        Orchestrator[AI Orchestrator]
+        Strat[Strategies<br/>rl_policy / rl_policy_fees / intraday_momentum / pattern_trading]
+        Orchestrator[Strategy Orchestrator<br/>ML + rules]
         Risk[Risk Manager]
         Exec[Execution Engine]
     end
-    subgraph Training["ML Orchestrator Pretrain"]
-        Pretrain[pretrain-orchestrator]
+    subgraph Training["Training & Pretrain"]
+        RLTrain[RL training]
+        OrchPretrain[Orchestrator pretrain]
+    end
+    subgraph Backtest["Backtesting"]
+        AgentBT[Agent backtest engine]
     end
     subgraph Broker["Broker Layer"]
         Alpaca[Alpaca]
@@ -53,19 +58,24 @@ flowchart LR
     subgraph Observability["Monitoring & Control"]
         Metrics[Prometheus Metrics]
         Grafana[Grafana Dashboard]
+        Alerting[Alertmanager]
         API[FastAPI Config/UI]
         Logs[Rotating Logs]
     end
 
     YF --> Trader
-    YF --> Pretrain
+    AlpacaBars --> RLTrain
+    AlpacaBars --> AgentBT
     Scan --> Trader
     News --> Strat
-    Pretrain --> ModelStore
+    RLTrain --> ModelStore
+    OrchPretrain --> ModelStore
     Trader --> Strat --> Orchestrator --> Risk --> Exec --> Alpaca
     Exec --> IBKR
     Orchestrator --> ModelStore
+    AgentBT --> Trader
     Trader --> Metrics --> Grafana
+    Metrics --> Alerting
     Trader --> Logs
     API <--> Trader
 ```
