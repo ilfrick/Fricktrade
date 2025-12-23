@@ -294,7 +294,7 @@ data:
     retries: 2
     filters:
       price_min: 2.0
-      price_max: 20.0
+      price_max: 100000.0
       relative_volume_min: 1.0
       premarket_gain_min_pct: 1.0
       min_shares_traded: 100000
@@ -364,7 +364,7 @@ news:
 pattern_trading:
   selection:
     price_min: 2.0
-    price_max: 20.0
+    price_max: 100000.0
     relative_volume_min: 1.0
     premarket_gain_min_pct: 1.0
     min_shares_traded: 100000
