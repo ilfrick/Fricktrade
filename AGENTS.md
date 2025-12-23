@@ -204,4 +204,5 @@ Recent changes (newest first):
 
 Highest positive impact (testing/live trading):
 - RL-only backtest returned +25.76% with 12 trades on the full-year run.
+- Dual RL strategies with per-strategy symbol lists returned +56.20% on short-window dynamic-symbol tests.
 - Best-model loading keeps the strongest evaluated RL policy in live trading.

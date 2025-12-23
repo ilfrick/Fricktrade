@@ -564,4 +564,5 @@ Recent changes (newest first):
 
 Highest positive impact (testing/live trading):
 - RL-only strategy in agent backtest: +25.76% return, 12 trades on the full-year run.
+- Dual RL strategies with per-strategy symbol lists: +56.20% return in short-window dynamic-symbol tests.
 - Best-model loading for RL (`learning.use_best_model: true`) keeps the highest-evaluated model in live runs.
