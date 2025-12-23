@@ -555,7 +555,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
-- RL-only live strategy selection (`strategy.names: [rl_policy]`) after backtests showed RL-only outperformed multi-strategy runs.
+- Deployed combined RL strategies (`rl_policy` + `rl_policy_fees`) and isolated dynamic symbol lists per strategy.
 - Added Alpaca historical ingestion for multi-year 5m data and wired ML orchestrator pretrain to use Alpaca data.
 - Added agent-aligned backtest engine so the real trading loop (strategy + orchestrator + risk + execution) is tested.
 - Added ML orchestrator (LSTM default) with online training, best-model checkpointing, and out-of-band pretraining.

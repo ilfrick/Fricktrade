@@ -195,7 +195,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
-- Switched live strategy selection to RL-only based on backtest performance.
+- Deployed combined RL strategies (`rl_policy` + `rl_policy_fees`) and isolated dynamic symbol lists per strategy.
 - Added Alpaca historical ingestion for multi-year intraday data and ML pretrain support.
 - Added agent-aligned backtest engine for realistic strategy/orchestrator/risk testing.
 - Introduced ML orchestrator (LSTM default) with online training and best-model checkpoints.
