@@ -293,7 +293,7 @@ data:
     timeout_seconds: 10
     retries: 2
     filters:
-      price_min: 1.0
+      price_min: 0.0
       relative_volume_min: 1.0
       premarket_gain_min_pct: 1.0
       min_shares_traded: 100000
@@ -362,7 +362,7 @@ news:
   retries: 2
 pattern_trading:
   selection:
-    price_min: 1.0
+    price_min: 0.0
     relative_volume_min: 1.0
     premarket_gain_min_pct: 1.0
     min_shares_traded: 100000
