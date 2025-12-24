@@ -369,7 +369,7 @@ news:
   api_key: ${ALPACA_API_KEY}
   api_secret: ${ALPACA_API_SECRET}
   lookback_hours: 12
-  cache_minutes: 15
+  cache_minutes: 1
   keywords: []
   timeout_seconds: 10
   retries: 2
