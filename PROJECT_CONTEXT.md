@@ -76,3 +76,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and restarted v2.0 services after AI filter cadence updates.
 - Enabled online updates for the AI symbol filter.
 - Rebuilt and restarted v2.0 services after enabling AI filter online updates.
+- Updated architecture diagram to reflect AI filter, ingestion, and online updates.

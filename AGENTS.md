@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Enabled online updates for the AI symbol filter (incremental retraining on refresh).
 - Increased AI filter cadence to 1 minute and raised universe cap for live scanning.
 - Added a pre-run log for the AI filter so execution is visible immediately.

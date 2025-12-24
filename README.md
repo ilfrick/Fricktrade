@@ -28,10 +28,13 @@ An intraday trading agent with shorting support, Alpaca + IBKR integration, conf
 
 ```mermaid
 flowchart LR
-    subgraph Data["Market Data & Scanning"]
+    subgraph Data["Market Data, Ingestion & Scanning"]
         YF[yfinance live data]
         AlpacaBars[Alpaca historical bars]
+        AlpacaAssets[Alpaca assets/universe]
+        Ingest[Ingest pipeline]
         Scan[Dynamic symbol scanner]
+        AIFilter[AI symbol filter<br/>online updates]
         News[News catalyst fetcher]
     end
     subgraph Models["Model Store"]
@@ -43,10 +46,12 @@ flowchart LR
         Orchestrator[Strategy Orchestrator<br/>ML + rules]
         Risk[Risk Manager]
         Exec[Execution Engine]
+        Orders[Open order tracking<br/>cancel/skip]
     end
     subgraph Training["Training & Pretrain"]
-        RLTrain[RL training]
+        RLTrain[RL training + online updates]
         OrchPretrain[Orchestrator pretrain]
+        AIFilterTrain[AI filter training]
     end
     subgraph Backtest["Backtesting"]
         AgentBT[Agent backtest engine]
@@ -66,11 +71,17 @@ flowchart LR
     YF --> Trader
     AlpacaBars --> RLTrain
     AlpacaBars --> AgentBT
+    AlpacaBars --> AIFilterTrain
+    AlpacaAssets --> Scan
+    AlpacaAssets --> AIFilter
     Scan --> Trader
+    AIFilter --> Trader
     News --> Strat
+    Ingest --> AlpacaBars
     RLTrain --> ModelStore
     OrchPretrain --> ModelStore
-    Trader --> Strat --> Orchestrator --> Risk --> Exec --> Alpaca
+    AIFilterTrain --> ModelStore
+    Trader --> Strat --> Orchestrator --> Risk --> Orders --> Exec --> Alpaca
     Exec --> IBKR
     Orchestrator --> ModelStore
     AgentBT --> Trader
@@ -566,6 +577,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Enabled online updates for the AI symbol filter (incremental retraining on refresh).
 - Increased AI filter cadence to 1 minute and raised universe cap for live scanning.
 - Added a pre-run log for the AI filter so execution is visible immediately.
