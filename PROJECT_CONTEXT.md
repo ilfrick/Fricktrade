@@ -46,3 +46,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Added AI filter for dynamic symbol selection in dev.
 - Policy: update `PROJECT_CONTEXT.md` and push to all branches after actions >10 seconds.
 - Rebuilt and redeployed all live services via Docker Compose.
+- Rebuilt and redeployed live v1 services after dashboard updates.
