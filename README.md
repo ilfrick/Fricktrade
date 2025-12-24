@@ -565,6 +565,8 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Added portfolio position metrics and Grafana table panels for holdings and pending orders.
+- Ensured held positions are always evaluated and prevented short sells when no long position.
 - Deployed combined RL strategies (`rl_policy` + `rl_policy_fees`) and isolated dynamic symbol lists per strategy.
 - Added Alpaca historical ingestion for multi-year 5m data and wired ML orchestrator pretrain to use Alpaca data.
 - Added agent-aligned backtest engine so the real trading loop (strategy + orchestrator + risk + execution) is tested.
