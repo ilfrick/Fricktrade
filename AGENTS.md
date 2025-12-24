@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Fixed trader loop indentation regression causing container restarts.
 - Updated architecture diagram to show AI filter ingesting news.
 - Added news-aware features to the AI symbol filter.
 - Synced news refresh to 1 minute to match AI filter cadence.
