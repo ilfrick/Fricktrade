@@ -16,6 +16,7 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.enums import DataFeed
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
+from app.data.news import fetch_catalyst_symbols
 
 @dataclass
 class AISymbolFilterConfig:
@@ -30,6 +31,13 @@ class AISymbolFilterConfig:
     online_learning_rate: float
     online_steps: int
     online_max_symbols: int
+    news_enabled: bool
+    news_lookback_hours: int
+    news_keywords: list[str]
+    news_timeout_seconds: int
+    news_retries: int
+    news_base_url: str
+    news_provider: str
     timeout_seconds: int
     retries: int
     objective: str
@@ -56,14 +64,15 @@ def score_symbols(
     if model is None or stats is None:
         return symbols, {s: 0.0 for s in symbols}
 
+    catalyst_map = _fetch_news_catalysts(symbols, api_key, api_secret, config)
     if config.online_enabled:
-        if _online_update_model(symbols, api_key, api_secret, config, model, stats):
+        if _online_update_model(symbols, api_key, api_secret, config, model, stats, catalyst_map):
             _save_model(model_path, model, stats)
 
     bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
     scores = {}
     for symbol, frame in bars.items():
-        features = _latest_features(frame, config.window)
+        features = _latest_features(frame, config.window, catalyst_map.get(symbol, False))
         if features is None:
             scores[symbol] = 0.0
             continue
@@ -88,6 +97,14 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     online_learning_rate = float(online_cfg.get("learning_rate", 0.001))
     online_steps = int(online_cfg.get("steps", 5))
     online_max_symbols = int(online_cfg.get("max_symbols", 200))
+    news_cfg = cfg.get("news", {}) or {}
+    news_enabled = bool(news_cfg.get("enabled", False))
+    news_lookback_hours = int(news_cfg.get("lookback_hours", 12))
+    news_keywords = list(news_cfg.get("keywords", []))
+    news_timeout_seconds = int(news_cfg.get("timeout_seconds", 10))
+    news_retries = int(news_cfg.get("retries", 2))
+    news_base_url = str(news_cfg.get("base_url", "https://data.alpaca.markets"))
+    news_provider = str(news_cfg.get("provider", "alpaca"))
     timeout_seconds = int(cfg.get("timeout_seconds", 15))
     retries = int(cfg.get("retries", 2))
     objective = str(cfg.get("objective", "return"))
@@ -104,6 +121,13 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         online_learning_rate=online_learning_rate,
         online_steps=online_steps,
         online_max_symbols=online_max_symbols,
+        news_enabled=news_enabled,
+        news_lookback_hours=news_lookback_hours,
+        news_keywords=news_keywords,
+        news_timeout_seconds=news_timeout_seconds,
+        news_retries=news_retries,
+        news_base_url=news_base_url,
+        news_provider=news_provider,
         timeout_seconds=timeout_seconds,
         retries=retries,
         objective=objective,
@@ -151,7 +175,8 @@ def _save_model(model_path: Path, model, stats: dict):
 def _train_model(symbols: list[str], api_key: str, api_secret: str, cfg: AISymbolFilterConfig):
     train_symbols = symbols[: cfg.train_max_symbols]
     bars = _fetch_bars(train_symbols, api_key, api_secret, cfg, limit_symbols=cfg.train_max_symbols)
-    features, labels = _build_training_data(bars, cfg)
+    catalyst_map = _fetch_news_catalysts(train_symbols, api_key, api_secret, cfg)
+    features, labels = _build_training_data(bars, cfg, catalyst_map)
     if features.size == 0:
         logging.warning("AI filter training skipped: no data")
         return None, None
@@ -183,12 +208,13 @@ def _online_update_model(
     cfg: AISymbolFilterConfig,
     model,
     stats: dict,
+    catalyst_map: dict[str, bool],
 ) -> bool:
     update_symbols = symbols[: cfg.online_max_symbols]
     if not update_symbols:
         return False
     bars = _fetch_bars(update_symbols, api_key, api_secret, cfg, limit_symbols=cfg.online_max_symbols)
-    features, labels = _build_training_data(bars, cfg)
+    features, labels = _build_training_data(bars, cfg, catalyst_map)
     if features.size == 0:
         logging.warning("AI filter online update skipped: no data")
         return False
@@ -271,11 +297,12 @@ def _fetch_with_retries(client: StockHistoricalDataClient, request: StockBarsReq
     return None
 
 
-def _build_training_data(bars: dict[str, pd.DataFrame], cfg: AISymbolFilterConfig):
+def _build_training_data(bars: dict[str, pd.DataFrame], cfg: AISymbolFilterConfig, catalyst_map: dict[str, bool]):
     features = []
     labels = []
-    for frame in bars.values():
-        feat, lab = _features_and_labels(frame, cfg)
+    for symbol, frame in bars.items():
+        catalyst = catalyst_map.get(symbol, False)
+        feat, lab = _features_and_labels(frame, cfg, catalyst)
         if feat.size == 0:
             continue
         if cfg.max_samples_per_symbol and feat.shape[0] > cfg.max_samples_per_symbol:
@@ -288,7 +315,7 @@ def _build_training_data(bars: dict[str, pd.DataFrame], cfg: AISymbolFilterConfi
     return np.vstack(features), np.concatenate(labels)
 
 
-def _features_and_labels(frame: pd.DataFrame, cfg: AISymbolFilterConfig):
+def _features_and_labels(frame: pd.DataFrame, cfg: AISymbolFilterConfig, catalyst: bool):
     if frame is None or frame.empty:
         return np.empty((0, 0)), np.empty((0,))
     close = frame["close"].astype(float).values
@@ -301,12 +328,12 @@ def _features_and_labels(frame: pd.DataFrame, cfg: AISymbolFilterConfig):
     for idx in range(cfg.window, len(returns) - 1):
         window_ret = returns[idx - cfg.window : idx]
         window_vol = volume[idx - cfg.window : idx]
-        feat_rows.append(_feature_vector(window_ret, window_vol))
+        feat_rows.append(_feature_vector(window_ret, window_vol, catalyst))
         labels.append(_target_value(returns[idx + 1], window_vol, cfg.objective))
     return np.array(feat_rows, dtype=float), np.array(labels, dtype=float)
 
 
-def _latest_features(frame: pd.DataFrame, window: int):
+def _latest_features(frame: pd.DataFrame, window: int, catalyst: bool):
     if frame is None or frame.empty:
         return None
     close = frame["close"].astype(float).values
@@ -316,10 +343,10 @@ def _latest_features(frame: pd.DataFrame, window: int):
         return None
     window_ret = returns[-window:]
     window_vol = volume[-window:]
-    return _feature_vector(window_ret, window_vol)
+    return _feature_vector(window_ret, window_vol, catalyst)
 
 
-def _feature_vector(returns: np.ndarray, volume: np.ndarray) -> np.ndarray:
+def _feature_vector(returns: np.ndarray, volume: np.ndarray, catalyst: bool) -> np.ndarray:
     mean_ret = float(np.mean(returns))
     std_ret = float(np.std(returns))
     momentum = float(np.sum(returns))
@@ -327,7 +354,8 @@ def _feature_vector(returns: np.ndarray, volume: np.ndarray) -> np.ndarray:
     vol_mean = float(np.mean(volume)) if volume.size else 0.0
     vol_std = float(np.std(volume)) if volume.size else 0.0
     vol_z = (float(volume[-1]) - vol_mean) / vol_std if vol_std else 0.0
-    return np.array([mean_ret, std_ret, momentum, last_ret, vol_z], dtype=float)
+    catalyst_flag = 1.0 if catalyst else 0.0
+    return np.array([mean_ret, std_ret, momentum, last_ret, vol_z, catalyst_flag], dtype=float)
 
 
 def _target_value(next_return: float, volume_window: np.ndarray, objective: str) -> float:
@@ -381,3 +409,24 @@ def _map_feed(feed: str) -> DataFeed:
     if feed.lower() == "sip":
         return DataFeed.SIP
     return DataFeed.IEX
+
+
+def _fetch_news_catalysts(
+    symbols: list[str],
+    api_key: str,
+    api_secret: str,
+    cfg: AISymbolFilterConfig,
+) -> dict[str, bool]:
+    if not cfg.news_enabled:
+        return {}
+    return fetch_catalyst_symbols(
+        symbols=symbols,
+        provider=cfg.news_provider,
+        base_url=cfg.news_base_url,
+        api_key=api_key,
+        api_secret=api_secret,
+        lookback_hours=cfg.news_lookback_hours,
+        keywords=cfg.news_keywords,
+        timeout_seconds=cfg.news_timeout_seconds,
+        retries=cfg.news_retries,
+    )
