@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Enabled GPU acceleration for the AI symbol filter when CUDA is available.
 - Fixed trader loop indentation regression causing container restarts.
 - Updated architecture diagram to show AI filter ingesting news.
 - Added news-aware features to the AI symbol filter.

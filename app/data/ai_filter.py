@@ -139,7 +139,8 @@ def _load_model(model_path: Path, retrain_hours: int):
     if not model_path.exists():
         return None, None
     try:
-        payload = torch.load(model_path, map_location="cpu")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        payload = torch.load(model_path, map_location=device)
     except Exception as exc:
         logging.warning("AI filter model load failed: %s", exc)
         return None, None
@@ -150,6 +151,7 @@ def _load_model(model_path: Path, retrain_hours: int):
             return None, None
     model = torch.nn.Linear(payload["input_dim"], 1)
     model.load_state_dict(payload["state_dict"])
+    model.to(device)
     model.eval()
     stats = {
         "mean": payload.get("mean"),
@@ -160,9 +162,10 @@ def _load_model(model_path: Path, retrain_hours: int):
 
 
 def _save_model(model_path: Path, model, stats: dict):
+    state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
     payload = {
         "input_dim": model.in_features,
-        "state_dict": model.state_dict(),
+        "state_dict": state_dict,
         "mean": stats.get("mean"),
         "std": stats.get("std"),
         "objective": stats.get("objective"),
@@ -173,6 +176,7 @@ def _save_model(model_path: Path, model, stats: dict):
 
 
 def _train_model(symbols: list[str], api_key: str, api_secret: str, cfg: AISymbolFilterConfig):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     train_symbols = symbols[: cfg.train_max_symbols]
     bars = _fetch_bars(train_symbols, api_key, api_secret, cfg, limit_symbols=cfg.train_max_symbols)
     catalyst_map = _fetch_news_catalysts(train_symbols, api_key, api_secret, cfg)
@@ -184,9 +188,9 @@ def _train_model(symbols: list[str], api_key: str, api_secret: str, cfg: AISymbo
     std = features.std(axis=0)
     std = np.where(std == 0, 1.0, std)
     features = (features - mean) / std
-    x = torch.tensor(features, dtype=torch.float32)
-    y = torch.tensor(labels, dtype=torch.float32).view(-1, 1)
-    model = torch.nn.Linear(x.shape[1], 1)
+    x = torch.tensor(features, dtype=torch.float32, device=device)
+    y = torch.tensor(labels, dtype=torch.float32, device=device).view(-1, 1)
+    model = torch.nn.Linear(x.shape[1], 1).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     loss_fn = torch.nn.MSELoss()
     model.train()
@@ -210,6 +214,7 @@ def _online_update_model(
     stats: dict,
     catalyst_map: dict[str, bool],
 ) -> bool:
+    device = next(model.parameters()).device
     update_symbols = symbols[: cfg.online_max_symbols]
     if not update_symbols:
         return False
@@ -231,8 +236,8 @@ def _online_update_model(
         stats["mean"] = mean.tolist()
         stats["std"] = std.tolist()
     stats.setdefault("objective", cfg.objective)
-    x = torch.tensor(features, dtype=torch.float32)
-    y = torch.tensor(labels, dtype=torch.float32).view(-1, 1)
+    x = torch.tensor(features, dtype=torch.float32, device=device)
+    y = torch.tensor(labels, dtype=torch.float32, device=device).view(-1, 1)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.online_learning_rate)
     loss_fn = torch.nn.MSELoss()
     model.train()
@@ -382,7 +387,7 @@ def _predict(model, stats: dict, features: np.ndarray) -> float:
     std = np.array(stats.get("std", []), dtype=float)
     if mean.size and std.size:
         features = (features - mean) / std
-    x = torch.tensor(features, dtype=torch.float32).view(1, -1)
+    x = torch.tensor(features, dtype=torch.float32, device=next(model.parameters()).device).view(1, -1)
     with torch.no_grad():
         score = model(x).item()
     if math.isnan(score) or math.isinf(score):
