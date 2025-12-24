@@ -26,6 +26,10 @@ class AISymbolFilterConfig:
     model_path: str
     train_max_symbols: int
     max_samples_per_symbol: int
+    online_enabled: bool
+    online_learning_rate: float
+    online_steps: int
+    online_max_symbols: int
     timeout_seconds: int
     retries: int
     objective: str
@@ -52,6 +56,10 @@ def score_symbols(
     if model is None or stats is None:
         return symbols, {s: 0.0 for s in symbols}
 
+    if config.online_enabled:
+        if _online_update_model(symbols, api_key, api_secret, config, model, stats):
+            _save_model(model_path, model, stats)
+
     bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
     scores = {}
     for symbol, frame in bars.items():
@@ -75,6 +83,11 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     model_path = str(cfg.get("model_path", "/data/ai_symbol_filter.pt"))
     train_max_symbols = int(cfg.get("train_max_symbols", 300))
     max_samples_per_symbol = int(cfg.get("max_samples_per_symbol", 200))
+    online_cfg = cfg.get("online", {}) or {}
+    online_enabled = bool(online_cfg.get("enabled", False))
+    online_learning_rate = float(online_cfg.get("learning_rate", 0.001))
+    online_steps = int(online_cfg.get("steps", 5))
+    online_max_symbols = int(online_cfg.get("max_symbols", 200))
     timeout_seconds = int(cfg.get("timeout_seconds", 15))
     retries = int(cfg.get("retries", 2))
     objective = str(cfg.get("objective", "return"))
@@ -87,6 +100,10 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         model_path=model_path,
         train_max_symbols=train_max_symbols,
         max_samples_per_symbol=max_samples_per_symbol,
+        online_enabled=online_enabled,
+        online_learning_rate=online_learning_rate,
+        online_steps=online_steps,
+        online_max_symbols=online_max_symbols,
         timeout_seconds=timeout_seconds,
         retries=retries,
         objective=objective,
@@ -157,6 +174,54 @@ def _train_model(symbols: list[str], api_key: str, api_secret: str, cfg: AISymbo
     model.eval()
     stats = {"mean": mean.tolist(), "std": std.tolist(), "objective": cfg.objective}
     return model, stats
+
+
+def _online_update_model(
+    symbols: list[str],
+    api_key: str,
+    api_secret: str,
+    cfg: AISymbolFilterConfig,
+    model,
+    stats: dict,
+) -> bool:
+    update_symbols = symbols[: cfg.online_max_symbols]
+    if not update_symbols:
+        return False
+    bars = _fetch_bars(update_symbols, api_key, api_secret, cfg, limit_symbols=cfg.online_max_symbols)
+    features, labels = _build_training_data(bars, cfg)
+    if features.size == 0:
+        logging.warning("AI filter online update skipped: no data")
+        return False
+    mean = np.array(stats.get("mean") or [], dtype=float)
+    std = np.array(stats.get("std") or [], dtype=float)
+    if mean.size and std.size:
+        std = np.where(std == 0, 1.0, std)
+        features = (features - mean) / std
+    else:
+        mean = features.mean(axis=0)
+        std = features.std(axis=0)
+        std = np.where(std == 0, 1.0, std)
+        features = (features - mean) / std
+        stats["mean"] = mean.tolist()
+        stats["std"] = std.tolist()
+    stats.setdefault("objective", cfg.objective)
+    x = torch.tensor(features, dtype=torch.float32)
+    y = torch.tensor(labels, dtype=torch.float32).view(-1, 1)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.online_learning_rate)
+    loss_fn = torch.nn.MSELoss()
+    model.train()
+    last_loss = None
+    for _ in range(cfg.online_steps):
+        optimizer.zero_grad()
+        pred = model(x)
+        loss = loss_fn(pred, y)
+        loss.backward()
+        optimizer.step()
+        last_loss = float(loss.item())
+    model.eval()
+    if last_loss is not None:
+        logging.info("AI filter online update complete; loss=%.6f samples=%d", last_loss, len(labels))
+    return True
 
 
 def _fetch_bars(

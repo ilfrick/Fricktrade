@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Enabled online updates for the AI symbol filter (incremental retraining on refresh).
 - Increased AI filter cadence to 1 minute and raised universe cap for live scanning.
 - Added a pre-run log for the AI filter so execution is visible immediately.
 - Added AI filter heartbeat logging every 30s after a successful run.

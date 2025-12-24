@@ -304,6 +304,11 @@ data:
       model_path: /data/ai_symbol_filter.pt
       train_max_symbols: 300
       max_samples_per_symbol: 200
+      online:
+        enabled: true
+        learning_rate: 0.001
+        steps: 5
+        max_symbols: 200
       timeout_seconds: 15
       retries: 2
       feed: iex
