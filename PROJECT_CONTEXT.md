@@ -50,3 +50,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and redeployed live v1 services to apply Grafana table fixes.
 - Rebuilt and redeployed live v1 services to apply Open Orders axis scaling.
 - Rebuilt and redeployed live v1 services to apply autoscale changes on time series panels.
+- Enabled Grafana provisioning reloads and restarted Grafana for live and dev stacks.
