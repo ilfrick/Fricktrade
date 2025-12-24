@@ -578,6 +578,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Added learner lock heartbeats during training/sleep to prevent CPU/GPU contention.
 - Enforced exclusive learner execution with GPU preference for online training.
 - Added AI filter device logging for GPU/CPU confirmation.
 - Enabled GPU acceleration for the AI symbol filter when CUDA is available.
