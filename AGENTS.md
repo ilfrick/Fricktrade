@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Added AI filter device logging for GPU/CPU confirmation.
 - Enabled GPU acceleration for the AI symbol filter when CUDA is available.
 - Fixed trader loop indentation regression causing container restarts.
 - Updated architecture diagram to show AI filter ingesting news.
