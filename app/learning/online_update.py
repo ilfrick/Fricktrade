@@ -113,7 +113,11 @@ def run_online_updates(cfg: dict) -> None:
     while True:
         ok, owner = _ensure_exclusive(cfg)
         if not ok:
-            return
+            if should_restart(started_at):
+                logging.info("Restart requested; exiting online updates.")
+                break
+            time.sleep(60)
+            continue
         if should_restart(started_at):
             logging.info("Restart requested; exiting online updates.")
             break
