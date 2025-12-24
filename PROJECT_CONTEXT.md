@@ -94,6 +94,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Added online learner lock heartbeats during training/sleep to keep GPU ownership.
 - Rebuilt and restarted v2.0 learner and learner-gpu containers after lock heartbeat changes.
 - Kept inactive learners idling instead of exiting to prevent restart loops.
+- Rebuilt and restarted v2.0 learner and learner-gpu containers after idle-loop change.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
