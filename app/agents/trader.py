@@ -12,6 +12,8 @@ from app.monitoring.metrics import (
     ACCOUNT_TOTAL,
     ACCOUNT_CASH,
     ACCOUNT_INVESTED,
+    POSITION_QTY,
+    POSITION_VALUE,
     SYMBOL_ACTIVE,
     STRATEGY_ACTIVE,
     ORCHESTRATOR_STRATEGY_ACTIVE,
@@ -62,6 +64,7 @@ class TradingAgent:
         self._symbols_by_strategy: dict[str, list[str]] = {}
         self._orchestrator_state: dict[str, dict[str, object]] = {}
         self._last_trade_at: datetime | None = None
+        self._position_symbols: set[str] = set()
         if isinstance(self._orchestrator, MLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -452,6 +455,23 @@ class TradingAgent:
         ACCOUNT_CASH.set(cash_val)
         ACCOUNT_INVESTED.set(total_val - cash_val)
 
+    def _update_position_metrics(self, portfolio: dict) -> None:
+        positions = portfolio.get("positions", {})
+        current = set()
+        for symbol, pos in positions.items():
+            qty = float(pos.get("qty", 0.0) or 0.0)
+            value = float(pos.get("value", 0.0) or 0.0)
+            if qty == 0 and value == 0:
+                continue
+            POSITION_QTY.labels(symbol=symbol).set(qty)
+            POSITION_VALUE.labels(symbol=symbol).set(value)
+            current.add(symbol)
+        removed = self._position_symbols - current
+        for symbol in removed:
+            POSITION_QTY.labels(symbol=symbol).set(0)
+            POSITION_VALUE.labels(symbol=symbol).set(0)
+        self._position_symbols = current
+
     def loop(self, symbol: str | list[str], market_data_provider, interval_seconds: int = 60):
         self._symbols = symbol if isinstance(symbol, list) else [symbol]
         while True:
@@ -464,6 +484,7 @@ class TradingAgent:
                 STRATEGY_ACTIVE.labels(strategy=name).set(1)
             BROKER_ACTIVE.labels(broker=self._broker_name).set(1)
             self._update_account_metrics()
+            self._update_position_metrics(portfolio)
             self._refresh_news_cache(symbols)
             self._refresh_dynamic_symbols(portfolio)
             symbols = self._resolve_active_symbols()
