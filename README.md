@@ -566,6 +566,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Added AI filter heartbeat logging every 30s after a successful run.
 - Added logging when the AI symbol filter runs so live usage is visible in logs.
 - Ported dev run artifacts (backtest and ingest outputs) into v2.0 for traceability.
 - Added Alpaca ingestion support to load a full universe when symbols are omitted; added saved backtest case configs.
