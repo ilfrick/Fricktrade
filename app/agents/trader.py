@@ -648,6 +648,11 @@ class TradingAgent:
         ai_cfg = dyn_cfg.get("ai_filter", {})
         if ai_cfg.get("enabled", False) and score_symbols is not None:
             ordered, scores = score_symbols(universe, api_key, api_secret, ai_cfg)
+            logging.info(
+                "AI filter scored %d symbols (enabled); top=%s",
+                len(ordered),
+                ",".join(ordered[:5]),
+            )
             if not ordered:
                 ordered = list(universe)
             self._symbols_by_strategy["__global__"] = ordered
