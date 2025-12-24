@@ -4,11 +4,11 @@ This file captures the key state and workflows for this repo so a new Codex sess
 can reload context quickly. Keep it updated when the setup changes.
 
 ## Worktrees and Branches
-- Live worktree: `/path/to/Autotrader` on branch `v1.0`
+- Live worktree: `/path/to/Autotrader` on branch `v2.0`
 - Dev worktree: `/path/to/Autotrader/dev` on branch `master` (created via `git worktree`)
 
 ## Dev vs Live Intent
-- Live (v1.0) is running and trading.
+- Live (v2.0) is running and trading.
 - Dev is for development and backtesting only; no live broker credentials.
 - `dev/.env` exists and is based on `.env.example` with empty broker keys.
 
@@ -91,6 +91,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and restarted v2.0 services after adding AI filter device logging.
 - Added exclusive online learner lock with GPU preference.
 - Rebuilt and restarted v2.0 services after enforcing exclusive learner lock.
+- Added online learner lock heartbeats during training/sleep to keep GPU ownership.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
