@@ -43,3 +43,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and redeployed live v1 services to apply autoscale changes on time series panels.
 - Enabled Grafana provisioning reloads and restarted Grafana for live and dev stacks.
 - Rebuilt and redeployed live v1 services after enabling the pending-order strategy guard.
+- Rebuilt and redeployed live v1 services after clearing stale open-order metrics.
