@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Enforced exclusive learner execution with GPU preference for online training.
 - Added AI filter device logging for GPU/CPU confirmation.
 - Enabled GPU acceleration for the AI symbol filter when CUDA is available.
 - Fixed trader loop indentation regression causing container restarts.

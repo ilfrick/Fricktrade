@@ -89,6 +89,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and restarted v2.0 services after enabling GPU AI filter acceleration.
 - Added AI filter device logging for GPU/CPU confirmation.
 - Rebuilt and restarted v2.0 services after adding AI filter device logging.
+- Added exclusive online learner lock with GPU preference.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
