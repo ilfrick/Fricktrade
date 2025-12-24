@@ -69,6 +69,9 @@ class TradingAgent:
         self._orchestrator_state: dict[str, dict[str, object]] = {}
         self._last_trade_at: datetime | None = None
         self._position_symbols: set[str] = set()
+        self._ai_filter_last_run_at: datetime | None = None
+        self._ai_filter_last_log_at: datetime | None = None
+        self._ai_filter_last_count: int = 0
         if isinstance(self._orchestrator, MLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -533,6 +536,7 @@ class TradingAgent:
             self._update_position_metrics(portfolio)
             self._refresh_news_cache(symbols)
             self._refresh_dynamic_symbols(portfolio)
+            self._log_ai_filter_heartbeat()
             symbols = self._resolve_active_symbols()
             symbols = self._merge_symbols_with_positions(symbols, portfolio)
             for sym in symbols:
@@ -563,6 +567,28 @@ class TradingAgent:
             if qty != 0:
                 merged.add(symbol)
         return list(merged)
+
+    def _log_ai_filter_heartbeat(self) -> None:
+        dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})
+        ai_cfg = dyn_cfg.get("ai_filter", {})
+        if not ai_cfg.get("enabled", False) or score_symbols is None:
+            return
+        now = datetime.utcnow()
+        if self._ai_filter_last_run_at is None:
+            return
+        last_log = self._ai_filter_last_log_at
+        if last_log and (now - last_log).total_seconds() < 30:
+            return
+        refresh_minutes = int(dyn_cfg.get("refresh_minutes", 15))
+        if (now - self._ai_filter_last_run_at).total_seconds() > refresh_minutes * 60:
+            return
+        age_sec = int((now - self._ai_filter_last_run_at).total_seconds())
+        logging.info(
+            "AI filter heartbeat ok; last_run_sec=%d symbols=%d",
+            age_sec,
+            self._ai_filter_last_count,
+        )
+        self._ai_filter_last_log_at = now
 
     def _update_orchestrator(self, symbol: str, market_state: dict) -> None:
         if isinstance(self._orchestrator, MLStrategyOrchestrator):
@@ -653,6 +679,8 @@ class TradingAgent:
                 len(ordered),
                 ",".join(ordered[:5]),
             )
+            self._ai_filter_last_run_at = now
+            self._ai_filter_last_count = len(ordered)
             if not ordered:
                 ordered = list(universe)
             self._symbols_by_strategy["__global__"] = ordered
