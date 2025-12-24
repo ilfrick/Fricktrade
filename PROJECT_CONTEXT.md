@@ -60,3 +60,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Stopped the dev backtest container so only the live v2.0 agent runs.
 - Stopped the old GPU learner container and restarted the v2.0 stack so only v2.0 services remain.
 - Added a safe fallback when the AI filter module is missing to keep live services from crashing.
+- Rebuilt and restarted v2.0 services after guarding the AI filter import.
