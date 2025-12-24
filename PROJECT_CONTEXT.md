@@ -75,3 +75,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Raised the AI filter universe cap and set refresh interval to 1 minute.
 - Rebuilt and restarted v2.0 services after AI filter cadence updates.
 - Enabled online updates for the AI symbol filter.
+- Rebuilt and restarted v2.0 services after enabling AI filter online updates.
