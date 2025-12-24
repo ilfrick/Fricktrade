@@ -577,6 +577,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Added logging for news catalyst cache refreshes.
 - Increased AI filter online update steps and max symbols for continuous training.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Enabled online updates for the AI symbol filter (incremental retraining on refresh).

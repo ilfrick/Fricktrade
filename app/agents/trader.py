@@ -534,9 +534,10 @@ class TradingAgent:
             BROKER_ACTIVE.labels(broker=self._broker_name).set(1)
             self._update_account_metrics()
             self._update_position_metrics(portfolio)
-            self._refresh_news_cache(symbols)
-            self._refresh_dynamic_symbols(portfolio)
-            self._log_ai_filter_heartbeat()
+        self._refresh_news_cache(symbols)
+        self._log_news_cache()
+        self._refresh_dynamic_symbols(portfolio)
+        self._log_ai_filter_heartbeat()
             symbols = self._resolve_active_symbols()
             symbols = self._merge_symbols_with_positions(symbols, portfolio)
             for sym in symbols:
@@ -647,6 +648,15 @@ class TradingAgent:
             retries=int(news_cfg.get("retries", 2)),
         )
         self._news_cache_at = now
+
+    def _log_news_cache(self) -> None:
+        news_cfg = self.cfg.get("news", {})
+        if not news_cfg.get("enabled", False):
+            return
+        if self._news_cache_at is None:
+            return
+        count = len(self._news_cache)
+        logging.info("News catalyst cache updated; symbols=%d", count)
 
     def _refresh_dynamic_symbols(self, portfolio: dict, now: datetime | None = None) -> None:
         dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})
