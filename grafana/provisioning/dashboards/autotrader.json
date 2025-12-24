@@ -376,11 +376,15 @@
       "targets": [
         {
           "expr": "position_qty",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "format": "table"
         },
         {
           "expr": "position_value",
-          "refId": "B"
+          "refId": "B",
+          "instant": true,
+          "format": "table"
         }
       ],
       "options": {
@@ -395,6 +399,12 @@
         "overrides": []
       },
       "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
         {
           "id": "joinByField",
           "options": {
@@ -416,7 +426,9 @@
       "targets": [
         {
           "expr": "open_orders",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "format": "table"
         }
       ],
       "options": {
@@ -429,7 +441,15 @@
           }
         },
         "overrides": []
-      }
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        }
+      ]
     }
   ]
 }
