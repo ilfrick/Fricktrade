@@ -48,3 +48,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and redeployed all live services via Docker Compose.
 - Rebuilt and redeployed live v1 services after dashboard updates.
 - Rebuilt and redeployed live v1 services to apply Grafana table fixes.
+- Rebuilt and redeployed live v1 services to apply Open Orders axis scaling.
