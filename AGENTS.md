@@ -196,6 +196,8 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Added strategy-level pending-order guard to skip signal evaluation while orders are open.
+- Added pending-order cancel/replace logic and broker order cancellation support.
 - Forced Grafana to reload provisioned dashboards for consistent axis autoscaling.
 - Added AI-driven symbol scoring for full Alpaca US universe selection in dev.
 - Added portfolio position metrics and Grafana table panels for holdings and pending orders.

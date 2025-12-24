@@ -267,8 +267,8 @@ learning:
     report_plot_dir: /app/models/reports
 backtest:
   data_dir: /data
-  start: '2025-01-02'
-  end: '2025-12-19'
+  start: '2025-10-23'
+  end: '2025-12-22'
   initial_cash: 200
   commission_pct: 0.05
   slippage_bps: 2
@@ -277,11 +277,7 @@ backtest:
   symbols_source: data_dir
 data:
   provider: yfinance
-  symbols:
-  - AAPL
-  - GOOGL
-  - TSLA
-  - MSFT
+  symbols: []
   interval: 5m
   lookback_days: 7
   session_gain_mode: gap
@@ -291,7 +287,7 @@ data:
     feed: iex
     refresh_minutes: 5
     max_symbols: 150
-    max_universe: 500
+    max_universe: 10000
     universe: alpaca_active
     cash_aware: true
     cash_buffer_pct: 95
@@ -299,6 +295,19 @@ data:
     cash_max_pct: 100
     timeout_seconds: 10
     retries: 2
+    ai_filter:
+      enabled: true
+      interval: 5m
+      lookback_days: 30
+      window: 20
+      retrain_hours: 6
+      model_path: /data/ai_symbol_filter.pt
+      train_max_symbols: 300
+      max_samples_per_symbol: 200
+      timeout_seconds: 15
+      retries: 2
+      feed: iex
+      objective: return
     filters:
       price_min: 0.0
       relative_volume_min: 1.0
@@ -322,23 +331,17 @@ data:
   sources:
   - provider: yfinance
     enabled: false
-    symbols:
-    - AAPL
-    - GOOGL
-    - TSLA
-    - MSFT
+    symbols: []
     interval: 5m
     lookback_days: 7
     rate_limit_seconds: 2
   - provider: alpaca
     enabled: true
-    symbols:
-    - AAPL
-    - GOOGL
-    - TSLA
-    - MSFT
+    symbols: []
+    universe: alpaca_active
+    max_universe: 10000
     interval: 5m
-    start: '2024-12-23'
+    start: '2025-10-23'
     end: '2025-12-22'
     rate_limit_seconds: 1
   - provider: stooq
@@ -351,9 +354,7 @@ data:
   - provider: alphavantage
     enabled: false
     api_key: ${ALPHAVANTAGE_API_KEY}
-    symbols:
-    - AAPL
-    - MSFT
+    symbols: []
     interval: 5m
     rate_limit_seconds: 15
 news:
@@ -393,6 +394,7 @@ execution:
     enabled: true
     interval_seconds: 30
     skip_if_pending: true
+    strategy_guard: true
 monitoring:
   prometheus_port: 8001
   metrics_path: /metrics
