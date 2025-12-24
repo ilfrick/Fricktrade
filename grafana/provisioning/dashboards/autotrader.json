@@ -3,7 +3,7 @@
   "uid": "autotrader",
   "title": "Autotrader Overview",
   "schemaVersion": 38,
-  "version": 2,
+  "version": 3,
   "refresh": "10s",
   "timezone": "browser",
   "panels": [
