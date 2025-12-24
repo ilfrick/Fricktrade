@@ -57,6 +57,7 @@ class TradingAgent:
             self._orchestrator = StrategyOrchestrator(orchestrator_cfg)
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
+        self._open_orders_labels: set[tuple[str, str]] = set()
         self._broker_name = self._resolve_broker_name()
         self._dynamic_symbols_at: datetime | None = None
         self._symbols: list[str] = []
@@ -801,7 +802,7 @@ class TradingAgent:
         self._update_open_orders_metrics(symbols)
 
     def _update_open_orders_metrics(self, symbols: list[str]) -> None:
-        self._reset_open_orders_metrics(symbols)
+        previous_labels = set(self._open_orders_labels)
         counts: dict[tuple[str, str], int] = {}
         for order in self._open_orders_cache:
             symbol = order.get("symbol")
@@ -810,13 +811,23 @@ class TradingAgent:
                 continue
             key = (symbol, side)
             counts[key] = counts.get(key, 0) + 1
+        new_labels = set(counts.keys())
+        for symbol, side in previous_labels - new_labels:
+            try:
+                OPEN_ORDERS.remove(symbol, side)
+            except ValueError:
+                pass
         for (symbol, side), count in counts.items():
             OPEN_ORDERS.labels(symbol=symbol, side=side).set(count)
+        self._open_orders_labels = new_labels
 
     def _reset_open_orders_metrics(self, symbols: list[str]) -> None:
-        for symbol in symbols:
-            for side in ("buy", "sell"):
-                OPEN_ORDERS.labels(symbol=symbol, side=side).set(0)
+        for symbol, side in self._open_orders_labels:
+            try:
+                OPEN_ORDERS.remove(symbol, side)
+            except ValueError:
+                pass
+        self._open_orders_labels.clear()
 
     def _has_pending_order(self, symbol: str) -> bool:
         exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
