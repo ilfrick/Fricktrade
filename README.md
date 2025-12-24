@@ -578,6 +578,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Updated learner lock logs to reflect idle behavior.
 - Kept inactive learner in a sleep loop instead of exiting to avoid restart churn.
 - Added learner lock heartbeats during training/sleep to prevent CPU/GPU contention.
 - Enforced exclusive learner execution with GPU preference for online training.

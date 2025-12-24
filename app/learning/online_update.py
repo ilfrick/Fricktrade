@@ -53,7 +53,7 @@ def _ensure_exclusive(cfg: dict) -> tuple[bool, str]:
     if lock:
         lock_owner = lock.get("owner")
         if lock_owner == "gpu" and owner == "cpu" and _lock_is_fresh(lock):
-            logging.info("GPU learner active; exiting CPU learner.")
+            logging.info("GPU learner active; idling CPU learner.")
             return False, owner
         if lock_owner == "cpu" and owner == "gpu":
             logging.info("GPU learner taking over from CPU learner.")
@@ -62,7 +62,7 @@ def _ensure_exclusive(cfg: dict) -> tuple[bool, str]:
             return True, owner
         if _lock_is_fresh(lock):
             if owner == "cpu":
-                logging.info("Learner lock held by %s; exiting CPU learner.", lock_owner)
+                logging.info("Learner lock held by %s; idling CPU learner.", lock_owner)
                 return False, owner
     _write_lock(path, owner)
     return True, owner
