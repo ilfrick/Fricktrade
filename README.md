@@ -566,6 +566,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Ported dev run artifacts (backtest and ingest outputs) into v2.0 for traceability.
 - Added Alpaca ingestion support to load a full universe when symbols are omitted; added saved backtest case configs.
 - Promoted the AI dynamic symbol filter into the live branch for v2.0.
 - Fixed open-order Prometheus gauges to remove stale labels so Grafana shows only current pending orders.
