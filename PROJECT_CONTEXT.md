@@ -79,6 +79,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Increased AI filter online update steps and max symbols for continuous training, then redeployed v2.0.
 - Added logging for news catalyst cache refreshes and redeployed v2.0.
 - Synced news cache refresh to 1 minute to align with AI filter cadence.
+- Rebuilt and restarted v2.0 services after syncing news refresh cadence.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
