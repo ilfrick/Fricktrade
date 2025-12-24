@@ -43,6 +43,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Created dev worktree on `master` under `/path/to/Autotrader/dev`.
 - Live worktree remains on `v1.0`.
 - Enabled a strategy-level pending-order guard to skip signal evaluation while orders are open.
+- Cleared stale open-order metric labels so Grafana reflects only current pending orders.
 - Added broker-aware shorting guard and dev trading limits.
 - Added AI filter for dynamic symbol selection in dev.
 - Policy: update `PROJECT_CONTEXT.md` and push to all branches after actions >10 seconds.

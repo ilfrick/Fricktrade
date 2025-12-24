@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Fixed open-order Prometheus gauges to remove stale labels so Grafana shows only current pending orders.
 - Added strategy-level pending-order guard to skip signal evaluation while orders are open.
 - Added pending-order cancel/replace logic and broker order cancellation support.
 - Forced Grafana to reload provisioned dashboards for consistent axis autoscaling.
