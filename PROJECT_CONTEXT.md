@@ -45,3 +45,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Added broker-aware shorting guard and dev trading limits.
 - Added AI filter for dynamic symbol selection in dev.
 - Policy: update `PROJECT_CONTEXT.md` and push to all branches after actions >10 seconds.
+- Rebuilt and redeployed all live services via Docker Compose.
