@@ -44,3 +44,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Live worktree remains on `v1.0`.
 - Added broker-aware shorting guard and dev trading limits.
 - Added AI filter for dynamic symbol selection in dev.
+- Policy: update `PROJECT_CONTEXT.md` and push to all branches after actions >10 seconds.
