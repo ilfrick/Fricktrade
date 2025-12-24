@@ -213,7 +213,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ops"
+          "unit": "ops",
+          "custom": {
+            "axisPlacement": "auto",
+            "axisSoftMin": 0
+          }
         },
         "overrides": []
       }
@@ -235,7 +239,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "custom": {
+            "axisPlacement": "auto",
+            "axisSoftMin": 0
+          }
         },
         "overrides": []
       }
@@ -261,7 +269,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent"
+          "unit": "percent",
+          "custom": {
+            "axisPlacement": "auto",
+            "axisSoftMin": 0
+          }
         },
         "overrides": []
       }
@@ -283,7 +295,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ops"
+          "unit": "ops",
+          "custom": {
+            "axisPlacement": "auto",
+            "axisSoftMin": 0
+          }
         },
         "overrides": []
       }
@@ -308,8 +324,7 @@
           "unit": "short",
           "custom": {
             "axisPlacement": "auto",
-            "axisSoftMin": 0,
-            "axisSoftMax": 10
+            "axisSoftMin": 0
           }
         },
         "overrides": []
