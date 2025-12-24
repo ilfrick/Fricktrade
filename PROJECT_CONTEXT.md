@@ -44,3 +44,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Enabled Grafana provisioning reloads and restarted Grafana for live and dev stacks.
 - Rebuilt and redeployed live v1 services after enabling the pending-order strategy guard.
 - Rebuilt and redeployed live v1 services after clearing stale open-order metrics.
+- Verified Grafana datasource queries show no open orders and position metrics align with Alpaca.
