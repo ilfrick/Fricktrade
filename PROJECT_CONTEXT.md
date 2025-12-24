@@ -96,6 +96,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Kept inactive learners idling instead of exiting to prevent restart loops.
 - Rebuilt and restarted v2.0 learner and learner-gpu containers after idle-loop change.
 - Updated learner lock logs to reflect idle behavior.
+- Rebuilt and restarted v2.0 learner and learner-gpu containers after log change.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
