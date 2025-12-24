@@ -72,3 +72,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and restarted v2.0 services after adding AI filter heartbeat logs.
 - Added a pre-run AI filter log to confirm execution start.
 - Rebuilt and restarted v2.0 services after adding AI filter pre-run logs.
+- Raised the AI filter universe cap and set refresh interval to 1 minute.

@@ -285,9 +285,9 @@ data:
     enabled: true
     provider: alpaca
     feed: iex
-    refresh_minutes: 5
+    refresh_minutes: 1
     max_symbols: 150
-    max_universe: 10000
+    max_universe: 50000
     universe: alpaca_active
     cash_aware: true
     cash_buffer_pct: 95
