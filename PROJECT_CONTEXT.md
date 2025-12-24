@@ -58,3 +58,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Verified Grafana datasource queries show no open orders and position metrics align with Alpaca.
 - Created branch `v2.0` from `master`, deployed it live, and synced dev-trained models into `/path/to/Autotrader/models`.
 - Stopped the dev backtest container so only the live v2.0 agent runs.
+- Stopped the old GPU learner container and restarted the v2.0 stack so only v2.0 services remain.
