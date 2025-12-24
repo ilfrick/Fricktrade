@@ -20,6 +20,8 @@ ORCHESTRATOR_STRATEGY_ACTIVE = Gauge(
 )
 OPEN_ORDERS = Gauge("open_orders", "Open orders", ["symbol", "side"])
 BROKER_ACTIVE = Gauge("broker_active", "Active broker", ["broker"])
+POSITION_QTY = Gauge("position_qty", "Position quantity", ["symbol"])
+POSITION_VALUE = Gauge("position_value", "Position market value", ["symbol"])
 
 
 def start_metrics_server(port: int):
