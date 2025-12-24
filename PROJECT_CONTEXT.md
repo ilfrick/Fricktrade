@@ -62,3 +62,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Added a safe fallback when the AI filter module is missing to keep live services from crashing.
 - Rebuilt and restarted v2.0 services after guarding the AI filter import.
 - Added the AI filter module to v2.0 so the live dynamic symbol filter runs.
+- Rebuilt and restarted v2.0 services after adding the AI filter module.
