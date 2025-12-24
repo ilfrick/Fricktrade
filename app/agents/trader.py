@@ -165,6 +165,11 @@ class TradingAgent:
         return action
 
     def run_once(self, symbol: str, market_state: dict):
+        exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
+        if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol):
+            SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
+            logging.info("Skipping %s: open orders pending (strategy guard)", symbol)
+            return None
         signals = []
         for name in self._strategy_names:
             strategy_symbols = market_state.get("strategy_symbols", {})

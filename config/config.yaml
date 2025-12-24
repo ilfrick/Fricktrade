@@ -388,6 +388,7 @@ execution:
     enabled: true
     interval_seconds: 30
     skip_if_pending: true
+    strategy_guard: true
 monitoring:
   prometheus_port: 8001
   metrics_path: /metrics

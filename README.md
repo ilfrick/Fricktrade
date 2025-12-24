@@ -565,6 +565,8 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Added strategy-level pending-order guard to skip signal evaluation while orders are open.
+- Added pending-order cancel/replace logic and broker order cancellation support.
 - Forced Grafana to reload provisioned dashboards for consistent axis autoscaling.
 - Added portfolio position metrics and Grafana table panels for holdings and pending orders.
 - Ensured held positions are always evaluated and prevented short sells when no long position.
