@@ -140,6 +140,7 @@ def _load_model(model_path: Path, retrain_hours: int):
         return None, None
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        logging.info("AI filter load device: %s", device)
         payload = torch.load(model_path, map_location=device)
     except Exception as exc:
         logging.warning("AI filter model load failed: %s", exc)
@@ -177,6 +178,7 @@ def _save_model(model_path: Path, model, stats: dict):
 
 def _train_model(symbols: list[str], api_key: str, api_secret: str, cfg: AISymbolFilterConfig):
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    logging.info("AI filter train device: %s", device)
     train_symbols = symbols[: cfg.train_max_symbols]
     bars = _fetch_bars(train_symbols, api_key, api_secret, cfg, limit_symbols=cfg.train_max_symbols)
     catalyst_map = _fetch_news_catalysts(train_symbols, api_key, api_secret, cfg)
