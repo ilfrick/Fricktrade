@@ -34,7 +34,7 @@ flowchart LR
         AlpacaAssets[Alpaca assets/universe]
         Ingest[Ingest pipeline]
         Scan[Dynamic symbol scanner]
-        AIFilter[AI symbol filter<br/>online updates]
+        AIFilter[AI symbol filter<br/>online updates + news]
         News[News catalyst fetcher]
     end
     subgraph Models["Model Store"]
@@ -77,6 +77,7 @@ flowchart LR
     Scan --> Trader
     AIFilter --> Trader
     News --> Strat
+    News --> AIFilter
     Ingest --> AlpacaBars
     RLTrain --> ModelStore
     OrchPretrain --> ModelStore
@@ -577,6 +578,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Updated architecture diagram to show AI filter ingesting news.
 - Added news-aware features to the AI symbol filter.
 - Synced news refresh to 1 minute to match AI filter cadence.
 - Added logging for news catalyst cache refreshes.
