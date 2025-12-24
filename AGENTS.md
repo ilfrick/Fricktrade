@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Added a pre-run log for the AI filter so execution is visible immediately.
 - Added AI filter heartbeat logging every 30s after a successful run.
 - Added logging when the AI symbol filter runs so live usage is visible in logs.
 - Ported dev run artifacts (backtest and ingest outputs) into v2.0 for traceability.
