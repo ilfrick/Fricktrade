@@ -69,3 +69,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Added log output when AI filter runs to confirm live usage.
 - Rebuilt and restarted v2.0 services after adding AI filter logging.
 - Added AI filter heartbeat logging every 30s when recent data is available.
+- Rebuilt and restarted v2.0 services after adding AI filter heartbeat logs.
