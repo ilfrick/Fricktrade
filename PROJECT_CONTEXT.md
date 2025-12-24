@@ -65,3 +65,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and restarted v2.0 services after adding the AI filter module.
 - Ported dev ingestion change to load Alpaca universe and added backtest case config files.
 - Ported dev backtest and ingest output artifacts into v2.0.
+- Rebuilt and restarted v2.0 services after porting dev artifacts.
