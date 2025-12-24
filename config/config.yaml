@@ -307,8 +307,8 @@ data:
       online:
         enabled: true
         learning_rate: 0.001
-        steps: 5
-        max_symbols: 200
+        steps: 10
+        max_symbols: 50000
       timeout_seconds: 15
       retries: 2
       feed: iex
