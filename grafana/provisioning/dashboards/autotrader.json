@@ -305,7 +305,12 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "custom": {
+            "axisPlacement": "auto",
+            "axisSoftMin": 0,
+            "axisSoftMax": 10
+          }
         },
         "overrides": []
       }
