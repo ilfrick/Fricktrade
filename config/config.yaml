@@ -309,6 +309,14 @@ data:
         learning_rate: 0.001
         steps: 10
         max_symbols: 50000
+      news:
+        enabled: true
+        provider: alpaca
+        base_url: https://data.alpaca.markets
+        lookback_hours: 12
+        keywords: []
+        timeout_seconds: 10
+        retries: 2
       timeout_seconds: 15
       retries: 2
       feed: iex
