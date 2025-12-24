@@ -34,3 +34,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Created dev worktree on `master` under `/path/to/Autotrader/dev`.
 - Live worktree remains on `v1.0`.
 - Policy: update `PROJECT_CONTEXT.md` and push to all branches after actions >10 seconds.
+- Rebuilt and redeployed all live services via Docker Compose.
