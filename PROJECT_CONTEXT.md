@@ -59,3 +59,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Created branch `v2.0` from `master`, deployed it live, and synced dev-trained models into `/path/to/Autotrader/models`.
 - Stopped the dev backtest container so only the live v2.0 agent runs.
 - Stopped the old GPU learner container and restarted the v2.0 stack so only v2.0 services remain.
+- Added a safe fallback when the AI filter module is missing to keep live services from crashing.

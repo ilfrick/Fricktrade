@@ -25,7 +25,10 @@ from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols
 from app.data.scanner import ScanFilters, load_universe, scan_symbols
-from app.data.ai_filter import score_symbols
+try:
+    from app.data.ai_filter import score_symbols
+except Exception:
+    score_symbols = None
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.strategies.rl_policy_fees import FeeAwareRLPolicyStrategy
 from app.utils.market import is_market_open
@@ -643,7 +646,7 @@ class TradingAgent:
 
         self._symbols_by_strategy = {}
         ai_cfg = dyn_cfg.get("ai_filter", {})
-        if ai_cfg.get("enabled", False):
+        if ai_cfg.get("enabled", False) and score_symbols is not None:
             ordered, scores = score_symbols(universe, api_key, api_secret, ai_cfg)
             if not ordered:
                 ordered = list(universe)
@@ -653,6 +656,8 @@ class TradingAgent:
             self._symbols = ordered
             self._dynamic_symbols_at = now
             return
+        if ai_cfg.get("enabled", False) and score_symbols is None:
+            logging.warning("AI filter enabled but module unavailable; falling back to scanner filters.")
         filters_cfg_default = dyn_cfg.get("filters", {})
         global_candidates = self._scan_with_filters(
             portfolio,
