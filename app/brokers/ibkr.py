@@ -36,6 +36,7 @@ class IBKRBroker(Broker):
                 continue
             orders.append(
                 {
+                    "order_id": str(order.orderId),
                     "symbol": trade.contract.symbol,
                     "side": "buy" if order.action.upper() == "BUY" else "sell",
                     "qty": float(order.totalQuantity),
@@ -58,3 +59,14 @@ class IBKRBroker(Broker):
                 side = "SELL" if pos.position > 0 else "BUY"
                 order = MarketOrder(side, abs(pos.position))
                 self.ib.placeOrder(pos.contract, order)
+
+    def cancel_order(self, order_id: str) -> None:
+        try:
+            oid = int(order_id)
+        except (TypeError, ValueError):
+            return
+        for trade in self.ib.trades():
+            order = trade.order
+            if order.orderId == oid or getattr(order, "permId", None) == oid:
+                self.ib.cancelOrder(order)
+                return
