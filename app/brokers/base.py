@@ -25,3 +25,7 @@ class Broker(ABC):
     @abstractmethod
     def close_position(self, symbol: str) -> None:
         raise NotImplementedError
+
+    @abstractmethod
+    def cancel_order(self, order_id: str) -> None:
+        raise NotImplementedError

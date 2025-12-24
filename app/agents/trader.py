@@ -166,10 +166,6 @@ class TradingAgent:
         return action
 
     def run_once(self, symbol: str, market_state: dict):
-        if self._has_pending_order(symbol):
-            SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
-            logging.info("Skipping %s: open orders pending", symbol)
-            return None
         signals = []
         for name in self._strategy_names:
             strategy_symbols = market_state.get("strategy_symbols", {})
@@ -203,10 +199,22 @@ class TradingAgent:
             mode = self.learning_cfg.get("guardrail", {}).get("mode", "confirm")
             action = self._apply_guardrail(action, guard_action, mode)
         if action == "hold":
+            if self._cancel_pending_if_needed(symbol, action):
+                self._remove_pending_orders(symbol)
             return None
         if action == "exit":
+            if self._cancel_pending_if_needed(symbol, action):
+                self._remove_pending_orders(symbol)
             self.broker.close_position(symbol)
             return None
+
+        if self._has_pending_order(symbol):
+            if self._cancel_pending_if_needed(symbol, action):
+                self._remove_pending_orders(symbol)
+            else:
+                SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
+                logging.info("Skipping %s: open orders pending", symbol)
+                return None
 
         last_price = market_state.get("last_price")
         if last_price is None:
@@ -266,6 +274,35 @@ class TradingAgent:
         elif action in ("buy", "sell"):
             SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_failed").inc()
         return order_id
+
+    def _cancel_pending_if_needed(self, symbol: str, action: str) -> bool:
+        pending = self._pending_orders(symbol)
+        if not pending:
+            return False
+        if action in ("hold", "exit"):
+            return self._cancel_pending_orders(pending, symbol)
+        pending_sides = {str(order.get("side", "")).lower() for order in pending}
+        action_side = action.lower()
+        if action_side in ("buy", "sell") and pending_sides and action_side not in pending_sides:
+            return self._cancel_pending_orders(pending, symbol)
+        return False
+
+    def _cancel_pending_orders(self, orders: list[dict], symbol: str) -> bool:
+        canceled = False
+        for order in orders:
+            order_id = order.get("order_id")
+            try:
+                self.broker.cancel_order(str(order_id))
+                canceled = True
+            except Exception as exc:
+                logging.warning("Cancel order failed for %s (%s): %s", symbol, order_id, exc)
+        return canceled
+
+    def _pending_orders(self, symbol: str) -> list[dict]:
+        return [order for order in self._open_orders_cache if order.get("symbol") == symbol]
+
+    def _remove_pending_orders(self, symbol: str) -> None:
+        self._open_orders_cache = [order for order in self._open_orders_cache if order.get("symbol") != symbol]
 
     def _size_order(
         self,

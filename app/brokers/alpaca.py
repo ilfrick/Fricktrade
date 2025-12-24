@@ -37,6 +37,7 @@ class AlpacaBroker(Broker):
             data = order.dict() if hasattr(order, "dict") else dict(order)
             results.append(
                 {
+                    "order_id": data.get("id") or data.get("order_id"),
                     "symbol": data.get("symbol"),
                     "side": data.get("side"),
                     "qty": float(data.get("qty") or 0.0),
@@ -61,3 +62,8 @@ class AlpacaBroker(Broker):
         except Exception:
             # Ignore if position does not exist.
             return
+
+    def cancel_order(self, order_id: str) -> None:
+        if not order_id:
+            return
+        self.client.cancel_order_by_id(order_id)
