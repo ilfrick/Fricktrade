@@ -1,0 +1,398 @@
+app:
+  name: autotrader
+  env: prod
+  timezone: Europe/Rome
+  log_level: INFO
+logging:
+  file_path: /data/logs/trader.log
+  max_bytes: 5000000
+  backup_count: 5
+market:
+  venue: Multi
+  default_currency: EUR
+  open_mode: any
+  holiday_update:
+    enabled: true
+    interval_days: 7
+    years_ahead: 1
+  venues:
+  - name: BorsaItaliana
+    timezone: Europe/Rome
+    trading_hours:
+      open: 09:00
+      close: '17:30'
+    holidays:
+    - '2025-01-01'
+    - '2025-01-06'
+    - '2025-04-18'
+    - '2025-04-20'
+    - '2025-04-21'
+    - '2025-04-25'
+    - '2025-05-01'
+    - '2025-06-02'
+    - '2025-06-09'
+    - '2025-08-15'
+    - '2025-11-01'
+    - '2025-12-08'
+    - '2025-12-25'
+    - '2025-12-26'
+    - '2026-01-01'
+    - '2026-01-06'
+    - '2026-04-03'
+    - '2026-04-05'
+    - '2026-04-06'
+    - '2026-04-25'
+    - '2026-05-01'
+    - '2026-05-25'
+    - '2026-06-02'
+    - '2026-08-15'
+    - '2026-10-04'
+    - '2026-11-01'
+    - '2026-12-08'
+    - '2026-12-25'
+    - '2026-12-26'
+  - name: NYSE
+    timezone: America/New_York
+    trading_hours:
+      open: 09:30
+      close: '16:00'
+    holidays:
+    - '2025-01-01'
+    - '2025-01-20'
+    - '2025-02-17'
+    - '2025-04-18'
+    - '2025-05-26'
+    - '2025-06-19'
+    - '2025-09-01'
+    - '2026-01-01'
+    - '2026-01-19'
+    - '2026-02-16'
+    - '2026-04-03'
+    - '2026-05-25'
+    - '2026-06-19'
+    - '2026-09-07'
+  - name: Nasdaq
+    timezone: America/New_York
+    trading_hours:
+      open: 09:30
+      close: '16:00'
+    holidays:
+    - '2025-01-01'
+    - '2025-01-20'
+    - '2025-02-17'
+    - '2025-04-18'
+    - '2025-05-26'
+    - '2025-06-19'
+    - '2025-07-04'
+    - '2025-09-01'
+    - '2025-11-27'
+    - '2025-12-25'
+brokers:
+  alpaca:
+    enabled: true
+    base_url: https://paper-api.alpaca.markets
+    api_key: ${ALPACA_API_KEY}
+    api_secret: ${ALPACA_API_SECRET}
+    fees:
+      commission_pct: 0.0
+      per_trade_fee: 0.0
+      per_share_fee: 0.0
+      min_fee: 0.0
+      spread_pct: 0.0
+  ibkr:
+    enabled: false
+    host: 127.0.0.1
+    port: 7497
+    client_id: 1
+    fees:
+      commission_pct: 0.0
+      per_trade_fee: 0.0
+      per_share_fee: 0.0
+      min_fee: 0.0
+      spread_pct: 0.0
+risk:
+  max_daily_loss_pct: 2.0
+  max_position_size_pct: 25.0
+  max_portfolio_leverage: 1.5
+  max_short_exposure_pct: 30.0
+  max_positions: 20
+  cooldown_seconds: 30
+  hard_stop_pct: 4.0
+  trailing_stop_pct: 2.0
+  circuit_breaker_drawdown_pct: 5.0
+trading_limits:
+  enabled: true
+  allow_shorts: false
+  enforce_account_flags: true
+  blocked_symbols: []
+  blocked_actions: []
+strategy:
+  name: rl_policy_fees
+  names:
+  - rl_policy_fees
+  combine: vote
+  fee_aware:
+    min_edge_pct: 0.005
+    edge_multiplier: 0.5
+    min_notional: 50.0
+  params:
+    lookback_minutes: 30
+    entry_threshold_pct: 0.8
+    exit_threshold_pct: 0.4
+    position_horizon_minutes: 90
+    allow_shorts: true
+orchestrator:
+  enabled: true
+  mode: select
+  top_k: 2
+  min_score: 0.0
+  normalize_scores: true
+  ml:
+    enabled: true
+    model_type: lstm
+    device: auto
+    hidden_dim: 32
+    dropout: 0.1
+    num_layers: 1
+    seq_len: 10
+    model_path: /data/orchestrator_model.pt
+    best_model_path: /data/orchestrator_model_best.pt
+    use_best_model: true
+    best_score_path: /data/orchestrator_model_best_score.json
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    batch_size: 64
+    buffer_size: 5000
+    update_steps_per_bar: 1
+    epsilon: 0.05
+    min_price_move_pct: 0.02
+    reward_scale: 1.0
+    max_grad_norm: 1.0
+    save_interval_seconds: 300
+    score_ema_alpha: 0.1
+    pretrain:
+      enabled: true
+      in_trader: false
+      provider: alpaca
+      alpaca_api_key: ${ALPACA_API_KEY}
+      alpaca_api_secret: ${ALPACA_API_SECRET}
+      lookback_days: 60
+      interval: 5m
+      window_days: 60
+      coverage_days: 365
+      step_days: 30
+      max_symbols: 100
+      max_samples: 8000
+      epochs: 3
+      warmup_bars: 50
+      symbols_source: alpaca_active_random
+      timeout_seconds: 15
+      retries: 2
+  learning:
+    enabled: true
+    learning_rate: 0.1
+    min_bias: -1.0
+    max_bias: 1.0
+    decay: 0.02
+    min_price_move_pct: 0.05
+    state_path: /data/orchestrator_state.json
+    save_interval_seconds: 300
+    use_best_state: true
+    best_state_path: /data/orchestrator_state_best.json
+    best_score_path: /data/orchestrator_best_score.json
+    score_ema_alpha: 0.1
+  strategy_weights:
+    intraday_momentum:
+      momentum: 1.0
+      trend: 0.8
+      volatility: -0.2
+      relative_volume: 0.5
+      spread: -0.3
+      catalyst: 0.4
+    pattern_trading:
+      momentum: 0.8
+      trend: 1.0
+      volatility: -0.4
+      relative_volume: 0.7
+      spread: -0.4
+      catalyst: 0.6
+    rl_policy:
+      momentum: 0.2
+      trend: 0.2
+      volatility: 0.2
+      relative_volume: 0.2
+      spread: -0.1
+      catalyst: 0.1
+learning:
+  enabled: true
+  model_path: /app/models/ppo_policy.zip
+  best_model_path: /app/models/ppo_policy_best.zip
+  use_best_model: true
+  device: auto
+  window_size: 50
+  features:
+    include_returns: true
+    sma_periods:
+    - 5
+    - 20
+    ema_periods:
+    - 10
+    rsi_periods:
+    - 14
+  guardrail:
+    enabled: true
+    mode: confirm
+    params:
+      lookback_minutes: 30
+      entry_threshold_pct: 0.8
+      exit_threshold_pct: 0.4
+      allow_shorts: true
+  online:
+    enabled: true
+    update_interval_minutes: 60
+    timesteps: 1000
+    eval_split: 0.1
+  training:
+    data_dir: /data
+    interval: 1m
+    timesteps: 200000
+    initial_cash: 200
+    commission_pct: 0.05
+    slippage_bps: 2
+    eval_split: 0.2
+    resume: true
+    report_path: /app/models/training_report.json
+    best_report_path: /app/models/training_report_best.json
+    report_plot_dir: /app/models/reports
+backtest:
+  data_dir: /data
+  start: '2025-10-23'
+  end: '2025-12-22'
+  initial_cash: 200
+  commission_pct: 0.05
+  slippage_bps: 2
+  use_gpu: true
+  mode: agent
+  symbols_source: data_dir
+data:
+  provider: yfinance
+  symbols: []
+  interval: 5m
+  lookback_days: 7
+  session_gain_mode: gap
+  dynamic_symbols:
+    enabled: true
+    provider: alpaca
+    feed: iex
+    refresh_minutes: 5
+    max_symbols: 150
+    max_universe: 10000
+    universe: alpaca_active
+    cash_aware: true
+    cash_buffer_pct: 95
+    cash_cap_mode: cash
+    cash_max_pct: 100
+    timeout_seconds: 10
+    retries: 2
+    ai_filter:
+      enabled: true
+      interval: 5m
+      lookback_days: 30
+      window: 20
+      retrain_hours: 6
+      model_path: /data/ai_symbol_filter.pt
+      train_max_symbols: 300
+      max_samples_per_symbol: 200
+      timeout_seconds: 15
+      retries: 2
+      feed: iex
+      objective: return
+    filters:
+      price_min: 0.0
+      relative_volume_min: 1.0
+      premarket_gain_min_pct: 1.0
+      min_shares_traded: 100000
+      max_spread_pct: 1.0
+      strict_spread: false
+      require_catalyst: false
+    fallback:
+      enabled: true
+      relative_volume_min: 0.0
+      premarket_gain_min_pct: 0.0
+      min_shares_traded: 100000
+      max_spread_pct: 2.0
+      require_catalyst: false
+  start: ''
+  end: ''
+  proxy: ''
+  rate_limit_seconds: 2
+  output_dir: /data
+  sources:
+  - provider: yfinance
+    enabled: false
+    symbols: []
+    interval: 5m
+    lookback_days: 7
+    rate_limit_seconds: 2
+  - provider: alpaca
+    enabled: true
+    symbols: []
+    universe: alpaca_active
+    max_universe: 10000
+    interval: 5m
+    start: '2025-10-23'
+    end: '2025-12-22'
+    rate_limit_seconds: 1
+  - provider: stooq
+    enabled: false
+    symbols:
+    - eni
+    - pkn
+    interval: 5m
+    rate_limit_seconds: 2
+  - provider: alphavantage
+    enabled: false
+    api_key: ${ALPHAVANTAGE_API_KEY}
+    symbols: []
+    interval: 5m
+    rate_limit_seconds: 15
+news:
+  enabled: true
+  provider: alpaca
+  base_url: https://data.alpaca.markets
+  api_key: ${ALPACA_API_KEY}
+  api_secret: ${ALPACA_API_SECRET}
+  lookback_hours: 12
+  cache_minutes: 15
+  keywords: []
+  timeout_seconds: 10
+  retries: 2
+pattern_trading:
+  selection:
+    price_min: 0.0
+    relative_volume_min: 1.0
+    premarket_gain_min_pct: 1.0
+    min_shares_traded: 100000
+    max_spread_pct: 1.0
+    strict_spread: false
+    require_catalyst: false
+  pattern:
+    ma_periods:
+    - 9
+    - 20
+    pullback_max_retrace_pct: 50
+  entry:
+    breakout_lookback_bars: 20
+    volume_confirm_mult: 1.5
+  risk:
+    stop_loss_pct: 0.05
+    partial_take_profit_pct: 0.1
+    trailing_stop_pct: 0.02
+execution:
+  open_orders:
+    enabled: true
+    interval_seconds: 30
+    skip_if_pending: true
+monitoring:
+  prometheus_port: 8001
+  metrics_path: /metrics
