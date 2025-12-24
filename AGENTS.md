@@ -196,6 +196,9 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Added AI-driven symbol scoring for full Alpaca US universe selection in dev.
+- Added portfolio position metrics and Grafana table panels for holdings and pending orders.
+- Ensured held positions are always evaluated and prevented short sells when no long position.
 - Deployed combined RL strategies (`rl_policy` + `rl_policy_fees`) and isolated dynamic symbol lists per strategy.
 - Added Alpaca historical ingestion for multi-year intraday data and ML pretrain support.
 - Added agent-aligned backtest engine for realistic strategy/orchestrator/risk testing.
