@@ -578,6 +578,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Enabled GPU acceleration for the AI symbol filter when CUDA is available.
 - Fixed trader loop indentation regression causing container restarts.
 - Updated architecture diagram to show AI filter ingesting news.
 - Added news-aware features to the AI symbol filter.
