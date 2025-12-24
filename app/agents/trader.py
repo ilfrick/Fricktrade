@@ -283,17 +283,7 @@ class TradingAgent:
             if current_qty > 0:
                 qty = int(current_qty * max(min(reduce_pct, 1.0), 0.0))
                 return (qty, None) if qty > 0 else (0, "position_limit")
-            account = self._account_snapshot or {}
-            if account.get("shorting_enabled") is False:
-                return 0, "short_limit"
-            if not allow_shorts or equity <= 0:
-                return 0, "short_limit"
-            short_limit = equity * (max_short_pct / 100.0)
-            current_short = float(portfolio.get("short_exposure", 0.0) or 0.0)
-            remaining_value = max(0.0, short_limit - current_short)
-            if remaining_value < last_price:
-                return 0, "short_limit"
-            return int(remaining_value // last_price), None
+            return 0, "no_position"
 
         return 0, "unsupported"
 
@@ -400,6 +390,7 @@ class TradingAgent:
             self._refresh_news_cache(symbols)
             self._refresh_dynamic_symbols(portfolio)
             symbols = self._resolve_active_symbols()
+            symbols = self._merge_symbols_with_positions(symbols, portfolio)
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             self._refresh_open_orders_cache(symbols)
@@ -417,6 +408,17 @@ class TradingAgent:
                 market_state["strategy_symbols"] = self._symbols_by_strategy
                 self.run_once(sym, market_state)
             time.sleep(interval_seconds)
+
+    def _merge_symbols_with_positions(self, symbols: list[str], portfolio: dict) -> list[str]:
+        positions = portfolio.get("positions", {})
+        if not positions:
+            return symbols
+        merged = set(symbols)
+        for symbol, position in positions.items():
+            qty = float(position.get("qty", 0.0) or 0.0)
+            if qty != 0:
+                merged.add(symbol)
+        return list(merged)
 
     def _update_orchestrator(self, symbol: str, market_state: dict) -> None:
         if isinstance(self._orchestrator, MLStrategyOrchestrator):
