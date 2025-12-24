@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 
 from app.data.downloader import download_yfinance, download_alpaca_bars
+from app.data.scanner import load_universe
 
 
 def _save_ohlcv(df: pd.DataFrame, out_dir: str, symbol: str, interval: str) -> Path:
@@ -104,6 +105,10 @@ def ingest_from_config(cfg: dict) -> list[Path]:
             alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
             api_key = source.get("api_key", alpaca_cfg.get("api_key", ""))
             api_secret = source.get("api_secret", alpaca_cfg.get("api_secret", ""))
+            universe_cfg = source.get("universe")
+            if (not symbols or symbols == []) and universe_cfg:
+                max_universe = int(source.get("max_universe", 10000))
+                symbols = load_universe(api_key, api_secret, universe_cfg, max_universe=max_universe)
             files.extend(
                 download_alpaca_bars(
                     symbols,
