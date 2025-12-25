@@ -109,6 +109,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Added a queued order execution layer and wired broker responses into the RL orchestrator.
 - Updated architecture diagram with order queue and broker feedback flow.
 - Enriched order feedback with broker status and fill metrics.
+- Updated architecture diagram to show AI filter features feeding the orchestrator.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
