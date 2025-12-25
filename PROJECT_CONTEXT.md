@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Ignored dev worktree artifacts and cleaned up transient log/output files.
 - Removed unused orchestrator config parameters now that the RL orchestrator is standard.
 - Created dev worktree on `master` under `/path/to/Autotrader/dev`.
 - Live worktree remains on `v2.0`.
