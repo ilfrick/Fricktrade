@@ -81,8 +81,19 @@ def _load_frames(cfg: dict) -> dict[str, pd.DataFrame]:
     data_cfg = cfg.get("data", {})
     interval = data_cfg.get("interval", "5m")
     data_dir = Path(cfg.get("backtest", {}).get("data_dir", "/data"))
+    symbols = data_cfg.get("symbols", [])
+    if not symbols:
+        pattern = f"*_{interval}.csv"
+        for path in data_dir.glob(pattern):
+            name = path.stem
+            suffix = f"_{interval}"
+            if not name.endswith(suffix):
+                continue
+            symbol = name[: -len(suffix)]
+            if symbol:
+                symbols.append(symbol.replace("_", "."))
     frames = {}
-    for symbol in data_cfg.get("symbols", []):
+    for symbol in symbols:
         path = data_dir / f"{symbol.replace('.', '_')}_{interval}.csv"
         if not path.exists():
             continue
