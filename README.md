@@ -592,6 +592,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- RL orchestrator sweep running in dev (in progress).
 - Orchestrator sweep rerun requested after image refresh.
 - Orchestrator sweep now falls back to backtest CSV symbols when data.symbols is empty.
 - Updated orchestrator sweep script to use RL orchestrator settings.
