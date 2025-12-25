@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Orchestrator sweep rerun requested after image refresh.
 - Orchestrator sweep now falls back to backtest CSV symbols when data.symbols is empty.
 - Updated orchestrator sweep script to use RL orchestrator settings.
 - Aligned orchestrator documentation with the RL implementation and marked legacy sweep usage.
