@@ -583,6 +583,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Added an order queue layer that serializes broker submissions and feeds order responses into the RL orchestrator.
 - Replaced the orchestrator with an RL-based version that incorporates AI filter inputs for actionable symbols.
 - Added documentation subpages per subsystem in `docs/`.
 - Added pytest-based test suite and a market-closed test runner service.

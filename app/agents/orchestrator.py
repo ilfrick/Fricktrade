@@ -325,6 +325,7 @@ class RLStrategyOrchestrator:
         self._last_saved_at: float | None = None
         self._score_ema: float | None = None
         self._best_score: float | None = None
+        self._order_feedback: dict[str, dict[str, float]] = {}
 
     def is_enabled(self) -> bool:
         return self.cfg.enabled
@@ -433,11 +434,17 @@ class RLStrategyOrchestrator:
         self._maybe_save_best()
         self._last_state.pop(symbol, None)
 
+    def on_order_update(self, response: dict) -> None:
+        symbol = response.get("symbol")
+        if not symbol:
+            return
+        self._order_feedback[symbol] = _order_feedback_features(response)
+
     def _ensure_model(self, strategy_names: list[str]) -> None:
         if self._model is not None:
             return
         self._strategy_names = strategy_names
-        self._input_dim = len(_feature_vector({})) + _ai_feature_dim() + len(strategy_names) * 2
+        self._input_dim = len(_feature_vector({})) + _ai_feature_dim() + len(strategy_names) * 2 + _order_feature_dim()
         self._output_dim = len(strategy_names)
         if self.cfg.model_type == "lstm":
             self._model = _LSTMModel(
@@ -673,7 +680,8 @@ class RLStrategyOrchestrator:
         actions = signals or []
         ai_features = self._ai_features(symbol, market_state, actions)
         signal_features = _signal_feature_vector(self._strategy_names, actions)
-        return base + ai_features + signal_features
+        order_features = _order_feedback_vector(self._order_feedback.get(symbol))
+        return base + ai_features + signal_features + order_features
 
     def _ai_features(self, symbol: str, market_state: dict, signals: list[dict]) -> list[float]:
         if ai_filter_module is None or not self._ai_filter_cfg:
@@ -789,6 +797,10 @@ def _ai_feature_dim() -> int:
     return 6
 
 
+def _order_feature_dim() -> int:
+    return 4
+
+
 def _signal_feature_vector(strategy_names: list[str], signals: list[dict]) -> list[float]:
     action_map = {}
     reduce_map = {}
@@ -812,6 +824,43 @@ def _signal_feature_vector(strategy_names: list[str], signals: list[dict]) -> li
         features.append(action_val)
         features.append(float(reduce_map.get(name, 0.0)))
     return features
+
+
+def _order_feedback_features(response: dict) -> dict[str, float]:
+    status = str(response.get("status", "")).lower()
+    if status in {"filled", "completed", "done"}:
+        status_val = 1.0
+    elif status in {"canceled", "cancelled"}:
+        status_val = -1.0
+    elif status in {"rejected", "failed"}:
+        status_val = -0.5
+    elif status in {"submitted", "accepted"}:
+        status_val = 0.5
+    else:
+        status_val = 0.0
+    side = str(response.get("side", "")).lower()
+    side_val = 1.0 if side == "buy" else (-1.0 if side == "sell" else 0.0)
+    qty = float(response.get("qty") or 0.0)
+    filled_qty = float(response.get("filled_qty") or 0.0)
+    fill_ratio = filled_qty / qty if qty else 0.0
+    broker = str(response.get("broker", "")).lower()
+    broker_val = 1.0 if broker == "alpaca" else (2.0 if broker == "ibkr" else 0.0)
+    return {
+        "order_status": status_val,
+        "order_side": side_val,
+        "order_fill_ratio": fill_ratio,
+        "order_broker": broker_val,
+    }
+
+
+def _order_feedback_vector(state: dict[str, float] | None) -> list[float]:
+    state = state or {}
+    return [
+        float(state.get("order_status", 0.0)),
+        float(state.get("order_side", 0.0)),
+        float(state.get("order_fill_ratio", 0.0)),
+        float(state.get("order_broker", 0.0)),
+    ]
 
 
 def _resolve_device(device: str) -> str:

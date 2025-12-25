@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.execution.executor import ExecutionEngine
+from app.execution.order_queue import OrderQueue
 from app.monitoring.metrics import (
     TRADES,
     SKIPPED_ORDERS,
@@ -48,6 +49,7 @@ class TradingAgent:
         self._strategy_by_symbol: dict[str, dict[str, object]] = {}
         self._guardrail_by_symbol: dict[str, object] = {}
         self.executor = ExecutionEngine(broker)
+        self._order_queue = OrderQueue(broker, self._broker_name)
         self._last_market_open = None
         self._started_at = datetime.utcnow()
         self._news_cache: dict[str, bool] = {}
@@ -275,7 +277,7 @@ class TradingAgent:
             logging.info("Skipping %s for %s: risk limits exceeded", action, symbol)
             return None
 
-        order_id = self.executor.execute(symbol, action, qty=qty)
+        order_id = self._order_queue.enqueue(symbol, action, qty=qty)
         if order_id and action in ("buy", "sell"):
             TRADES.labels(symbol=symbol, side=action).inc()
             self._last_trade_at = now
@@ -301,10 +303,21 @@ class TradingAgent:
             order_id = order.get("order_id")
             try:
                 self.broker.cancel_order(str(order_id))
+                self._order_queue.mark_cancel_requested(str(order_id))
                 canceled = True
             except Exception as exc:
                 logging.warning("Cancel order failed for %s (%s): %s", symbol, order_id, exc)
         return canceled
+
+    def _flush_order_responses(self) -> None:
+        responses = self._order_queue.pop_responses()
+        if not responses:
+            return
+        for response in responses:
+            try:
+                self._orchestrator.on_order_update(response.__dict__)
+            except Exception as exc:
+                logging.warning("Orchestrator order feedback failed: %s", exc)
 
     def _pending_orders(self, symbol: str) -> list[dict]:
         return [order for order in self._open_orders_cache if order.get("symbol") == symbol]
@@ -539,6 +552,8 @@ class TradingAgent:
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             self._refresh_open_orders_cache(symbols)
+            self._order_queue.update(self._open_orders_cache)
+            self._flush_order_responses()
             market_open = is_market_open(self.cfg)
             if market_open != self._last_market_open:
                 state = "open" if market_open else "closed"
