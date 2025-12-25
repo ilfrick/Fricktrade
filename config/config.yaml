@@ -143,12 +143,12 @@ strategy:
     position_horizon_minutes: 90
     allow_shorts: true
 orchestrator:
-  enabled: true
+  enabled: false
   mode: select
   top_k: 2
   min_score: 0.0
   normalize_scores: true
-  ml:
+  rl:
     enabled: true
     model_type: lstm
     device: auto

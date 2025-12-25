@@ -33,7 +33,7 @@ from app.strategies.rl_policy import RLPolicyStrategy
 from app.strategies.rl_policy_fees import FeeAwareRLPolicyStrategy
 from app.utils.market import is_market_open
 from app.utils.restart import should_restart
-from app.agents.orchestrator import StrategyOrchestrator, MLStrategyOrchestrator
+from app.agents.orchestrator import RLStrategyOrchestrator
 
 
 class TradingAgent:
@@ -54,11 +54,7 @@ class TradingAgent:
         self._news_cache_at: datetime | None = None
         self._strategy_names = self._resolve_strategy_names()
         self._combine_mode = cfg["strategy"].get("combine", "priority")
-        orchestrator_cfg = cfg.get("orchestrator", {})
-        if orchestrator_cfg.get("ml", {}).get("enabled", False):
-            self._orchestrator = MLStrategyOrchestrator(orchestrator_cfg)
-        else:
-            self._orchestrator = StrategyOrchestrator(orchestrator_cfg)
+        self._orchestrator = RLStrategyOrchestrator(cfg)
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
         self._open_orders_labels: set[tuple[str, str]] = set()
@@ -72,7 +68,7 @@ class TradingAgent:
         self._ai_filter_last_run_at: datetime | None = None
         self._ai_filter_last_log_at: datetime | None = None
         self._ai_filter_last_count: int = 0
-        if isinstance(self._orchestrator, MLStrategyOrchestrator):
+        if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
                 self._build_strategy,
@@ -196,7 +192,7 @@ class TradingAgent:
             signal["name"] = name
             signals.append(signal)
         self._update_orchestrator(symbol, market_state)
-        if isinstance(self._orchestrator, MLStrategyOrchestrator):
+        if isinstance(self._orchestrator, RLStrategyOrchestrator):
             names, weights = self._orchestrator.select(symbol, self._strategy_names, market_state, signals)
         else:
             names, weights = self._orchestrator.select(self._strategy_names, market_state)
@@ -592,7 +588,7 @@ class TradingAgent:
         self._ai_filter_last_log_at = now
 
     def _update_orchestrator(self, symbol: str, market_state: dict) -> None:
-        if isinstance(self._orchestrator, MLStrategyOrchestrator):
+        if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.update(symbol, market_state)
             return
         state = self._orchestrator_state.get(symbol)
@@ -613,7 +609,7 @@ class TradingAgent:
         self._orchestrator_state.pop(symbol, None)
 
     def _record_orchestrator(self, symbol: str, signals: list[dict], market_state: dict) -> None:
-        if isinstance(self._orchestrator, MLStrategyOrchestrator):
+        if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.record(symbol, signals, market_state)
             return
         decisions = {s.get("name"): s.get("action") for s in signals if s.get("name")}

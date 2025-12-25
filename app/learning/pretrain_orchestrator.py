@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from app.agents.orchestrator import MLStrategyOrchestrator
+from app.agents.orchestrator import RLStrategyOrchestrator
 from app.utils.config import load_config
 from app.brokers.alpaca import AlpacaBroker
 from app.brokers.ibkr import IBKRBroker
@@ -13,12 +13,12 @@ from app.data.scanner import load_universe
 def run_pretrain(config_path: str) -> None:
     cfg = load_config(config_path)
     orchestrator_cfg = cfg.get("orchestrator", {})
-    if not orchestrator_cfg.get("ml", {}).get("enabled", False):
-        raise SystemExit("ML orchestrator is disabled in config.")
+    if not orchestrator_cfg.get("rl", {}).get("enabled", False):
+        raise SystemExit("RL orchestrator is disabled in config.")
 
     broker = _build_broker(cfg)
     agent = TradingAgent(broker, cfg)
-    orchestrator = MLStrategyOrchestrator(orchestrator_cfg)
+    orchestrator = RLStrategyOrchestrator(cfg)
     data_cfg = _resolve_data_cfg(cfg, orchestrator_cfg)
     orchestrator.run_pretrain(
         agent._strategy_names,  # uses existing strategy list
@@ -44,7 +44,7 @@ def _build_broker(cfg: dict):
 
 def _resolve_data_cfg(cfg: dict, orchestrator_cfg: dict) -> dict:
     data_cfg = dict(cfg.get("data", {}))
-    pretrain_cfg = orchestrator_cfg.get("ml", {}).get("pretrain", {})
+    pretrain_cfg = orchestrator_cfg.get("rl", {}).get("pretrain", {})
     symbols_source = str(pretrain_cfg.get("symbols_source", "data"))
     max_symbols = int(pretrain_cfg.get("max_symbols", 20))
     if symbols_source != "alpaca_active_random":

@@ -442,3 +442,42 @@ def _fetch_news_catalysts(
         timeout_seconds=cfg.news_timeout_seconds,
         retries=cfg.news_retries,
     )
+
+
+def build_feature_vector_from_series(
+    prices: list[float],
+    volumes: list[float] | None,
+    window: int,
+    catalyst: bool,
+) -> np.ndarray | None:
+    if prices is None or len(prices) < window + 1:
+        return None
+    volumes = volumes or []
+    if len(volumes) < len(prices):
+        pad_val = float(volumes[-1]) if volumes else 0.0
+        volumes = list(volumes) + [pad_val] * (len(prices) - len(volumes))
+    close = np.array(prices, dtype=float)
+    volume = np.array(volumes, dtype=float)
+    returns = np.diff(close) / close[:-1]
+    if len(returns) < window:
+        return None
+    window_ret = returns[-window:]
+    window_vol = volume[-window:]
+    return _feature_vector(window_ret, window_vol, catalyst)
+
+
+def latest_features_for_symbol(
+    symbol: str,
+    api_key: str,
+    api_secret: str,
+    cfg: dict,
+    catalyst: bool,
+) -> np.ndarray | None:
+    if not symbol or not api_key or not api_secret:
+        return None
+    config = _read_config(cfg)
+    bars = _fetch_bars([symbol], api_key, api_secret, config, limit_symbols=1)
+    frame = bars.get(symbol)
+    if frame is None or frame.empty:
+        return None
+    return _latest_features(frame, config.window, catalyst)
