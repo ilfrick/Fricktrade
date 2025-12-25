@@ -696,7 +696,8 @@ class RLStrategyOrchestrator:
         prices = market_state.get("prices") or []
         volumes = market_state.get("volumes") or []
         features = ai_filter_module.build_feature_vector_from_series(prices, volumes, window, catalyst)
-        if features is None:
+        allow_fetch = bool(self._ai_filter_cfg.get("allow_orchestrator_fetch", False))
+        if features is None and allow_fetch:
             api_key = str(self._alpaca_cfg.get("api_key", ""))
             api_secret = str(self._alpaca_cfg.get("api_secret", ""))
             features = ai_filter_module.latest_features_for_symbol(

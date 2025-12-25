@@ -591,6 +591,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Hardened backtests against live data calls and disabled on-demand AI feature fetches in the orchestrator by default.
 - Ignored dev worktree artifacts and cleaned up transient log/output files.
 - Removed unused orchestrator config parameters now that the RL orchestrator is standard.
 - Aligned AI/RL objectives with time-penalized return for faster equity growth.
