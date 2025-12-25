@@ -591,6 +591,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Rebuilt the dev stack after enforcing GPU usage.
 - Rebuilt and restarted the v2.0 stack after enforcing GPU usage.
 - Enforced GPU usage for ML/RL components when CUDA is available.
 - Started a long-running dev RL training run (in progress).
