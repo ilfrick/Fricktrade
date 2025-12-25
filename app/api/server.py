@@ -175,6 +175,7 @@ _DESCRIPTIONS = {
     "data.dynamic_symbols.cash_max_pct": "Max percent of cash allowed when capping symbol prices.",
     "data.dynamic_symbols.timeout_seconds": "Timeout for Alpaca snapshot scans.",
     "data.dynamic_symbols.retries": "Retries for Alpaca snapshot scans.",
+    "data.dynamic_symbols.ai_filter.allow_orchestrator_fetch": "Allow orchestrator to fetch AI filter features on demand.",
     "data.dynamic_symbols.fallback.enabled": "Enable relaxed filters when the main scan yields no symbols.",
     "data.dynamic_symbols.fallback.relative_volume_min": "Fallback minimum relative volume.",
     "data.dynamic_symbols.fallback.premarket_gain_min_pct": "Fallback minimum premarket gain percent.",

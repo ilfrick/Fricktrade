@@ -287,6 +287,7 @@ data:
       feed: iex
       objective: return_time_penalty
       time_penalty_per_bar: 0.05
+      allow_orchestrator_fetch: false
     filters:
       price_min: 0.0
       relative_volume_min: 1.0

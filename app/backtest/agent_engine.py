@@ -193,6 +193,11 @@ def _backtest_cfg_override(cfg: dict) -> dict:
     dynamic_enabled = bool(backtest_cfg.get("dynamic_symbols_enabled", False))
     news_enabled = bool(backtest_cfg.get("news_enabled", False))
     new_cfg["data"]["dynamic_symbols"]["enabled"] = dynamic_enabled
+    if dynamic_enabled:
+        new_cfg["data"]["dynamic_symbols"]["provider"] = "data"
+        ai_cfg = dict(new_cfg["data"]["dynamic_symbols"].get("ai_filter", {}))
+        ai_cfg["enabled"] = False
+        new_cfg["data"]["dynamic_symbols"]["ai_filter"] = ai_cfg
     new_cfg["news"]["enabled"] = news_enabled
     new_cfg["execution"] = dict(cfg.get("execution", {}))
     new_cfg["execution"]["open_orders"] = {"enabled": False}
@@ -203,6 +208,12 @@ def _backtest_cfg_override(cfg: dict) -> dict:
     pretrain_cfg["in_trader"] = False
     ml_cfg["pretrain"] = pretrain_cfg
     orchestrator_cfg["ml"] = ml_cfg
+    rl_cfg = dict(orchestrator_cfg.get("rl", {}))
+    rl_pretrain = dict(rl_cfg.get("pretrain", {}))
+    rl_pretrain["enabled"] = False
+    rl_pretrain["in_trader"] = False
+    rl_cfg["pretrain"] = rl_pretrain
+    orchestrator_cfg["rl"] = rl_cfg
     new_cfg["orchestrator"] = orchestrator_cfg
     return new_cfg
 
