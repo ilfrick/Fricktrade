@@ -34,6 +34,7 @@ class OrderQueue:
         self._broker_name = broker_name
         self._queue: list[OrderRequest] = []
         self._active: OrderRequest | None = None
+        self._active_snapshot: dict | None = None
         self._cancel_requested: set[str] = set()
         self._responses: list[OrderResponse] = []
 
@@ -51,10 +52,19 @@ class OrderQueue:
             self._cancel_requested.add(order_id)
 
     def update(self, open_orders: list[dict]) -> None:
-        open_ids = {str(o.get("order_id")) for o in open_orders if o.get("order_id")}
+        open_by_id = {str(o.get("order_id")): o for o in open_orders if o.get("order_id")}
+        open_ids = set(open_by_id.keys())
         if self._active and self._active.order_id:
-            if self._active.order_id not in open_ids:
+            active_id = self._active.order_id
+            if active_id in open_by_id:
+                snapshot = open_by_id[active_id]
+                response = self._response_from_snapshot(snapshot, "open")
+                if response and response != self._active_snapshot:
+                    self._active_snapshot = response
+                    self._responses.append(OrderResponse(**response))
+            elif active_id not in open_ids:
                 status = "canceled" if self._active.order_id in self._cancel_requested else "completed"
+                snapshot = self._active_snapshot or {}
                 self._responses.append(
                     OrderResponse(
                         symbol=self._active.symbol,
@@ -63,10 +73,13 @@ class OrderQueue:
                         order_id=self._active.order_id,
                         side=self._active.side,
                         qty=self._active.qty,
+                        filled_qty=snapshot.get("filled_qty"),
+                        filled_avg_price=snapshot.get("filled_avg_price"),
                     )
                 )
                 self._cancel_requested.discard(self._active.order_id)
                 self._active = None
+                self._active_snapshot = None
         if self._active is None and self._queue:
             self._start_next()
 
@@ -106,3 +119,22 @@ class OrderQueue:
                 qty=request.qty,
             )
         )
+
+    def _response_from_snapshot(self, snapshot: dict, fallback_status: str) -> dict | None:
+        if not snapshot:
+            return None
+        order_id = snapshot.get("order_id")
+        symbol = snapshot.get("symbol")
+        if not order_id or not symbol:
+            return None
+        status = snapshot.get("status") or fallback_status
+        return {
+            "symbol": symbol,
+            "broker": self._broker_name,
+            "status": str(status).lower(),
+            "order_id": str(order_id),
+            "side": snapshot.get("side"),
+            "qty": snapshot.get("qty"),
+            "filled_qty": snapshot.get("filled_qty"),
+            "filled_avg_price": snapshot.get("filled_avg_price"),
+        }

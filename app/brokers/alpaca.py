@@ -42,6 +42,9 @@ class AlpacaBroker(Broker):
                     "side": data.get("side"),
                     "qty": float(data.get("qty") or 0.0),
                     "limit_price": data.get("limit_price"),
+                    "status": data.get("status"),
+                    "filled_qty": float(data.get("filled_qty") or 0.0),
+                    "filled_avg_price": data.get("filled_avg_price"),
                 }
             )
         return results
