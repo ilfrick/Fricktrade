@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Rebuilt and restarted the v2.0 stack after fixing trader startup crash.
 - Fixed trader startup crash by initializing broker name before the order queue.
 - Started a long-running v2.0 RL training run (in progress).
 - Rebuilt the dev stack after enforcing GPU usage.
