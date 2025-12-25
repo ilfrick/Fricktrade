@@ -273,34 +273,36 @@ Available strategy names:
 
 ## AI Strategy Orchestrator
 
-The AI orchestrator scores each strategy against the current market context and selects the top candidates per symbol.
+The RL orchestrator scores each strategy against the current market context (market state, strategy signals,
+AI-filter-style features, and order feedback) and selects the top candidates per symbol.
 Enable it under `orchestrator.*` in `config/config.yaml`:
 
 ```yaml
 orchestrator:
-  enabled: true
   mode: select
   top_k: 2
   min_score: 0.0
-  ml:
+  rl:
     enabled: true
     model_type: lstm
     device: auto
     model_path: /data/orchestrator_model.pt
     best_model_path: /data/orchestrator_model_best.pt
     use_best_model: true
+    time_penalty_per_bar: 0.05
     pretrain:
       enabled: true
+      in_trader: false
       lookback_days: 30
       interval: 5m
 ```
 
-ML mode trains per-bar to maximize PnL using rewards based on the next price move. The default LSTM model uses
+RL mode trains per-bar to maximize time-penalized returns using rewards based on the next price move. The default LSTM model uses
 a rolling sequence of market features for each symbol. It maintains a replay buffer,
 updates the model each bar, and checkpoints the best-performing model automatically. Pretraining pulls fresh
 historical data via yfinance to warm start the policy.
 
-Pretraining runs out-of-band by default (`orchestrator.ml.pretrain.in_trader: false`). To pretrain manually:
+Pretraining runs out-of-band by default (`orchestrator.rl.pretrain.in_trader: false`). To pretrain manually:
 
 ```bash
 docker compose run --rm trader python3 -m app.main pretrain-orchestrator --config /app/config/config.yaml
@@ -310,14 +312,14 @@ For multi-year 5m pretraining, set the pretrain provider to Alpaca (yfinance int
 
 ```yaml
 orchestrator:
-  ml:
+  rl:
     pretrain:
       provider: alpaca
       alpaca_api_key: ${ALPACA_API_KEY}
       alpaca_api_secret: ${ALPACA_API_SECRET}
 ```
 
-To sweep orchestrator hyperparameters and compare against a fixed baseline:
+Legacy ML orchestrator sweep (not compatible with the RL orchestrator):
 
 ```bash
 docker compose run --rm trader python3 scripts/orchestrator_sweep.py --config /app/config/config.yaml
@@ -327,7 +329,7 @@ To pretrain with randomly selected Alpaca symbols, set:
 
 ```yaml
 orchestrator:
-  ml:
+  rl:
     pretrain:
       symbols_source: alpaca_active_random
       interval: 5m
@@ -336,8 +338,7 @@ orchestrator:
       step_days: 30
 ```
 
-Weights for the rule-based fallback live under `orchestrator.strategy_weights` and include `momentum`, `trend`,
-`volatility`, `relative_volume`, `session_gain_pct`, `spread`, and `catalyst`.
+Rule-based orchestrator weights are no longer used; the RL orchestrator handles selection end-to-end.
 
 ## Fee-Aware RL Strategy
 
@@ -591,6 +592,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Aligned orchestrator documentation with the RL implementation and marked legacy sweep usage.
 - Enabled backtest.run_when_closed and restarted tests-when-closed.
 - Rebuilt and restarted all services to apply the latest configuration.
 - Rebuilt tests-when-closed to include backtest runner support.
