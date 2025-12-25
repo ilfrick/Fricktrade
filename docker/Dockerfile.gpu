@@ -14,6 +14,8 @@ COPY requirements-gpu.txt /app/requirements-gpu.txt
 RUN pip3 install --no-cache-dir --timeout 300 -r /app/requirements.txt -r /app/requirements-gpu.txt
 
 COPY app /app/app
+COPY scripts /app/scripts
+COPY tests /app/tests
 COPY config /app/config
 
 ENV PYTHONPATH=/app
