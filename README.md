@@ -591,6 +591,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Rebuilt the dev stack after RL training guard fix.
 - Rebuilt and restarted the v2.0 stack after RL training guard fix.
 - Guarded RL training against empty/short datasets to prevent index errors.
 - Adjusted dev docker-compose ports to avoid conflicts and rebuilt the dev stack.
