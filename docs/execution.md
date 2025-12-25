@@ -4,8 +4,9 @@
 Place, cancel, and close orders through the active broker.
 
 ## Implementation
+- `app/execution/order_queue.py` queues orders and submits one at a time.
 - `app/execution/executor.py` wraps broker methods.
-- `app/agents/trader.py` manages open order guard and cancel logic.
+- `app/agents/trader.py` manages open order guard, cancel logic, and queue updates.
 
 ## Configuration
 `config/config.yaml`:
