@@ -104,6 +104,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Added pytest-based tests and a service that runs tests when markets are closed.
 - Built and started the v2.0 tests-when-closed service after adding pytest.
 - Added subsystem documentation pages under `docs/`.
+- Stopped and removed duplicate dev trader run containers.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
