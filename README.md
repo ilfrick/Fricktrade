@@ -24,6 +24,11 @@ An intraday trading agent with shorting support, Alpaca + IBKR integration, conf
 - `prometheus/`: Prometheus scrape config
 - `scripts/`: helper scripts
 
+## Documentation
+
+- `docs/README.md` for the full index.
+- Subpages in `docs/` cover: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration.
+
 ## Architecture
 
 ```mermaid
@@ -578,6 +583,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Added documentation subpages per subsystem in `docs/`.
 - Added pytest-based test suite and a market-closed test runner service.
 - Fixed AI filter bar mapping for single-symbol responses; corrected backtest session prev-close handling.
 - Updated learner lock logs to reflect idle behavior.
