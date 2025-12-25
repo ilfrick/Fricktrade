@@ -27,6 +27,7 @@ Scores a large universe of symbols and returns an ordered list for trading.
 - `data.dynamic_symbols.ai_filter.train_max_symbols`
 - `data.dynamic_symbols.ai_filter.max_samples_per_symbol`
 - `data.dynamic_symbols.ai_filter.objective`
+- `data.dynamic_symbols.ai_filter.time_penalty_per_bar`
 - `data.dynamic_symbols.ai_filter.feed`
 - `data.dynamic_symbols.ai_filter.timeout_seconds`
 - `data.dynamic_symbols.ai_filter.retries`

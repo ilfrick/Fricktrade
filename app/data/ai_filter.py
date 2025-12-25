@@ -41,6 +41,7 @@ class AISymbolFilterConfig:
     timeout_seconds: int
     retries: int
     objective: str
+    time_penalty_per_bar: float
     feed: str
 
 
@@ -108,6 +109,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     timeout_seconds = int(cfg.get("timeout_seconds", 15))
     retries = int(cfg.get("retries", 2))
     objective = str(cfg.get("objective", "return"))
+    time_penalty_per_bar = float(cfg.get("time_penalty_per_bar", 0.0))
     feed = str(cfg.get("feed", "iex"))
     return AISymbolFilterConfig(
         interval=interval,
@@ -131,6 +133,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         timeout_seconds=timeout_seconds,
         retries=retries,
         objective=objective,
+        time_penalty_per_bar=time_penalty_per_bar,
         feed=feed,
     )
 
@@ -341,7 +344,7 @@ def _features_and_labels(frame: pd.DataFrame, cfg: AISymbolFilterConfig, catalys
         window_ret = returns[idx - cfg.window : idx]
         window_vol = volume[idx - cfg.window : idx]
         feat_rows.append(_feature_vector(window_ret, window_vol, catalyst))
-        labels.append(_target_value(returns[idx + 1], window_vol, cfg.objective))
+        labels.append(_target_value(returns[idx + 1], window_vol, cfg.objective, cfg.time_penalty_per_bar))
     return np.array(feat_rows, dtype=float), np.array(labels, dtype=float)
 
 
@@ -370,9 +373,16 @@ def _feature_vector(returns: np.ndarray, volume: np.ndarray, catalyst: bool) -> 
     return np.array([mean_ret, std_ret, momentum, last_ret, vol_z, catalyst_flag], dtype=float)
 
 
-def _target_value(next_return: float, volume_window: np.ndarray, objective: str) -> float:
+def _target_value(
+    next_return: float,
+    volume_window: np.ndarray,
+    objective: str,
+    time_penalty_per_bar: float,
+) -> float:
     if objective == "return":
         return float(next_return)
+    if objective == "return_time_penalty":
+        return float(next_return) - time_penalty_per_bar
     if objective == "risk_adjusted":
         vol = float(np.std(volume_window)) if volume_window.size else 0.0
         penalty = vol if vol else 1.0

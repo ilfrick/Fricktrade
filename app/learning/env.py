@@ -17,6 +17,7 @@ class TradingEnv(gym.Env):
         initial_cash: float = 100000.0,
         commission_pct: float = 0.05,
         slippage_bps: float = 2.0,
+        time_penalty_per_step: float = 0.0,
         feature_config: dict | None = None,
     ):
         super().__init__()
@@ -25,6 +26,7 @@ class TradingEnv(gym.Env):
         self.initial_cash = float(initial_cash)
         self.commission_pct = float(commission_pct)
         self.slippage_bps = float(slippage_bps)
+        self.time_penalty_per_step = float(time_penalty_per_step)
         self.feature_config = feature_config or {}
 
         self.action_space = gym.spaces.Discrete(3)
@@ -92,7 +94,7 @@ class TradingEnv(gym.Env):
             self.cash += price - self._trade_cost(price)
 
         portfolio_value = self.cash + self.position_qty * price
-        reward = portfolio_value - self.last_value
+        reward = portfolio_value - self.last_value - self.time_penalty_per_step
         self.last_value = portfolio_value
 
         self.step_index += 1

@@ -14,6 +14,7 @@ Train and evaluate RL policies, and support online updates.
 - `learning.enabled`
 - `learning.device`
 - `learning.window_size`
+- `learning.reward_time_penalty_per_step`
 - `learning.model_path`
 - `learning.best_model_path`
 - `learning.use_best_model`

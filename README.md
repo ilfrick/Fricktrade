@@ -591,6 +591,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Aligned AI/RL objectives with time-penalized return for faster equity growth.
 - Updated architecture diagram to show AI filter features feeding the orchestrator.
 - Enriched order feedback with broker status and fill metrics for the RL orchestrator.
 - Updated architecture diagram to include the order queue and broker feedback loop.
