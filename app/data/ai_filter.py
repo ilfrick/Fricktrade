@@ -288,8 +288,13 @@ def _fetch_bars(
                     continue
                 bars_by_symbol[symbol] = frame.sort_index()
         else:
-            for symbol in chunk:
-                bars_by_symbol[symbol] = df.sort_index()
+            if len(chunk) == 1:
+                bars_by_symbol[chunk[0]] = df.sort_index()
+            elif "symbol" in df.columns:
+                for symbol, frame in df.groupby("symbol"):
+                    bars_by_symbol[str(symbol)] = frame.drop(columns=["symbol"]).sort_index()
+            else:
+                logging.warning("AI filter bars missing symbol index for %d symbols; skipping chunk.", len(chunk))
     return bars_by_symbol
 
 
