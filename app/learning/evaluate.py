@@ -164,13 +164,15 @@ def evaluate_from_config(cfg: dict) -> dict:
 
 
 def _resolve_device(device: str) -> str:
-    if device != "auto":
-        return device
     try:
         import torch
     except Exception:
         return "cpu"
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    if device != "auto":
+        return device
+    return "cpu"
 
 
 def _select_model_path(learning_cfg: dict) -> str:

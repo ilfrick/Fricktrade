@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Enforced GPU usage for ML/RL components when CUDA is available.
 - Started a long-running dev RL training run (in progress).
 - Rebuilt the dev stack after RL training guard fix.
 - Rebuilt and restarted the v2.0 stack after RL training guard fix.
