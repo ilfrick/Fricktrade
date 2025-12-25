@@ -51,6 +51,7 @@ flowchart LR
         Orchestrator[Strategy Orchestrator<br/>ML + rules]
         Risk[Risk Manager]
         Exec[Execution Engine]
+        Queue[Order Queue<br/>FIFO + feedback]
         Orders[Open order tracking<br/>cancel/skip]
     end
     subgraph Training["Training & Pretrain"]
@@ -87,8 +88,11 @@ flowchart LR
     RLTrain --> ModelStore
     OrchPretrain --> ModelStore
     AIFilterTrain --> ModelStore
-    Trader --> Strat --> Orchestrator --> Risk --> Orders --> Exec --> Alpaca
+    Trader --> Strat --> Orchestrator --> Risk --> Queue --> Orders --> Exec --> Alpaca
     Exec --> IBKR
+    Alpaca --> Queue
+    IBKR --> Queue
+    Queue --> Orchestrator
     Orchestrator --> ModelStore
     AgentBT --> Trader
     Trader --> Metrics --> Grafana
@@ -583,6 +587,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Updated architecture diagram to include the order queue and broker feedback loop.
 - Added an order queue layer that serializes broker submissions and feeds order responses into the RL orchestrator.
 - Replaced the orchestrator with an RL-based version that incorporates AI filter inputs for actionable symbols.
 - Added documentation subpages per subsystem in `docs/`.
