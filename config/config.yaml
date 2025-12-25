@@ -240,6 +240,17 @@ backtest:
   use_gpu: true
   mode: agent
   symbols_source: data_dir
+  dynamic_symbols_enabled: false
+  news_enabled: false
+  news_source: none
+  news_path: /data/news_cache.json
+  plan:
+    enabled: false
+    window_days: 60
+    step_days: 30
+    liquidity_tiers: 3
+    sample_per_tier: 50
+    seed: 42
 data:
   provider: yfinance
   symbols: []

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import json
 
 import pandas as pd
 
 from app.agents.trader import TradingAgent
 from app.data.downloader import download_alpaca_bars
+from app.backtest.sampling import BacktestWindow, build_backtest_plan
 
 
 @dataclass
@@ -17,6 +19,16 @@ class BacktestResult:
     end_value: float
     return_pct: float
     trades: int
+    start: str = ""
+    end: str = ""
+    symbols: list[str] = field(default_factory=list)
+
+
+@dataclass
+class BacktestPlanResult:
+    runs: list[BacktestResult]
+    average_return_pct: float
+    total_trades: int
 
 
 class SimBroker:
@@ -74,11 +86,21 @@ class SimBroker:
         self.positions.pop(symbol, None)
 
 
-def run_agent_backtest(cfg: dict) -> BacktestResult:
+def run_agent_backtest(cfg: dict) -> BacktestResult | BacktestPlanResult:
     data_cfg = cfg["data"]
     backtest_cfg = cfg["backtest"]
     interval = data_cfg.get("interval")
     data_dir = Path(backtest_cfg["data_dir"])
+    plan = build_backtest_plan(cfg)
+    if plan:
+        results = []
+        for window in plan:
+            result = _run_agent_backtest_single(cfg, window.symbols, window.start, window.end)
+            results.append(result)
+        total_trades = sum(r.trades for r in results)
+        avg_return = sum(r.return_pct for r in results) / len(results)
+        return BacktestPlanResult(runs=results, average_return_pct=avg_return, total_trades=total_trades)
+
     symbols_source = str(backtest_cfg.get("symbols_source", "data"))
     symbols = data_cfg.get("symbols", [])
     if symbols_source == "dynamic":
@@ -87,6 +109,16 @@ def run_agent_backtest(cfg: dict) -> BacktestResult:
         symbols = _symbols_from_data_dir(data_dir, interval)
     if not symbols:
         raise ValueError("No symbols configured for backtest.")
+    start = datetime.strptime(backtest_cfg["start"], "%Y-%m-%d")
+    end = datetime.strptime(backtest_cfg["end"], "%Y-%m-%d")
+    return _run_agent_backtest_single(cfg, symbols, start, end)
+
+
+def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, end: datetime) -> BacktestResult:
+    data_cfg = cfg["data"]
+    backtest_cfg = cfg["backtest"]
+    interval = data_cfg.get("interval")
+    data_dir = Path(backtest_cfg["data_dir"])
 
     if backtest_cfg.get("download_missing_symbols", False):
         _download_missing_bars(cfg, symbols, interval, data_dir)
@@ -100,10 +132,7 @@ def run_agent_backtest(cfg: dict) -> BacktestResult:
     if not frames:
         raise FileNotFoundError(f"No CSV data found for symbols in {data_dir}")
 
-    start = datetime.strptime(backtest_cfg["start"], "%Y-%m-%d")
-    end = datetime.strptime(backtest_cfg["end"], "%Y-%m-%d")
     timeline = _build_timeline(frames, start, end)
-
     sim_cfg = _backtest_cfg_override(cfg)
     broker = SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"])
     agent = TradingAgent(broker, sim_cfg)
@@ -115,7 +144,9 @@ def run_agent_backtest(cfg: dict) -> BacktestResult:
     state = {sym: _SymbolState(max_len=max(lookback_bars, 60)) for sym in frames}
     start_value = broker.get_account()["equity"]
 
+    news_cache = _load_backtest_news(backtest_cfg)
     for ts in timeline:
+        _apply_news_cache(agent, news_cache, ts)
         for symbol, frame in frames.items():
             if ts not in frame.index:
                 continue
@@ -137,7 +168,37 @@ def run_agent_backtest(cfg: dict) -> BacktestResult:
         end_value=end_value,
         return_pct=(end_value - start_value) / start_value * 100.0,
         trades=broker.trades,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+        symbols=sorted(frames.keys()),
     )
+
+
+def _load_backtest_news(backtest_cfg: dict) -> dict[str, set[str]]:
+    source = str(backtest_cfg.get("news_source", "none")).lower()
+    if source != "local":
+        return {}
+    path = Path(backtest_cfg.get("news_path", ""))
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    cache = {}
+    for day, symbols in payload.items():
+        if isinstance(symbols, list):
+            cache[str(day)] = set(str(sym) for sym in symbols)
+    return cache
+
+
+def _apply_news_cache(agent: TradingAgent, news_cache: dict[str, set[str]], ts: datetime) -> None:
+    if not news_cache:
+        return
+    day_key = ts.strftime("%Y-%m-%d")
+    symbols = news_cache.get(day_key, set())
+    agent._news_cache = {symbol: True for symbol in symbols}
+    agent._news_cache_at = ts
 
 
 def _symbols_from_data_dir(data_dir: Path, interval: str | None) -> list[str]:
@@ -192,13 +253,17 @@ def _backtest_cfg_override(cfg: dict) -> dict:
     backtest_cfg = cfg.get("backtest", {})
     dynamic_enabled = bool(backtest_cfg.get("dynamic_symbols_enabled", False))
     news_enabled = bool(backtest_cfg.get("news_enabled", False))
+    news_source = str(backtest_cfg.get("news_source", "none")).lower()
     new_cfg["data"]["dynamic_symbols"]["enabled"] = dynamic_enabled
     if dynamic_enabled:
         new_cfg["data"]["dynamic_symbols"]["provider"] = "data"
         ai_cfg = dict(new_cfg["data"]["dynamic_symbols"].get("ai_filter", {}))
         ai_cfg["enabled"] = False
         new_cfg["data"]["dynamic_symbols"]["ai_filter"] = ai_cfg
-    new_cfg["news"]["enabled"] = news_enabled
+    if news_source == "local":
+        new_cfg["news"]["enabled"] = False
+    else:
+        new_cfg["news"]["enabled"] = news_enabled
     new_cfg["execution"] = dict(cfg.get("execution", {}))
     new_cfg["execution"]["open_orders"] = {"enabled": False}
     orchestrator_cfg = dict(cfg.get("orchestrator", {}))
