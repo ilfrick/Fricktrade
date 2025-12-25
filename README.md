@@ -578,6 +578,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Fixed AI filter bar mapping for single-symbol responses; corrected backtest session prev-close handling.
 - Updated learner lock logs to reflect idle behavior.
 - Kept inactive learner in a sleep loop instead of exiting to avoid restart churn.
 - Added learner lock heartbeats during training/sleep to prevent CPU/GPU contention.

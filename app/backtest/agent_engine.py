@@ -262,17 +262,17 @@ class _SymbolState:
 
     def update(self, ts: datetime, row: pd.Series) -> None:
         price = float(row.get("Close", 0.0) or 0.0)
-        self.prices.append(price)
-        self.opens.append(float(row.get("Open", 0.0) or 0.0))
-        self.highs.append(float(row.get("High", 0.0) or 0.0))
-        self.lows.append(float(row.get("Low", 0.0) or 0.0))
-        self.volumes.append(float(row.get("Volume", 0.0) or 0.0))
         date = ts.date()
         if self.current_date != date:
             if self.prices:
                 self.prev_close = self.prices[-1]
             self.session_open = price
             self.current_date = date
+        self.prices.append(price)
+        self.opens.append(float(row.get("Open", 0.0) or 0.0))
+        self.highs.append(float(row.get("High", 0.0) or 0.0))
+        self.lows.append(float(row.get("Low", 0.0) or 0.0))
+        self.volumes.append(float(row.get("Volume", 0.0) or 0.0))
 
     def market_state(self) -> dict:
         prices = list(self.prices)
