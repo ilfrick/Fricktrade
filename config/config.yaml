@@ -143,11 +143,9 @@ strategy:
     position_horizon_minutes: 90
     allow_shorts: true
 orchestrator:
-  enabled: false
   mode: select
   top_k: 2
   min_score: 0.0
-  normalize_scores: true
   rl:
     enabled: true
     model_type: lstm
@@ -190,41 +188,6 @@ orchestrator:
       symbols_source: alpaca_active_random
       timeout_seconds: 15
       retries: 2
-  learning:
-    enabled: true
-    learning_rate: 0.1
-    min_bias: -1.0
-    max_bias: 1.0
-    decay: 0.02
-    min_price_move_pct: 0.05
-    state_path: /data/orchestrator_state.json
-    save_interval_seconds: 300
-    use_best_state: true
-    best_state_path: /data/orchestrator_state_best.json
-    best_score_path: /data/orchestrator_best_score.json
-    score_ema_alpha: 0.1
-  strategy_weights:
-    intraday_momentum:
-      momentum: 1.0
-      trend: 0.8
-      volatility: -0.2
-      relative_volume: 0.5
-      spread: -0.3
-      catalyst: 0.4
-    pattern_trading:
-      momentum: 0.8
-      trend: 1.0
-      volatility: -0.4
-      relative_volume: 0.7
-      spread: -0.4
-      catalyst: 0.6
-    rl_policy:
-      momentum: 0.2
-      trend: 0.2
-      volatility: 0.2
-      relative_volume: 0.2
-      spread: -0.1
-      catalyst: 0.1
 learning:
   enabled: true
   model_path: /app/models/ppo_policy.zip

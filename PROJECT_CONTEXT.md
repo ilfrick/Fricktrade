@@ -40,8 +40,9 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Removed unused orchestrator config parameters now that the RL orchestrator is standard.
 - Created dev worktree on `master` under `/path/to/Autotrader/dev`.
-- Live worktree remains on `v1.0`.
+- Live worktree remains on `v2.0`.
 - Enabled a strategy-level pending-order guard to skip signal evaluation while orders are open.
 - Cleared stale open-order metric labels so Grafana reflects only current pending orders.
 - Added broker-aware shorting guard and dev trading limits.
