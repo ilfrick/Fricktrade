@@ -41,6 +41,9 @@ class IBKRBroker(Broker):
                     "side": "buy" if order.action.upper() == "BUY" else "sell",
                     "qty": float(order.totalQuantity),
                     "limit_price": getattr(order, "lmtPrice", None),
+                    "status": status,
+                    "filled_qty": float(getattr(trade.orderStatus, "filled", 0.0) or 0.0),
+                    "filled_avg_price": getattr(trade.orderStatus, "avgFillPrice", None),
                 }
             )
         return orders

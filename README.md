@@ -587,6 +587,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Enriched order feedback with broker status and fill metrics for the RL orchestrator.
 - Updated architecture diagram to include the order queue and broker feedback loop.
 - Added an order queue layer that serializes broker submissions and feeds order responses into the RL orchestrator.
 - Replaced the orchestrator with an RL-based version that incorporates AI filter inputs for actionable symbols.
