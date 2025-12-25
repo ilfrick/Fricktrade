@@ -20,3 +20,11 @@ Run historical simulations with the real trading loop or legacy SMA engine.
 - `backtest.symbols_source` (data_dir, data, dynamic)
 - `backtest.dynamic_symbols_enabled`
 - `backtest.news_enabled`
+- `backtest.news_source` (none, local)
+- `backtest.news_path` (JSON: {"YYYY-MM-DD": ["AAPL", ...]})
+- `backtest.plan.enabled`
+- `backtest.plan.window_days`
+- `backtest.plan.step_days`
+- `backtest.plan.liquidity_tiers`
+- `backtest.plan.sample_per_tier`
+- `backtest.plan.seed`
