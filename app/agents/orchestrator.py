@@ -16,6 +16,11 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import yfinance as yf
 
+try:
+    from app.data import ai_filter as ai_filter_module
+except Exception:
+    ai_filter_module = None
+
 
 @dataclass
 class OrchestratorConfig:
@@ -40,7 +45,7 @@ class OrchestratorConfig:
 
 
 @dataclass
-class MLOrchestratorConfig:
+class RLOrchestratorConfig:
     enabled: bool = False
     model_type: str = "lstm"
     device: str = "auto"
@@ -257,53 +262,54 @@ class StrategyOrchestrator:
             return
 
 
-class MLStrategyOrchestrator:
+class RLStrategyOrchestrator:
     def __init__(self, cfg: dict | None):
         cfg = cfg or {}
-        ml_cfg = cfg.get("ml", {})
-        self._mode = str(cfg.get("mode", "select"))
-        self._top_k = int(cfg.get("top_k", 2))
-        self._min_score = float(cfg.get("min_score", 0.0))
-        self.cfg = MLOrchestratorConfig(
-            enabled=bool(ml_cfg.get("enabled", False)),
-            model_type=str(ml_cfg.get("model_type", "lstm")),
-            device=str(ml_cfg.get("device", "auto")),
-            hidden_dim=int(ml_cfg.get("hidden_dim", 64)),
-            dropout=float(ml_cfg.get("dropout", 0.1)),
-            num_layers=int(ml_cfg.get("num_layers", 1)),
-            seq_len=int(ml_cfg.get("seq_len", 20)),
-            model_path=str(ml_cfg.get("model_path", "/data/orchestrator_model.pt")),
-            best_model_path=str(ml_cfg.get("best_model_path", "/data/orchestrator_model_best.pt")),
-            use_best_model=bool(ml_cfg.get("use_best_model", True)),
-            best_score_path=str(ml_cfg.get("best_score_path", "/data/orchestrator_model_best_score.json")),
-            learning_rate=float(ml_cfg.get("learning_rate", 1e-3)),
-            weight_decay=float(ml_cfg.get("weight_decay", 1e-4)),
-            batch_size=int(ml_cfg.get("batch_size", 64)),
-            buffer_size=int(ml_cfg.get("buffer_size", 5000)),
-            update_steps_per_bar=int(ml_cfg.get("update_steps_per_bar", 1)),
-            epsilon=float(ml_cfg.get("epsilon", 0.05)),
-            min_price_move_pct=float(ml_cfg.get("min_price_move_pct", 0.02)),
-            reward_scale=float(ml_cfg.get("reward_scale", 1.0)),
-            max_grad_norm=float(ml_cfg.get("max_grad_norm", 1.0)),
-            save_interval_seconds=int(ml_cfg.get("save_interval_seconds", 300)),
-            score_ema_alpha=float(ml_cfg.get("score_ema_alpha", 0.1)),
-            pretrain_enabled=bool(ml_cfg.get("pretrain", {}).get("enabled", True)),
-            pretrain_in_trader=bool(ml_cfg.get("pretrain", {}).get("in_trader", False)),
-            pretrain_provider=str(ml_cfg.get("pretrain", {}).get("provider", "yfinance")),
-            pretrain_alpaca_api_key=str(ml_cfg.get("pretrain", {}).get("alpaca_api_key", "")),
-            pretrain_alpaca_api_secret=str(ml_cfg.get("pretrain", {}).get("alpaca_api_secret", "")),
-            pretrain_lookback_days=int(ml_cfg.get("pretrain", {}).get("lookback_days", 30)),
-            pretrain_interval=str(ml_cfg.get("pretrain", {}).get("interval", "5m")),
-            pretrain_window_days=int(ml_cfg.get("pretrain", {}).get("window_days", 60)),
-            pretrain_coverage_days=int(ml_cfg.get("pretrain", {}).get("coverage_days", 365)),
-            pretrain_step_days=int(ml_cfg.get("pretrain", {}).get("step_days", 30)),
-            pretrain_max_symbols=int(ml_cfg.get("pretrain", {}).get("max_symbols", 20)),
-            pretrain_max_samples=int(ml_cfg.get("pretrain", {}).get("max_samples", 2000)),
-            pretrain_epochs=int(ml_cfg.get("pretrain", {}).get("epochs", 2)),
-            pretrain_warmup_bars=int(ml_cfg.get("pretrain", {}).get("warmup_bars", 50)),
-            pretrain_symbols_source=str(ml_cfg.get("pretrain", {}).get("symbols_source", "data")),
-            yf_timeout_seconds=int(ml_cfg.get("pretrain", {}).get("timeout_seconds", 15)),
-            yf_retries=int(ml_cfg.get("pretrain", {}).get("retries", 2)),
+        orchestrator_cfg = cfg.get("orchestrator", cfg)
+        rl_cfg = orchestrator_cfg.get("rl", orchestrator_cfg.get("ml", {}))
+        self._mode = str(orchestrator_cfg.get("mode", "select"))
+        self._top_k = int(orchestrator_cfg.get("top_k", 2))
+        self._min_score = float(orchestrator_cfg.get("min_score", 0.0))
+        self.cfg = RLOrchestratorConfig(
+            enabled=bool(rl_cfg.get("enabled", False)),
+            model_type=str(rl_cfg.get("model_type", "lstm")),
+            device=str(rl_cfg.get("device", "auto")),
+            hidden_dim=int(rl_cfg.get("hidden_dim", 64)),
+            dropout=float(rl_cfg.get("dropout", 0.1)),
+            num_layers=int(rl_cfg.get("num_layers", 1)),
+            seq_len=int(rl_cfg.get("seq_len", 20)),
+            model_path=str(rl_cfg.get("model_path", "/data/orchestrator_model.pt")),
+            best_model_path=str(rl_cfg.get("best_model_path", "/data/orchestrator_model_best.pt")),
+            use_best_model=bool(rl_cfg.get("use_best_model", True)),
+            best_score_path=str(rl_cfg.get("best_score_path", "/data/orchestrator_model_best_score.json")),
+            learning_rate=float(rl_cfg.get("learning_rate", 1e-3)),
+            weight_decay=float(rl_cfg.get("weight_decay", 1e-4)),
+            batch_size=int(rl_cfg.get("batch_size", 64)),
+            buffer_size=int(rl_cfg.get("buffer_size", 5000)),
+            update_steps_per_bar=int(rl_cfg.get("update_steps_per_bar", 1)),
+            epsilon=float(rl_cfg.get("epsilon", 0.05)),
+            min_price_move_pct=float(rl_cfg.get("min_price_move_pct", 0.02)),
+            reward_scale=float(rl_cfg.get("reward_scale", 1.0)),
+            max_grad_norm=float(rl_cfg.get("max_grad_norm", 1.0)),
+            save_interval_seconds=int(rl_cfg.get("save_interval_seconds", 300)),
+            score_ema_alpha=float(rl_cfg.get("score_ema_alpha", 0.1)),
+            pretrain_enabled=bool(rl_cfg.get("pretrain", {}).get("enabled", True)),
+            pretrain_in_trader=bool(rl_cfg.get("pretrain", {}).get("in_trader", False)),
+            pretrain_provider=str(rl_cfg.get("pretrain", {}).get("provider", "yfinance")),
+            pretrain_alpaca_api_key=str(rl_cfg.get("pretrain", {}).get("alpaca_api_key", "")),
+            pretrain_alpaca_api_secret=str(rl_cfg.get("pretrain", {}).get("alpaca_api_secret", "")),
+            pretrain_lookback_days=int(rl_cfg.get("pretrain", {}).get("lookback_days", 30)),
+            pretrain_interval=str(rl_cfg.get("pretrain", {}).get("interval", "5m")),
+            pretrain_window_days=int(rl_cfg.get("pretrain", {}).get("window_days", 60)),
+            pretrain_coverage_days=int(rl_cfg.get("pretrain", {}).get("coverage_days", 365)),
+            pretrain_step_days=int(rl_cfg.get("pretrain", {}).get("step_days", 30)),
+            pretrain_max_symbols=int(rl_cfg.get("pretrain", {}).get("max_symbols", 20)),
+            pretrain_max_samples=int(rl_cfg.get("pretrain", {}).get("max_samples", 2000)),
+            pretrain_epochs=int(rl_cfg.get("pretrain", {}).get("epochs", 2)),
+            pretrain_warmup_bars=int(rl_cfg.get("pretrain", {}).get("warmup_bars", 50)),
+            pretrain_symbols_source=str(rl_cfg.get("pretrain", {}).get("symbols_source", "data")),
+            yf_timeout_seconds=int(rl_cfg.get("pretrain", {}).get("timeout_seconds", 15)),
+            yf_retries=int(rl_cfg.get("pretrain", {}).get("retries", 2)),
         )
         self._device = _resolve_device(self.cfg.device)
         self._model: nn.Module | None = None
@@ -311,6 +317,8 @@ class MLStrategyOrchestrator:
         self._input_dim: int | None = None
         self._output_dim: int | None = None
         self._strategy_names: list[str] = []
+        self._ai_filter_cfg = cfg.get("data", {}).get("dynamic_symbols", {}).get("ai_filter", {})
+        self._alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
         self._buffer: deque[tuple[torch.Tensor, torch.Tensor]] = deque(maxlen=self.cfg.buffer_size)
         self._last_state: dict[str, dict[str, object]] = {}
         self._feature_history: dict[str, deque[list[float]]] = {}
@@ -353,7 +361,7 @@ class MLStrategyOrchestrator:
         if not self.cfg.enabled or not strategy_names:
             return strategy_names, {name: 1.0 for name in strategy_names}
         self._ensure_model(strategy_names)
-        features = _feature_vector(market_state)
+        features = self._state_features(symbol, market_state, signals)
         sequence = self._update_sequence(symbol, features)
         scores = self._predict(sequence)
         if random.random() < self.cfg.epsilon:
@@ -389,7 +397,7 @@ class MLStrategyOrchestrator:
         last_price = _last_price(market_state)
         if last_price is None:
             return
-        features = _feature_vector(market_state)
+        features = self._state_features(symbol, market_state, signals)
         sequence = self._update_sequence(symbol, features)
         self._last_state[symbol] = {"features": sequence, "actions": actions, "price": last_price}
 
@@ -429,7 +437,7 @@ class MLStrategyOrchestrator:
         if self._model is not None:
             return
         self._strategy_names = strategy_names
-        self._input_dim = len(_feature_vector({}))
+        self._input_dim = len(_feature_vector({})) + _ai_feature_dim() + len(strategy_names) * 2
         self._output_dim = len(strategy_names)
         if self.cfg.model_type == "lstm":
             self._model = _LSTMModel(
@@ -612,10 +620,6 @@ class MLStrategyOrchestrator:
                         "lows": window_lows,
                         "last_price": window_prices[-1] if window_prices else None,
                     }
-                    seq.append(_feature_vector(market_state))
-                    sequence = list(seq)
-                    if len(sequence) < self.cfg.seq_len:
-                        sequence = _pad_sequence(sequence, self.cfg.seq_len, self._input_dim or len(sequence[-1]))
                     signals = []
                     for name, strategy in strategies.items():
                         if strategy is None:
@@ -623,6 +627,11 @@ class MLStrategyOrchestrator:
                         signal = strategy.generate_signal(market_state)
                         signal["name"] = name
                         signals.append(signal)
+                    features = self._state_features(symbol, market_state, signals)
+                    seq.append(features)
+                    sequence = list(seq)
+                    if len(sequence) < self.cfg.seq_len:
+                        sequence = _pad_sequence(sequence, self.cfg.seq_len, self._input_dim or len(sequence[-1]))
                     actions = {s.get("name"): s.get("action") for s in signals if s.get("name")}
                     if not actions:
                         continue
@@ -636,8 +645,8 @@ class MLStrategyOrchestrator:
                             rewards[name] = -move_pct
                         else:
                             rewards[name] = 0.0
-                    features = sequence if self.cfg.model_type == "lstm" else _feature_vector(market_state)
-                    self._enqueue(features, rewards)
+                    train_features = sequence if self.cfg.model_type == "lstm" else features
+                    self._enqueue(train_features, rewards)
                     samples += 1
                     if samples >= self.cfg.pretrain_max_samples:
                         break
@@ -658,6 +667,38 @@ class MLStrategyOrchestrator:
         if len(sequence) < self.cfg.seq_len:
             sequence = _pad_sequence(sequence, self.cfg.seq_len, len(features))
         return sequence
+
+    def _state_features(self, symbol: str, market_state: dict, signals: list[dict] | None) -> list[float]:
+        base = _feature_vector(market_state)
+        actions = signals or []
+        ai_features = self._ai_features(symbol, market_state, actions)
+        signal_features = _signal_feature_vector(self._strategy_names, actions)
+        return base + ai_features + signal_features
+
+    def _ai_features(self, symbol: str, market_state: dict, signals: list[dict]) -> list[float]:
+        if ai_filter_module is None or not self._ai_filter_cfg:
+            return [0.0] * _ai_feature_dim()
+        has_order = any(s.get("action") in {"buy", "sell", "exit"} for s in signals)
+        if not has_order:
+            return [0.0] * _ai_feature_dim()
+        window = int(self._ai_filter_cfg.get("window", 20))
+        catalyst = bool(market_state.get("catalyst", False))
+        prices = market_state.get("prices") or []
+        volumes = market_state.get("volumes") or []
+        features = ai_filter_module.build_feature_vector_from_series(prices, volumes, window, catalyst)
+        if features is None:
+            api_key = str(self._alpaca_cfg.get("api_key", ""))
+            api_secret = str(self._alpaca_cfg.get("api_secret", ""))
+            features = ai_filter_module.latest_features_for_symbol(
+                symbol,
+                api_key,
+                api_secret,
+                self._ai_filter_cfg,
+                catalyst,
+            )
+        if features is None:
+            return [0.0] * _ai_feature_dim()
+        return [float(val) for val in features.tolist()]
 
 
 class _MLP(nn.Module):
@@ -744,6 +785,35 @@ def _feature_vector(market_state: dict) -> list[float]:
     return [float(features.get(name, 0.0) or 0.0) for name in _FEATURE_NAMES]
 
 
+def _ai_feature_dim() -> int:
+    return 6
+
+
+def _signal_feature_vector(strategy_names: list[str], signals: list[dict]) -> list[float]:
+    action_map = {}
+    reduce_map = {}
+    for signal in signals:
+        name = signal.get("name")
+        if not name:
+            continue
+        action_map[name] = signal.get("action", "hold")
+        reduce_map[name] = float(signal.get("reduce_pct", 1.0))
+    features = []
+    for name in strategy_names:
+        action = str(action_map.get(name, "hold")).lower()
+        if action == "buy":
+            action_val = 1.0
+        elif action == "sell":
+            action_val = -1.0
+        elif action == "exit":
+            action_val = -0.5
+        else:
+            action_val = 0.0
+        features.append(action_val)
+        features.append(float(reduce_map.get(name, 0.0)))
+    return features
+
+
 def _resolve_device(device: str) -> str:
     if device != "auto":
         return device
@@ -796,7 +866,7 @@ def _download_yf(
     return None
 
 
-def _iter_pretrain_windows(symbol: str, cfg: MLOrchestratorConfig):
+def _iter_pretrain_windows(symbol: str, cfg: RLOrchestratorConfig):
     provider = cfg.pretrain_provider
     if provider == "alpaca":
         yield from _iter_alpaca_pretrain_windows(symbol, cfg)
@@ -836,7 +906,7 @@ def _iter_pretrain_windows(symbol: str, cfg: MLOrchestratorConfig):
         end = end - timedelta(days=step)
 
 
-def _iter_alpaca_pretrain_windows(symbol: str, cfg: MLOrchestratorConfig):
+def _iter_alpaca_pretrain_windows(symbol: str, cfg: RLOrchestratorConfig):
     api_key = cfg.pretrain_alpaca_api_key
     api_secret = cfg.pretrain_alpaca_api_secret
     if not api_key or not api_secret:

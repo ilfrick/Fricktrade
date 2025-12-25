@@ -10,7 +10,7 @@ Generate buy/sell/hold/exit signals from market state.
 - Pattern trading: `app/strategies/pattern_trading.py`.
 
 ## Orchestration
-- Simple rules or ML orchestrator select strategy outputs.
+- RL orchestrator selects strategy outputs using market state, strategy signals, and AI-filter-style features.
 - Combine mode: `priority` or `vote` (see `strategy.combine`).
 
 ## Configuration

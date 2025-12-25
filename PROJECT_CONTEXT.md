@@ -105,6 +105,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Built and started the v2.0 tests-when-closed service after adding pytest.
 - Added subsystem documentation pages under `docs/`.
 - Stopped and removed duplicate dev trader run containers.
+- Replaced the orchestrator with an RL-based version using AI-filter-style features for actionable symbols.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
