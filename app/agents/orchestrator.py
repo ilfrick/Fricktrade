@@ -867,9 +867,11 @@ def _order_feedback_vector(state: dict[str, float] | None) -> list[float]:
 
 
 def _resolve_device(device: str) -> str:
+    if torch.cuda.is_available():
+        return "cuda"
     if device != "auto":
         return device
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    return "cpu"
 
 
 def _last_price(market_state: dict) -> float | None:

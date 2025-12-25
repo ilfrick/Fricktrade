@@ -90,13 +90,15 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
 
 
 def _resolve_device(device: str) -> str:
-    if device != "auto":
-        return device
     try:
         import torch
     except Exception:
         return "cpu"
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    if device != "auto":
+        return device
+    return "cpu"
 
 
 def _is_better_report(report: dict, best_report_path: str) -> bool:
