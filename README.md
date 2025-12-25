@@ -54,6 +54,9 @@ flowchart LR
         Queue[Order Queue<br/>FIFO + feedback]
         Orders[Open order tracking<br/>cancel/skip]
     end
+    subgraph Features["Feature Feeds"]
+        AIFeatures[AI filter features<br/>filtered to active orders]
+    end
     subgraph Training["Training & Pretrain"]
         RLTrain[RL training + online updates]
         OrchPretrain[Orchestrator pretrain]
@@ -82,6 +85,7 @@ flowchart LR
     AlpacaAssets --> AIFilter
     Scan --> Trader
     AIFilter --> Trader
+    AIFilter --> AIFeatures --> Orchestrator
     News --> Strat
     News --> AIFilter
     Ingest --> AlpacaBars
@@ -587,6 +591,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Updated architecture diagram to show AI filter features feeding the orchestrator.
 - Enriched order feedback with broker status and fill metrics for the RL orchestrator.
 - Updated architecture diagram to include the order queue and broker feedback loop.
 - Added an order queue layer that serializes broker submissions and feeds order responses into the RL orchestrator.
