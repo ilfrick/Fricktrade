@@ -22,3 +22,4 @@ Generate buy/sell/hold/exit signals from market state.
 - `strategy.fee_aware.*` (fee guard)
 - `pattern_trading.*`
 - `orchestrator.*`
+- `orchestrator.rl.time_penalty_per_bar`

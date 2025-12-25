@@ -26,6 +26,9 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     window_size = learning_cfg.get("window_size", 50)
     timesteps = int(training_cfg.get("timesteps", 200_000))
     eval_split = float(training_cfg.get("eval_split", 0.2))
+    time_penalty = float(
+        training_cfg.get("reward_time_penalty_per_step", learning_cfg.get("reward_time_penalty_per_step", 0.0))
+    )
 
     if resume is None:
         resume = bool(training_cfg.get("resume", True))
@@ -44,6 +47,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
                 initial_cash=training_cfg.get("initial_cash", cfg["backtest"]["initial_cash"]),
                 commission_pct=training_cfg.get("commission_pct", cfg["backtest"]["commission_pct"]),
                 slippage_bps=training_cfg.get("slippage_bps", cfg["backtest"]["slippage_bps"]),
+                time_penalty_per_step=time_penalty,
                 feature_config=feature_config,
             )
         )

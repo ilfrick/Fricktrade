@@ -171,6 +171,7 @@ orchestrator:
     max_grad_norm: 1.0
     save_interval_seconds: 300
     score_ema_alpha: 0.1
+    time_penalty_per_bar: 0.05
     pretrain:
       enabled: true
       in_trader: false
@@ -231,6 +232,7 @@ learning:
   use_best_model: true
   device: auto
   window_size: 50
+  reward_time_penalty_per_step: 0.05
   features:
     include_returns: true
     sma_periods:
@@ -320,7 +322,8 @@ data:
       timeout_seconds: 15
       retries: 2
       feed: iex
-      objective: return
+      objective: return_time_penalty
+      time_penalty_per_bar: 0.05
     filters:
       price_min: 0.0
       relative_volume_min: 1.0

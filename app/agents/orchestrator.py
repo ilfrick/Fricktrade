@@ -68,6 +68,7 @@ class RLOrchestratorConfig:
     max_grad_norm: float = 1.0
     save_interval_seconds: int = 300
     score_ema_alpha: float = 0.1
+    time_penalty_per_bar: float = 0.0
     pretrain_enabled: bool = True
     pretrain_in_trader: bool = False
     pretrain_provider: str = "yfinance"
@@ -293,6 +294,7 @@ class RLStrategyOrchestrator:
             max_grad_norm=float(rl_cfg.get("max_grad_norm", 1.0)),
             save_interval_seconds=int(rl_cfg.get("save_interval_seconds", 300)),
             score_ema_alpha=float(rl_cfg.get("score_ema_alpha", 0.1)),
+            time_penalty_per_bar=float(rl_cfg.get("time_penalty_per_bar", 0.0)),
             pretrain_enabled=bool(rl_cfg.get("pretrain", {}).get("enabled", True)),
             pretrain_in_trader=bool(rl_cfg.get("pretrain", {}).get("in_trader", False)),
             pretrain_provider=str(rl_cfg.get("pretrain", {}).get("provider", "yfinance")),
@@ -421,11 +423,11 @@ class RLStrategyOrchestrator:
         rewards = {}
         for name, action in state.get("actions", {}).items():
             if action == "buy":
-                reward = move_pct
+                reward = move_pct - self.cfg.time_penalty_per_bar
             elif action == "sell":
-                reward = -move_pct
+                reward = -move_pct - self.cfg.time_penalty_per_bar
             else:
-                reward = 0.0
+                reward = -self.cfg.time_penalty_per_bar
             rewards[name] = reward * self.cfg.reward_scale
         self._enqueue(state.get("features"), rewards)
         self._train()
@@ -647,11 +649,11 @@ class RLStrategyOrchestrator:
                     rewards = {}
                     for name, action in actions.items():
                         if action == "buy":
-                            rewards[name] = move_pct
+                            rewards[name] = move_pct - self.cfg.time_penalty_per_bar
                         elif action == "sell":
-                            rewards[name] = -move_pct
+                            rewards[name] = -move_pct - self.cfg.time_penalty_per_bar
                         else:
-                            rewards[name] = 0.0
+                            rewards[name] = -self.cfg.time_penalty_per_bar
                     train_features = sequence if self.cfg.model_type == "lstm" else features
                     self._enqueue(train_features, rewards)
                     samples += 1

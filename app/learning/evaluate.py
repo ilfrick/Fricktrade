@@ -58,6 +58,7 @@ def evaluate_model(
     results = []
     equity_curves = []
     for df in datasets:
+        time_penalty = float(training_cfg.get("reward_time_penalty_per_step", 0.0))
         env = DummyVecEnv(
             [
                 lambda data=df: TradingEnv(
@@ -66,6 +67,7 @@ def evaluate_model(
                     initial_cash=training_cfg.get("initial_cash", 100000),
                     commission_pct=training_cfg.get("commission_pct", 0.05),
                     slippage_bps=training_cfg.get("slippage_bps", 2),
+                    time_penalty_per_step=time_penalty,
                     feature_config=feature_config,
                 )
             ]
@@ -136,6 +138,11 @@ def evaluate_from_config(cfg: dict) -> dict:
     eval_split = float(training_cfg.get("eval_split", 0.2))
     report_path = training_cfg.get("report_path", "/app/models/training_report.json")
     plot_dir = training_cfg.get("report_plot_dir", "/app/models/reports")
+    if "reward_time_penalty_per_step" not in training_cfg:
+        training_cfg = dict(training_cfg)
+        training_cfg["reward_time_penalty_per_step"] = float(
+            learning_cfg.get("reward_time_penalty_per_step", 0.0)
+        )
 
     datasets = load_csv_data(data_dir, interval=interval)
     eval_sets = []
