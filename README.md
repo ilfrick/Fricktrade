@@ -591,6 +591,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- tests-when-closed now runs backtests when configured in backtest.run_when_closed.
 - Ran pytest in the tests-when-closed container (10 passed).
 - Dynamic backtest symbols now fall back to CSV data when symbols are empty.
 - Added backtest plan sampling with local news support plus robustness/unit tests.

@@ -23,6 +23,7 @@ Run historical simulations with the real trading loop or legacy SMA engine.
 - `backtest.news_enabled`
 - `backtest.news_source` (none, local)
 - `backtest.news_path` (JSON: {"YYYY-MM-DD": ["AAPL", ...]})
+- `backtest.run_when_closed` (run backtest from tests-when-closed service)
 - `backtest.plan.enabled`
 - `backtest.plan.window_days`
 - `backtest.plan.step_days`
