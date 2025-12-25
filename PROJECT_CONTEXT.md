@@ -107,6 +107,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Stopped and removed duplicate dev trader run containers.
 - Replaced the orchestrator with an RL-based version using AI-filter-style features for actionable symbols.
 - Added a queued order execution layer and wired broker responses into the RL orchestrator.
+- Updated architecture diagram with order queue and broker feedback flow.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
