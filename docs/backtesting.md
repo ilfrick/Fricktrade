@@ -19,6 +19,7 @@ Run historical simulations with the real trading loop or legacy SMA engine.
 - `backtest.use_gpu`
 - `backtest.symbols_source` (data_dir, data, dynamic)
 - `backtest.dynamic_symbols_enabled`
+- If enabled and `data.symbols` is empty, the backtest falls back to symbols in `backtest.data_dir`.
 - `backtest.news_enabled`
 - `backtest.news_source` (none, local)
 - `backtest.news_path` (JSON: {"YYYY-MM-DD": ["AAPL", ...]})

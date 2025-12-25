@@ -591,6 +591,8 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Ran pytest in the tests-when-closed container (10 passed).
+- Dynamic backtest symbols now fall back to CSV data when symbols are empty.
 - Added backtest plan sampling with local news support plus robustness/unit tests.
 - Stopped the dev stack after publishing v2.0 release.
 - Rebuilt and restarted the v2.0 stack after fixing trader startup crash.

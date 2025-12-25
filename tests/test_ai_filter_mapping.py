@@ -59,5 +59,6 @@ def _cfg() -> ai_filter.AISymbolFilterConfig:
         timeout_seconds=1,
         retries=0,
         objective="return",
+        time_penalty_per_bar=0.0,
         feed="iex",
     )

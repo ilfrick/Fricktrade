@@ -290,6 +290,12 @@ def _resolve_dynamic_symbols(cfg: dict) -> list[str]:
     symbols = data_cfg.get("symbols", [])
     if not backtest_cfg.get("dynamic_symbols_enabled", False):
         return symbols
+    interval = data_cfg.get("interval")
+    data_dir = Path(backtest_cfg.get("data_dir", "/data"))
+    if not symbols:
+        symbols = _symbols_from_data_dir(data_dir, interval)
+    if not symbols:
+        return symbols
     sim_cfg = _backtest_cfg_override(cfg)
     broker = SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"])
     agent = TradingAgent(broker, sim_cfg)
