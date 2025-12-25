@@ -244,7 +244,7 @@ backtest:
   news_enabled: false
   news_source: none
   news_path: /data/news_cache.json
-  run_when_closed: false
+  run_when_closed: true
   plan:
     enabled: false
     window_days: 60
