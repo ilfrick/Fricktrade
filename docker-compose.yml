@@ -134,3 +134,23 @@ services:
         reservations:
           devices:
             - capabilities: ["gpu"]
+
+  tests-when-closed:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config
+      - ./data:/data
+    command:
+      [
+        "python",
+        "/app/scripts/run_tests_when_closed.py",
+        "--config",
+        "/app/config/config.yaml",
+        "--interval-minutes",
+        "15"
+      ]
+    restart: unless-stopped
