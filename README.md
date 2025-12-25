@@ -591,6 +591,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Stopped the dev stack after publishing v2.0 release.
 - Rebuilt and restarted the v2.0 stack after fixing trader startup crash.
 - Fixed trader startup crash by initializing broker name before the order queue.
 - Started a long-running v2.0 RL training run (in progress).
