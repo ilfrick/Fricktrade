@@ -22,6 +22,8 @@ class TradingEnv(gym.Env):
     ):
         super().__init__()
         self.data = data.reset_index(drop=True)
+        if self.data.empty:
+            raise ValueError("training data is empty")
         self.window_size = window_size
         self.initial_cash = float(initial_cash)
         self.commission_pct = float(commission_pct)
@@ -41,7 +43,8 @@ class TradingEnv(gym.Env):
         self._reset_state()
 
     def _reset_state(self) -> None:
-        self.step_index = self.window_size
+        last_index = max(len(self.data) - 1, 0)
+        self.step_index = min(self.window_size, last_index)
         self.position = 0
         self.cash = self.initial_cash
         self.position_qty = 0.0
