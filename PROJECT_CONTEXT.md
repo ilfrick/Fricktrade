@@ -99,6 +99,8 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and restarted v2.0 learner and learner-gpu containers after log change.
 - Rebuilt and redeployed the full v2.0 stack after learner idle changes.
 - Fixed AI filter bar mapping for single-symbol responses; fixed backtest prev-close handling.
+- Rebuilt and redeployed the full v2.0 stack after AI filter/backtest fixes.
+- Rebuilt and restarted v2.0 learner-gpu after full stack redeploy.
 - Added logging for news catalyst cache refreshes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
