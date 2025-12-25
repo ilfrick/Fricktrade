@@ -15,6 +15,14 @@ def _run_pytest() -> int:
     return result.returncode
 
 
+def _run_backtest(config_path: str) -> int:
+    result = subprocess.run(
+        ["python", "-m", "app.main", "backtest", "--config", config_path],
+        check=False,
+    )
+    return result.returncode
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="/app/config/config.yaml")
@@ -33,6 +41,11 @@ def main() -> None:
             logging.info("Market closed; running tests.")
             code = _run_pytest()
             logging.info("Pytest finished with exit code %d.", code)
+            backtest_cfg = cfg.get("backtest", {})
+            if backtest_cfg.get("run_when_closed", False):
+                logging.info("Market closed; running backtest.")
+                backtest_code = _run_backtest(args.config)
+                logging.info("Backtest finished with exit code %d.", backtest_code)
         if args.once:
             break
         time.sleep(interval * 60)
