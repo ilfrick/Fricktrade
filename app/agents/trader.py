@@ -49,6 +49,7 @@ class TradingAgent:
         self._strategy_by_symbol: dict[str, dict[str, object]] = {}
         self._guardrail_by_symbol: dict[str, object] = {}
         self.executor = ExecutionEngine(broker)
+        self._broker_name = self._resolve_broker_name()
         self._order_queue = OrderQueue(broker, self._broker_name)
         self._last_market_open = None
         self._started_at = datetime.utcnow()
@@ -60,7 +61,6 @@ class TradingAgent:
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
         self._open_orders_labels: set[tuple[str, str]] = set()
-        self._broker_name = self._resolve_broker_name()
         self._dynamic_symbols_at: datetime | None = None
         self._symbols: list[str] = []
         self._symbols_by_strategy: dict[str, list[str]] = {}
