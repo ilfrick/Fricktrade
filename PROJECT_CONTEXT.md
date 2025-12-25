@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Rebuilt tests-when-closed to include backtest runner support.
 - tests-when-closed now runs backtests when configured in backtest.run_when_closed.
 - Ran pytest in the tests-when-closed container (10 passed).
 - Dynamic backtest symbols now fall back to CSV data when symbols are empty.
