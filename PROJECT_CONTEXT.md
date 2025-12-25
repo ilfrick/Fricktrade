@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Updated orchestrator sweep script to use RL orchestrator settings.
 - Aligned orchestrator documentation with the RL implementation and marked legacy sweep usage.
 - Enabled backtest.run_when_closed and restarted tests-when-closed.
 - Rebuilt and restarted all services to apply the latest configuration.

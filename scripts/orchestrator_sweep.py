@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.agents.orchestrator import MLStrategyOrchestrator
+from app.agents.orchestrator import RLStrategyOrchestrator
 from app.agents.trader import TradingAgent
 from app.backtest.agent_engine import run_agent_backtest
 from app.utils.config import load_config
@@ -108,10 +108,10 @@ def _apply_cfg(cfg: dict, updates: dict) -> dict:
 
 def _run_pretrain(cfg: dict) -> None:
     orchestrator_cfg = cfg.get("orchestrator", {})
-    if not orchestrator_cfg.get("ml", {}).get("enabled", False):
+    if not orchestrator_cfg.get("rl", {}).get("enabled", False):
         return
     agent = TradingAgent(_DummyBroker(), cfg)
-    orchestrator = MLStrategyOrchestrator(orchestrator_cfg)
+    orchestrator = RLStrategyOrchestrator(orchestrator_cfg)
     orchestrator.run_pretrain(
         agent._strategy_names,
         agent._build_strategy,
@@ -126,12 +126,18 @@ def _evaluate_windows(cfg: dict, windows: list[tuple[datetime, datetime]]) -> li
         cfg["backtest"]["start"] = start.strftime("%Y-%m-%d")
         cfg["backtest"]["end"] = end.strftime("%Y-%m-%d")
         result = run_agent_backtest(cfg)
+        if hasattr(result, "average_return_pct"):
+            return_pct = float(result.average_return_pct)
+            trades = float(result.total_trades)
+        else:
+            return_pct = float(result.return_pct)
+            trades = float(result.trades)
         results.append(
             {
                 "start": cfg["backtest"]["start"],
                 "end": cfg["backtest"]["end"],
-                "return_pct": result.return_pct,
-                "trades": result.trades,
+                "return_pct": return_pct,
+                "trades": trades,
             }
         )
     return results
@@ -172,7 +178,7 @@ def main() -> None:
     base_cfg = load_config(args.config)
     pretrain_interval = (
         base_cfg.get("orchestrator", {})
-        .get("ml", {})
+        .get("rl", {})
         .get("pretrain", {})
         .get("interval", base_cfg.get("data", {}).get("interval", "5m"))
     )
@@ -193,9 +199,7 @@ def main() -> None:
     baseline_cfg = _apply_cfg(
         base_cfg,
         {
-            "orchestrator.enabled": False,
-            "orchestrator.ml.enabled": False,
-            "orchestrator.learning.enabled": False,
+            "orchestrator.rl.enabled": False,
         },
     )
     baseline_windows = _evaluate_windows(baseline_cfg, windows)
@@ -219,16 +223,15 @@ def main() -> None:
         cfg = _apply_cfg(
             base_cfg,
             {
-                "orchestrator.enabled": True,
-                "orchestrator.ml.enabled": True,
-                "orchestrator.ml.model_type": params["model_type"],
-                "orchestrator.ml.hidden_dim": params["hidden_dim"],
-                "orchestrator.ml.seq_len": params["seq_len"],
-                "orchestrator.ml.learning_rate": params["learning_rate"],
-                "orchestrator.ml.model_path": model_path,
-                "orchestrator.ml.best_model_path": best_model_path,
-                "orchestrator.ml.use_best_model": True,
-                "orchestrator.ml.pretrain.coverage_days": coverage_days,
+                "orchestrator.rl.enabled": True,
+                "orchestrator.rl.model_type": params["model_type"],
+                "orchestrator.rl.hidden_dim": params["hidden_dim"],
+                "orchestrator.rl.seq_len": params["seq_len"],
+                "orchestrator.rl.learning_rate": params["learning_rate"],
+                "orchestrator.rl.model_path": model_path,
+                "orchestrator.rl.best_model_path": best_model_path,
+                "orchestrator.rl.use_best_model": True,
+                "orchestrator.rl.pretrain.coverage_days": coverage_days,
             },
         )
         _run_pretrain(cfg)

@@ -319,7 +319,7 @@ orchestrator:
       alpaca_api_secret: ${ALPACA_API_SECRET}
 ```
 
-Legacy ML orchestrator sweep (not compatible with the RL orchestrator):
+RL orchestrator sweep:
 
 ```bash
 docker compose run --rm trader python3 scripts/orchestrator_sweep.py --config /app/config/config.yaml
@@ -592,6 +592,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Updated orchestrator sweep script to use RL orchestrator settings.
 - Aligned orchestrator documentation with the RL implementation and marked legacy sweep usage.
 - Enabled backtest.run_when_closed and restarted tests-when-closed.
 - Rebuilt and restarted all services to apply the latest configuration.
