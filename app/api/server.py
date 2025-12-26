@@ -195,7 +195,7 @@ _DESCRIPTIONS = {
     "data.sources[].rate_limit_seconds": "Rate limit for source.",
     "data.sources[].api_key": "API key for source.",
     "news.enabled": "Enable news catalyst filtering.",
-    "news.provider": "News provider (alpaca).",
+    "news.provider": "News provider (alpaca or brokers).",
     "news.base_url": "News API base URL.",
     "news.api_key": "News API key (defaults to Alpaca key).",
     "news.api_secret": "News API secret (defaults to Alpaca secret).",

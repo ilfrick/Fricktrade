@@ -43,12 +43,15 @@ Online updates:
 
 News features:
 - `data.dynamic_symbols.ai_filter.news.enabled`
-- `data.dynamic_symbols.ai_filter.news.provider`
+- `data.dynamic_symbols.ai_filter.news.provider` (use `brokers` to aggregate from enabled brokers; currently Alpaca-backed)
 - `data.dynamic_symbols.ai_filter.news.base_url`
 - `data.dynamic_symbols.ai_filter.news.lookback_hours`
 - `data.dynamic_symbols.ai_filter.news.keywords`
 - `data.dynamic_symbols.ai_filter.news.timeout_seconds`
 - `data.dynamic_symbols.ai_filter.news.retries`
+
+Universe selection:
+- `data.dynamic_symbols.universe` (use `brokers_active` to start from enabled broker universes plus positions/orders)
 
 ## Usage
 - Enable dynamic symbols: `data.dynamic_symbols.enabled: true`.

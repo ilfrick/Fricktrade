@@ -39,6 +39,43 @@ def fetch_catalyst_symbols(
         return {s: False for s in symbols}
 
 
+def fetch_catalyst_symbols_for_config(
+    symbols: Iterable[str],
+    news_cfg: dict,
+    brokers_cfg: dict,
+) -> dict[str, bool]:
+    provider = str(news_cfg.get("provider", "alpaca"))
+    if provider != "brokers":
+        return fetch_catalyst_symbols(
+            symbols,
+            provider=provider,
+            base_url=str(news_cfg.get("base_url", "https://data.alpaca.markets")),
+            api_key=str(news_cfg.get("api_key", "")),
+            api_secret=str(news_cfg.get("api_secret", "")),
+            lookback_hours=int(news_cfg.get("lookback_hours", 12)),
+            keywords=list(news_cfg.get("keywords", [])),
+            timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
+            retries=int(news_cfg.get("retries", 2)),
+        )
+    catalysts = {s: False for s in symbols}
+    alpaca_cfg = brokers_cfg.get("alpaca", {}) if isinstance(brokers_cfg, dict) else {}
+    if alpaca_cfg.get("enabled", True):
+        alpaca = fetch_catalyst_symbols(
+            symbols,
+            provider="alpaca",
+            base_url=str(news_cfg.get("base_url", "https://data.alpaca.markets")),
+            api_key=str(news_cfg.get("api_key", "")),
+            api_secret=str(news_cfg.get("api_secret", "")),
+            lookback_hours=int(news_cfg.get("lookback_hours", 12)),
+            keywords=list(news_cfg.get("keywords", [])),
+            timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
+            retries=int(news_cfg.get("retries", 2)),
+        )
+        for sym, is_cat in alpaca.items():
+            catalysts[sym] = catalysts.get(sym, False) or is_cat
+    return catalysts
+
+
 def _fetch_alpaca_news(
     symbols: list[str],
     base_url: str,

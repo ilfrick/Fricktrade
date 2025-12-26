@@ -164,6 +164,8 @@ docker compose run --rm api
 - `data.interval` and `data.lookback_days` are clamped for yfinance intraday limits.
 - `data.session_gain_mode` controls session gain calculation (`gap` or `session`).
 - Dynamic symbol scanning is configured under `data.dynamic_symbols` (Alpaca snapshot-based scanner), enabled by default, refreshes every 5 minutes, supports cash-aware filtering with `cash_aware` (see `cash_cap_mode`), and can relax filters via `data.dynamic_symbols.fallback`.
+- `data.dynamic_symbols.universe: brokers_active` seeds the scanner/AI filter from enabled broker universes plus open positions and orders.
+- `news.provider: brokers` aggregates catalysts across enabled brokers (Alpaca-backed today).
 - Alerts are defined in `prometheus/alerts.yml` and a dedicated Grafana dashboard is provisioned for alerting/health.
 - Alertmanager handles email notifications via `alertmanager/alertmanager.yml`.
 - `market.open_mode` chooses whether any or all configured venues must be open to trade.
@@ -196,6 +198,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Added broker-backed news catalysts and a broker-aware universe option for the AI symbol filter.
 - Fixed multi-broker symbol aggregation, action-based routing, and fallback routing.
 - Guarded routing default to only select enabled brokers.
 - Added multi-broker routing support with broker-aware metrics and alerts.

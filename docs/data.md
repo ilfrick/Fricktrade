@@ -18,7 +18,9 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.output_dir`
 - `data.sources.*`
 - `data.dynamic_symbols.*`
+- `data.dynamic_symbols.universe` (`brokers_active` merges enabled broker universes with positions/orders)
 - `news.*`
+  - `news.provider: brokers` aggregates catalysts across enabled brokers (Alpaca-backed today)
 
 ## Ingest Example
 ```bash

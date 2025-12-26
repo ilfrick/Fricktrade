@@ -37,6 +37,8 @@ Centralize runtime settings for all subsystems.
 - Strategy selection: `strategy.name` or `strategy.names`.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
 - AI filter: `data.dynamic_symbols.ai_filter.enabled`.
+- Multi-broker universe: `data.dynamic_symbols.universe: brokers_active`.
+- Multi-broker news: `news.provider: brokers`.
 - Online learning: `learning.online.enabled`.
 - Checkpointing: `checkpointing.enabled`.
 - Multi-broker routing: `execution.brokers.enabled`.

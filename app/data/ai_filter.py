@@ -16,7 +16,8 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.enums import DataFeed
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
-from app.data.news import fetch_catalyst_symbols
+from app.data.news import fetch_catalyst_symbols_for_config
+
 
 @dataclass
 class AISymbolFilterConfig:
@@ -50,6 +51,7 @@ def score_symbols(
     api_key: str,
     api_secret: str,
     cfg: dict,
+    brokers_cfg: dict | None = None,
 ) -> tuple[list[str], dict[str, float]]:
     symbols = [s for s in symbols if s]
     if not symbols or not api_key or not api_secret:
@@ -65,7 +67,7 @@ def score_symbols(
     if model is None or stats is None:
         return symbols, {s: 0.0 for s in symbols}
 
-    catalyst_map = _fetch_news_catalysts(symbols, api_key, api_secret, config)
+    catalyst_map = _fetch_news_catalysts(symbols, api_key, api_secret, config, brokers_cfg or {})
     if config.online_enabled:
         if _online_update_model(symbols, api_key, api_secret, config, model, stats, catalyst_map):
             _save_model(model_path, model, stats)
@@ -184,7 +186,7 @@ def _train_model(symbols: list[str], api_key: str, api_secret: str, cfg: AISymbo
     logging.info("AI filter train device: %s", device)
     train_symbols = symbols[: cfg.train_max_symbols]
     bars = _fetch_bars(train_symbols, api_key, api_secret, cfg, limit_symbols=cfg.train_max_symbols)
-    catalyst_map = _fetch_news_catalysts(train_symbols, api_key, api_secret, cfg)
+    catalyst_map = _fetch_news_catalysts(train_symbols, api_key, api_secret, cfg, brokers_cfg or {})
     features, labels = _build_training_data(bars, cfg, catalyst_map)
     if features.size == 0:
         logging.warning("AI filter training skipped: no data")
@@ -438,20 +440,21 @@ def _fetch_news_catalysts(
     api_key: str,
     api_secret: str,
     cfg: AISymbolFilterConfig,
+    brokers_cfg: dict,
 ) -> dict[str, bool]:
     if not cfg.news_enabled:
         return {}
-    return fetch_catalyst_symbols(
-        symbols=symbols,
-        provider=cfg.news_provider,
-        base_url=cfg.news_base_url,
-        api_key=api_key,
-        api_secret=api_secret,
-        lookback_hours=cfg.news_lookback_hours,
-        keywords=cfg.news_keywords,
-        timeout_seconds=cfg.news_timeout_seconds,
-        retries=cfg.news_retries,
-    )
+    news_cfg = {
+        "provider": cfg.news_provider,
+        "base_url": cfg.news_base_url,
+        "api_key": api_key,
+        "api_secret": api_secret,
+        "lookback_hours": cfg.news_lookback_hours,
+        "keywords": cfg.news_keywords,
+        "timeout_seconds": cfg.news_timeout_seconds,
+        "retries": cfg.news_retries,
+    }
+    return fetch_catalyst_symbols_for_config(symbols, news_cfg, brokers_cfg)
 
 
 def build_feature_vector_from_series(

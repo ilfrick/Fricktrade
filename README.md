@@ -29,7 +29,7 @@ flowchart LR
         Ingest[Ingest pipeline]
         Scan[Dynamic symbol scanner]
         AIFilter[AI symbol filter<br/>online updates + news]
-        News[News catalyst fetcher]
+        News[News catalyst fetcher<br/>broker-backed]
     end
     subgraph Models["Model Store"]
         ModelStore[/data + /app/models/]
@@ -227,6 +227,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added broker-backed news catalysts and a broker-aware universe option for AI symbol filtering.
 - Added multi-broker routing with broker-aware metrics, backtest support, and config/UI updates.
 - Verified healthwatch metrics and sent test alert via Alertmanager.
 - Restarted healthwatch after fixing targets config.
