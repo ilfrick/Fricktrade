@@ -8,6 +8,7 @@
 - Verify account permissions (shorting, margin, PDT).
 - Check symbol venue gating and market hours.
 - Confirm quantity and notional limits.
+- Alertmanager now includes broker/code/symbol/side for rejected orders.
 
 ## AI filter not running
 - Ensure `data.dynamic_symbols.ai_filter.enabled: true`.

@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added order rejection metrics/alerts with broker and error code.
 - Guarded sell actions to skip when no long position exists.
 - Added config key validation in the UI to prevent typos from being applied.
 - Seeded symbols from checkpoint so active symbols persist during AI filter startup.

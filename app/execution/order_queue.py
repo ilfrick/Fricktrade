@@ -1,8 +1,10 @@
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.brokers.base import Broker
+from app.monitoring.metrics import ORDER_REJECTS
 
 
 @dataclass
@@ -95,6 +97,19 @@ class OrderQueue:
         try:
             order_id = self._broker.place_order(request.symbol, request.side, request.qty, request.order_type)
         except Exception as exc:
+            code = "unknown"
+            try:
+                payload = json.loads(str(exc))
+                if isinstance(payload, dict) and payload.get("code") is not None:
+                    code = str(payload.get("code"))
+            except Exception:
+                pass
+            ORDER_REJECTS.labels(
+                broker=self._broker_name,
+                symbol=request.symbol,
+                side=request.side,
+                code=code,
+            ).inc()
             logging.warning("Queued order failed (%s %s qty=%s): %s", request.side, request.symbol, request.qty, exc)
             self._responses.append(
                 OrderResponse(

@@ -6,6 +6,11 @@ SKIPPED_ORDERS = Counter(
     "Orders skipped by safety checks",
     ["symbol", "side", "reason"],
 )
+ORDER_REJECTS = Counter(
+    "order_rejects_total",
+    "Orders rejected by broker",
+    ["broker", "symbol", "side", "code"],
+)
 PNL = Gauge("pnl_percent", "Current PnL percent")
 DRAWDOWN = Gauge("drawdown_percent", "Current drawdown percent")
 ACCOUNT_TOTAL = Gauge("account_total", "Account total equity")
