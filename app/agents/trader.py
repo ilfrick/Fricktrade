@@ -675,6 +675,8 @@ class TradingAgent:
         self._dynamic_symbols_at = _dt_from_str(payload.get("dynamic_symbols_at"))
         self._symbols = list(payload.get("symbols", []))
         self._symbols_by_strategy = dict(payload.get("symbols_by_strategy", {}) or {})
+        if not self._symbols and self._dynamic_symbols:
+            self._symbols = list(self._dynamic_symbols)
         self._symbol_venues = dict(payload.get("symbol_venues", {}) or {})
         self._symbol_venues_at = _dt_from_str(payload.get("symbol_venues_at"))
         self._news_cache = dict(payload.get("news_cache", {}) or {})
