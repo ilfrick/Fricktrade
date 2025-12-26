@@ -64,6 +64,7 @@ class TradingAgent:
         self._open_orders_at: datetime | None = None
         self._open_orders_labels: set[tuple[str, str]] = set()
         self._dynamic_symbols_at: datetime | None = None
+        self._dynamic_symbols: list[str] = []
         self._symbols: list[str] = []
         self._symbols_by_strategy: dict[str, list[str]] = {}
         self._symbol_venues: dict[str, str] = {}
@@ -807,6 +808,7 @@ class TradingAgent:
             for name in self._strategy_names:
                 self._symbols_by_strategy[name] = ordered
             self._symbols = ordered
+            self._dynamic_symbols = list(ordered)
             self._dynamic_symbols_at = now
             return
         if ai_cfg.get("enabled", False) and score_symbols is None:
@@ -839,6 +841,7 @@ class TradingAgent:
                 self._symbols_by_strategy[name] = candidates
         if self._symbols_by_strategy:
             self._symbols = self._symbols_by_strategy.get("__global__", self._symbols)
+            self._dynamic_symbols = list(self._symbols)
         self._dynamic_symbols_at = now
         return
 

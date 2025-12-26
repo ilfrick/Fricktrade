@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Fixed dynamic symbol cache initialization after async AI filter change.
 - Made AI filter refresh async so the trader keeps the last valid symbols during updates.
 - Reduced AI filter lookback_days to 2 and redeployed the v2.0 stack.
 - Added broker API health metrics/alerts and rebuilt/restarted the v2.0 stack.
