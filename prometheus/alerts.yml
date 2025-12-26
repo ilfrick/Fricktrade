@@ -25,3 +25,19 @@ groups:
         annotations:
           summary: "Open orders stuck"
           description: "Open orders present for over 30 minutes."
+      - alert: ServiceDown
+        expr: healthwatch_service_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service down"
+          description: "Healthwatch cannot reach {{ $labels.service }}."
+      - alert: ServiceFlapping
+        expr: changes(healthwatch_service_up[15m]) > 4
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Service flapping"
+          description: "Healthwatch detected frequent restarts for {{ $labels.service }}."

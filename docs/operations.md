@@ -10,6 +10,11 @@
 - State is saved under `checkpointing.dir` (default `/data/checkpoints`).
 - Old checkpoint history is pruned by age and count.
 
+## Healthwatch and Autoheal
+- Healthwatch probes core services and exposes Prometheus metrics.
+- Alerts fire if services are down or flapping.
+- Autoheal restarts containers that fail health checks.
+
 ## Models and Artifacts
 - RL models: `/app/models` and `/data` (Docker volume).
 - Orchestrator checkpoints: `orchestrator.rl.*_path`.
