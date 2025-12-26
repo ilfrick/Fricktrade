@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Added config key validation in the web UI update flow to block typos.
 - Seeded symbols from checkpoint so active symbols persist during AI filter startup.
 - Initialized dynamic symbol cache to prevent checkpoint crashes after async refresh.
 - Made AI filter refresh async so the trader keeps the last valid symbols during updates.

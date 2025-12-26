@@ -270,6 +270,14 @@ async def update_config(payload: dict[str, Any]):
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}") from exc
     with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
         current_cfg = yaml.safe_load(handle) or {}
+    unknown_keys = _validate_config_keys(new_cfg, current_cfg)
+    if unknown_keys:
+        joined = ", ".join(sorted(unknown_keys)[:20])
+        suffix = "..." if len(unknown_keys) > 20 else ""
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown config keys: {joined}{suffix}",
+        )
     _merge_secrets(new_cfg, current_cfg)
     with open(CONFIG_PATH, "w", encoding="utf-8") as handle:
         yaml.safe_dump(new_cfg, handle, sort_keys=False)
@@ -324,6 +332,26 @@ def _merge_secrets(target: dict, source: dict) -> None:
                 new_val[path[-1]] = current
         except Exception:
             continue
+
+
+def _validate_config_keys(new_cfg: object, current_cfg: object, prefix: str = "") -> list[str]:
+    unknown: list[str] = []
+    if isinstance(new_cfg, dict) and isinstance(current_cfg, dict):
+        for key, value in new_cfg.items():
+            if key not in current_cfg:
+                unknown.append(f"{prefix}{key}")
+                continue
+            child_prefix = f"{prefix}{key}."
+            unknown.extend(_validate_config_keys(value, current_cfg.get(key), child_prefix))
+        return unknown
+    if isinstance(new_cfg, list) and isinstance(current_cfg, list):
+        if not current_cfg:
+            return unknown
+        schema = current_cfg[0]
+        for idx, item in enumerate(new_cfg):
+            child_prefix = f"{prefix}[{idx}]."
+            unknown.extend(_validate_config_keys(item, schema, child_prefix))
+    return unknown
 
 
 def _render_ui() -> str:
@@ -462,6 +490,10 @@ def _render_ui() -> str:
       const payload = { yaml: document.getElementById('config').value };
       const res = await fetch('/config/update', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const data = await res.json();
+      if (!res.ok) {
+        document.getElementById('status').textContent = data.detail || 'Config update failed.';
+        return;
+      }
       document.getElementById('status').textContent = data.restart_required ? 'Config saved. Restart required.' : 'Config saved.';
     }
     async function requestRestart() {

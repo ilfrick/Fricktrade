@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added config key validation in the UI to prevent typos from being applied.
 - Seeded symbols from checkpoint so active symbols persist during AI filter startup.
 - Fixed dynamic symbol cache initialization after async AI filter change.
 - Made AI filter refresh async so the trader keeps the last valid symbols during updates.

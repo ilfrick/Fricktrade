@@ -29,6 +29,7 @@ Centralize runtime settings for all subsystems.
 ## Editing Configuration
 - Edit `config/config.yaml` directly or use the web UI at `/ui`.
 - Most keys support `${ENV_VAR}` interpolation.
+- The web UI rejects unknown keys and shows an error instead of applying changes.
 - After changes, rebuild/restart containers to apply: `docker compose up -d --build`.
 
 ## Common Toggles
