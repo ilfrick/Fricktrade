@@ -25,7 +25,7 @@ from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols
-from app.data.scanner import ScanFilters, load_universe, scan_symbols
+from app.data.scanner import ScanFilters, load_symbol_venues, load_universe, scan_symbols
 try:
     from app.data.ai_filter import score_symbols
 except Exception:
@@ -64,6 +64,8 @@ class TradingAgent:
         self._dynamic_symbols_at: datetime | None = None
         self._symbols: list[str] = []
         self._symbols_by_strategy: dict[str, list[str]] = {}
+        self._symbol_venues: dict[str, str] = {}
+        self._symbol_venues_at: datetime | None = None
         self._orchestrator_state: dict[str, dict[str, object]] = {}
         self._last_trade_at: datetime | None = None
         self._position_symbols: set[str] = set()
@@ -546,6 +548,7 @@ class TradingAgent:
             self._refresh_news_cache(symbols)
             self._log_news_cache()
             self._refresh_dynamic_symbols(portfolio)
+            self._refresh_symbol_venues()
             self._log_ai_filter_heartbeat()
             symbols = self._resolve_active_symbols()
             symbols = self._merge_symbols_with_positions(symbols, portfolio)
@@ -586,10 +589,37 @@ class TradingAgent:
         market_cfg = self.cfg.get("market", {})
         venue_map = market_cfg.get("symbol_venues", {}) or {}
         default_venue = str(market_cfg.get("default_symbol_venue", "")).strip()
-        venue = str(venue_map.get(symbol, default_venue)).strip()
+        venue = str(venue_map.get(symbol) or self._symbol_venues.get(symbol) or default_venue).strip()
         if not venue:
             return is_market_open(self.cfg)
         return is_venue_open(self.cfg, venue)
+
+    def _refresh_symbol_venues(self) -> None:
+        market_cfg = self.cfg.get("market", {})
+        auto_cfg = market_cfg.get("symbol_venues_auto", {})
+        if not auto_cfg.get("enabled", False):
+            return
+        now = datetime.utcnow()
+        interval = int(auto_cfg.get("refresh_minutes", 60))
+        if self._symbol_venues_at and (now - self._symbol_venues_at).total_seconds() < interval * 60:
+            return
+        alpaca_cfg = self.cfg.get("brokers", {}).get("alpaca", {})
+        api_key = alpaca_cfg.get("api_key", "")
+        api_secret = alpaca_cfg.get("api_secret", "")
+        if not api_key or not api_secret:
+            return
+        exchange_map = auto_cfg.get("exchange_venue_map", {}) or {}
+        if not exchange_map:
+            return
+        max_symbols = int(auto_cfg.get("max_symbols", 50000))
+        try:
+            venues = load_symbol_venues(api_key, api_secret, max_symbols, exchange_map)
+        except Exception as exc:
+            logging.warning("Symbol venue refresh failed: %s", exc)
+            return
+        if venues:
+            self._symbol_venues = venues
+            self._symbol_venues_at = now
 
     def _log_ai_filter_heartbeat(self) -> None:
         dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})

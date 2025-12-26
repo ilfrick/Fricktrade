@@ -130,6 +130,38 @@ def load_universe(
     return [s for s in universe if s]
 
 
+def load_symbol_venues(
+    api_key: str,
+    api_secret: str,
+    max_symbols: int,
+    exchange_map: dict[str, str],
+) -> dict[str, str]:
+    client = TradingClient(api_key, api_secret, raw_data=True)
+    assets = client.get_all_assets()
+    venues: dict[str, str] = {}
+    for asset in assets:
+        status = asset.get("status")
+        tradable = asset.get("tradable")
+        asset_class = asset.get("class") or asset.get("asset_class")
+        if status != "active":
+            continue
+        if tradable is not True:
+            continue
+        if asset_class != "us_equity":
+            continue
+        symbol = asset.get("symbol")
+        exchange = asset.get("exchange")
+        if not symbol or not exchange:
+            continue
+        venue = exchange_map.get(str(exchange).upper())
+        if not venue:
+            continue
+        venues[str(symbol)] = venue
+        if len(venues) >= max_symbols:
+            break
+    return venues
+
+
 def _passes_filters(
     filters: ScanFilters,
     price: float,

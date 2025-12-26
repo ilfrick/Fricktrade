@@ -10,6 +10,9 @@ Centralize runtime settings for all subsystems.
 ## Key Sections
 - `app.*` (logging, intervals)
 - `market.*` (venues, hours, symbol venue mapping)
+  - `market.default_symbol_venue` (fallback venue for unmapped symbols)
+  - `market.symbol_venues` (manual symbol -> venue mapping)
+  - `market.symbol_venues_auto` (auto-refresh mapping from broker)
 - `data.*` (symbols, dynamic scan, sources)
 - `news.*`
 - `strategy.*`

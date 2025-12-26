@@ -12,6 +12,15 @@ market:
   default_currency: EUR
   default_symbol_venue: NYSE
   symbol_venues: {}
+  symbol_venues_auto:
+    enabled: true
+    refresh_minutes: 1440
+    max_symbols: 50000
+    exchange_venue_map:
+      NYSE: NYSE
+      NASDAQ: Nasdaq
+      ARCA: NYSE
+      AMEX: NYSE
   open_mode: any
   holiday_update:
     enabled: true
