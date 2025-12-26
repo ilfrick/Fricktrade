@@ -13,6 +13,7 @@ execution, and metrics updates.
 - Skips trading when markets are closed.
 - Runs per-symbol signals, combines them, applies guardrails, sizes orders,
   and submits via `ExecutionEngine`.
+- `sell` actions are ignored when no long position exists (prevents short attempts).
 - Saves periodic checkpoints of in-memory state for reboot resilience.
 
 ## Key Components
