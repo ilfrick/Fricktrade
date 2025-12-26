@@ -10,6 +10,8 @@ logging:
 market:
   venue: Multi
   default_currency: EUR
+  default_symbol_venue: NYSE
+  symbol_venues: {}
   open_mode: any
   holiday_update:
     enabled: true

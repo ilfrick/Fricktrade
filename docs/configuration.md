@@ -9,6 +9,7 @@ Centralize runtime settings for all subsystems.
 
 ## Key Sections
 - `app.*` (logging, intervals)
+- `market.*` (venues, hours, symbol venue mapping)
 - `data.*` (symbols, dynamic scan, sources)
 - `news.*`
 - `strategy.*`

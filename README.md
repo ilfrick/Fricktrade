@@ -592,6 +592,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Added per-symbol venue gating to prevent orders when a symbol’s market is closed.
 - RL orchestrator sweep running in dev (in progress).
 - Orchestrator sweep rerun requested after image refresh.
 - Orchestrator sweep now falls back to backtest CSV symbols when data.symbols is empty.
