@@ -507,10 +507,13 @@ class TradingAgent:
         return {self._resolve_default_broker_name(): self.broker}
 
     def _resolve_default_broker_name(self) -> str:
+        brokers_cfg = self.cfg.get("brokers", {})
         routing_default = str(self._routing_cfg.get("default", "")).strip()
         if routing_default:
-            return routing_default
-        brokers_cfg = self.cfg.get("brokers", {})
+            if routing_default == "alpaca" and brokers_cfg.get("alpaca", {}).get("enabled", True):
+                return routing_default
+            if routing_default == "ibkr" and brokers_cfg.get("ibkr", {}).get("enabled", False):
+                return routing_default
         if brokers_cfg.get("ibkr", {}).get("enabled", False):
             return "ibkr"
         return "alpaca"

@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Guarded routing default to only select enabled brokers.
 - Added multi-broker routing support with broker-aware metrics and alerts.
 - Added rejection reason labels to order rejection alerts and logs.
 - Added order rejection metrics/alerts with broker and error code.
