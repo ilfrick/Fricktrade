@@ -592,6 +592,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Added checkpointing with retention for trader/learner state to resume across reboots.
 - Waiting on v2.0 training completion (in progress).
 - v2.0 training still running after extended wait.
 - Monitoring v2.0 training run (in progress).

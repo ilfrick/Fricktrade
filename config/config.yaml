@@ -178,7 +178,7 @@ orchestrator:
     min_price_move_pct: 0.02
     reward_scale: 1.0
     max_grad_norm: 1.0
-    save_interval_seconds: 300
+    save_interval_seconds: 60
     score_ema_alpha: 0.1
     time_penalty_per_bar: 0.05
     pretrain:
@@ -358,6 +358,15 @@ data:
     enabled: false
     api_key: ${ALPHAVANTAGE_API_KEY}
     symbols: []
+
+checkpointing:
+  enabled: true
+  interval_seconds: 60
+  dir: /data/checkpoints
+  keep_history: true
+  retention:
+    max_age_hours: 72
+    max_files: 200
     interval: 5m
     rate_limit_seconds: 15
 news:

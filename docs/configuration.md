@@ -24,3 +24,4 @@ Centralize runtime settings for all subsystems.
 - `brokers.*`
 - `backtest.*`
 - `monitoring.*`
+- `checkpointing.*` (periodic state checkpoints + retention)

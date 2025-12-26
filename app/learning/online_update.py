@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 
 from app.learning.train_rl import train_from_config
+from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 from app.utils.restart import should_restart
 
 
@@ -68,13 +69,21 @@ def _ensure_exclusive(cfg: dict) -> tuple[bool, str]:
     return True, owner
 
 
-def _sleep_with_lock(cfg: dict, owner: str, total_seconds: int, refresh_seconds: int = 60) -> None:
+def _sleep_with_lock(
+    cfg: dict,
+    owner: str,
+    total_seconds: int,
+    refresh_seconds: int = 60,
+    checkpoint_cb=None,
+) -> None:
     path = _lock_path(cfg)
     remaining = total_seconds
     while remaining > 0:
         _write_lock(path, owner)
         interval = min(refresh_seconds, remaining)
         time.sleep(interval)
+        if checkpoint_cb:
+            checkpoint_cb()
         remaining -= interval
 
 
@@ -108,9 +117,30 @@ def run_online_updates(cfg: dict) -> None:
     timesteps = int(online_cfg.get("timesteps", 1000))
     eval_split = float(online_cfg.get("eval_split", 0.1))
     resume = bool(learning_cfg.get("training", {}).get("resume", True))
+    checkpoint_state = {"at": None}
+    initial_delay = _initial_delay_seconds(cfg, interval_minutes)
 
     started_at = datetime.utcnow()
     while True:
+        if initial_delay > 0:
+            ok, owner = _ensure_exclusive(cfg)
+            if ok:
+                logging.info("Resuming learner after restart; sleeping %ds", initial_delay)
+                def _checkpoint_tick() -> None:
+                    checkpoint_state["at"] = _checkpoint_learner(
+                        cfg,
+                        checkpoint_state["at"],
+                        status="sleeping",
+                        owner=owner,
+                        timesteps=timesteps,
+                        eval_split=eval_split,
+                    )
+
+                _sleep_with_lock(cfg, owner, initial_delay, checkpoint_cb=_checkpoint_tick)
+                initial_delay = 0
+            else:
+                time.sleep(60)
+            continue
         ok, owner = _ensure_exclusive(cfg)
         if not ok:
             if should_restart(started_at):
@@ -127,5 +157,61 @@ def run_online_updates(cfg: dict) -> None:
         loop_cfg["learning"]["training"]["eval_split"] = eval_split
         logging.info("Starting online update (%d timesteps)", timesteps)
         _train_with_lock(loop_cfg, resume=resume, cfg=cfg, owner=owner)
+        checkpoint_state["at"] = _checkpoint_learner(
+            cfg,
+            checkpoint_state["at"],
+            status="completed",
+            owner=owner,
+            timesteps=timesteps,
+            eval_split=eval_split,
+        )
         logging.info("Online update complete; sleeping %d minutes", interval_minutes)
-        _sleep_with_lock(cfg, owner, interval_minutes * 60)
+
+        def _checkpoint_tick() -> None:
+            checkpoint_state["at"] = _checkpoint_learner(
+                cfg,
+                checkpoint_state["at"],
+                status="sleeping",
+                owner=owner,
+                timesteps=timesteps,
+                eval_split=eval_split,
+            )
+
+        _sleep_with_lock(cfg, owner, interval_minutes * 60, checkpoint_cb=_checkpoint_tick)
+
+
+def _checkpoint_learner(
+    cfg: dict,
+    last_saved_at: datetime | None,
+    status: str,
+    owner: str,
+    timesteps: int,
+    eval_split: float,
+) -> datetime | None:
+    payload = {
+        "status": status,
+        "owner": owner,
+        "timesteps": timesteps,
+        "eval_split": eval_split,
+        "last_update_at": datetime.utcnow().isoformat(),
+    }
+    return maybe_save_checkpoint("learner", payload, cfg, last_saved_at)
+
+
+def _initial_delay_seconds(cfg: dict, interval_minutes: int) -> int:
+    data = load_checkpoint("learner", cfg)
+    if not data:
+        return 0
+    payload = data.get("payload", {}) or {}
+    last_update = payload.get("last_update_at")
+    if not last_update:
+        return 0
+    try:
+        last_dt = datetime.fromisoformat(last_update)
+    except Exception:
+        return 0
+    next_dt = last_dt + timedelta(minutes=interval_minutes)
+    delta = next_dt - datetime.utcnow()
+    if delta.total_seconds() <= 0:
+        return 0
+    return int(delta.total_seconds())
