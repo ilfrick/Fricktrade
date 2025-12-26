@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Ran pytest with warnings output (10 passed, 4 warnings).
 - Applied scalping-oriented configuration defaults (tighter stops, faster cadence).
 - Rebuilt and redeployed the dev stack to apply symbol venue refresh.
 - Added automatic Alpaca symbol-to-venue refresh for per-symbol market gating.
