@@ -1,4 +1,4 @@
-from prometheus_client import Gauge, Counter, start_http_server
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
 TRADES = Counter("trades_total", "Total trades executed", ["symbol", "side"])
 SKIPPED_ORDERS = Counter(
@@ -22,6 +22,21 @@ OPEN_ORDERS = Gauge("open_orders", "Open orders", ["symbol", "side"])
 BROKER_ACTIVE = Gauge("broker_active", "Active broker", ["broker"])
 POSITION_QTY = Gauge("position_qty", "Position quantity", ["symbol"])
 POSITION_VALUE = Gauge("position_value", "Position market value", ["symbol"])
+BROKER_REQUESTS = Counter(
+    "broker_requests_total",
+    "Broker API requests",
+    ["broker", "method", "status"],
+)
+BROKER_LAST_SUCCESS = Gauge(
+    "broker_last_success_timestamp_seconds",
+    "Last successful broker API call",
+    ["broker", "method"],
+)
+BROKER_LATENCY = Histogram(
+    "broker_request_latency_seconds",
+    "Broker API request latency",
+    ["broker", "method"],
+)
 
 
 def start_metrics_server(port: int):

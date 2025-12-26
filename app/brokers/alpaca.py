@@ -3,35 +3,43 @@ from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
 
 from app.brokers.base import Broker
+from app.monitoring.broker_metrics import record_broker_call
 
 
 class AlpacaBroker(Broker):
     def __init__(self, api_key: str, api_secret: str, base_url: str, paper: bool = True):
         self.client = TradingClient(api_key, api_secret, paper=paper, url_override=base_url)
+        self._name = "alpaca"
 
     def is_connected(self) -> bool:
         try:
-            self.client.get_account()
+            record_broker_call(self._name, "get_account", self.client.get_account)
             return True
         except Exception:
             return False
 
     def get_account(self) -> dict:
-        account = self.client.get_account()
+        account = record_broker_call(self._name, "get_account", self.client.get_account)
         return account.dict()
 
     def get_positions(self) -> list[dict]:
-        try:
-            positions = self.client.get_all_positions()
-        except AttributeError:
-            positions = self.client.list_positions()
+        def _fetch_positions():
+            try:
+                return self.client.get_all_positions()
+            except AttributeError:
+                return self.client.list_positions()
+
+        positions = record_broker_call(self._name, "get_positions", _fetch_positions)
         return [pos.dict() if hasattr(pos, "dict") else dict(pos) for pos in positions]
 
     def get_open_orders(self) -> list[dict]:
-        try:
-            orders = self.client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
-        except AttributeError:
-            orders = self.client.list_orders(status="open")
+        def _fetch_orders():
+            try:
+                return self.client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+            except AttributeError:
+                return self.client.list_orders(status="open")
+
+        orders = record_broker_call(self._name, "get_open_orders", _fetch_orders)
         results = []
         for order in orders:
             data = order.dict() if hasattr(order, "dict") else dict(order)
@@ -56,12 +64,17 @@ class AlpacaBroker(Broker):
             side=OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL,
             time_in_force=TimeInForce.DAY,
         )
-        order = self.client.submit_order(order_req)
+        order = record_broker_call(
+            self._name,
+            "place_order",
+            self.client.submit_order,
+            order_req,
+        )
         return order.id
 
     def close_position(self, symbol: str) -> None:
         try:
-            self.client.close_position(symbol)
+            record_broker_call(self._name, "close_position", self.client.close_position, symbol)
         except Exception:
             # Ignore if position does not exist.
             return
@@ -69,4 +82,4 @@ class AlpacaBroker(Broker):
     def cancel_order(self, order_id: str) -> None:
         if not order_id:
             return
-        self.client.cancel_order_by_id(order_id)
+        record_broker_call(self._name, "cancel_order", self.client.cancel_order_by_id, order_id)

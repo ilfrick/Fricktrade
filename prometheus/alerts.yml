@@ -25,6 +25,26 @@ groups:
         annotations:
           summary: "Open orders stuck"
           description: "Open orders present for over 30 minutes."
+      - alert: BrokerApiErrorRate
+        expr: |
+          sum by (broker) (rate(broker_requests_total{status="error"}[10m]))
+          /
+          sum by (broker) (rate(broker_requests_total[10m]))
+          > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Broker API error rate elevated"
+          description: "Broker {{ $labels.broker }} has >20% error rate over 10m."
+      - alert: BrokerApiNoSuccess
+        expr: time() - max_over_time(broker_last_success_timestamp_seconds[10m]) > 600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful broker API calls"
+          description: "No successful broker calls observed in 10m."
       - alert: ServiceDown
         expr: healthwatch_service_up == 0
         for: 2m
