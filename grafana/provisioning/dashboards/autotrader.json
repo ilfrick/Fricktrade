@@ -465,6 +465,34 @@
           }
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Broker API Calls (1m)",
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum by (broker, method, status) (increase(broker_requests_total[1m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "axisPlacement": "auto",
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 30
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

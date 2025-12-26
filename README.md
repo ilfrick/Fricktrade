@@ -234,6 +234,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added Grafana panel for broker API call activity.
 - Fixed Mermaid label text so the architecture diagram renders in master.
 - Ensured dynamic universe always keeps positions/orders and hardened broker-backed news fetching.
 - Fixed architecture diagram to show broker-backed news inputs.
