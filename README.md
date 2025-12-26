@@ -592,6 +592,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Ran pytest with warnings output (10 passed, 4 warnings).
 - Applied scalping-oriented configuration defaults (tighter stops, faster cadence).
 - Rebuilt and redeployed the live stack to apply symbol venue refresh.
 - Added automatic Alpaca symbol-to-venue refresh for per-symbol market gating.
