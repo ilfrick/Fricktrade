@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Added rejection reason labels to order rejection alerts and logs.
 - Added order rejection metrics/alerts with broker and error code.
 - Guarded sell actions to skip when no long position exists.
 - Added config key validation in the web UI update flow to block typos.

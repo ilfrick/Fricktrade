@@ -104,13 +104,23 @@ class OrderQueue:
                     code = str(payload.get("code"))
             except Exception:
                 pass
+            reason = _reject_reason(code, exc)
             ORDER_REJECTS.labels(
                 broker=self._broker_name,
                 symbol=request.symbol,
                 side=request.side,
                 code=code,
+                reason=reason,
             ).inc()
-            logging.warning("Queued order failed (%s %s qty=%s): %s", request.side, request.symbol, request.qty, exc)
+            logging.warning(
+                "Queued order failed (%s %s qty=%s code=%s reason=%s): %s",
+                request.side,
+                request.symbol,
+                request.qty,
+                code,
+                reason,
+                exc,
+            )
             self._responses.append(
                 OrderResponse(
                     symbol=request.symbol,
@@ -134,6 +144,20 @@ class OrderQueue:
                 qty=request.qty,
             )
         )
+
+
+def _reject_reason(code: str, exc: Exception) -> str:
+    mapping = {
+        "40310100": "pdt_protection",
+    }
+    if code in mapping:
+        return mapping[code]
+    text = str(exc).lower()
+    if "pattern day trading" in text or "pdt" in text:
+        return "pdt_protection"
+    if "insufficient" in text or "insufficient buying power" in text:
+        return "insufficient_funds"
+    return "unknown"
 
     def _response_from_snapshot(self, snapshot: dict, fallback_status: str) -> dict | None:
         if not snapshot:

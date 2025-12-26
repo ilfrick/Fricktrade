@@ -18,13 +18,13 @@ groups:
           summary: "Order failures detected"
           description: "Order failures observed in the last 15 minutes."
       - alert: OrderRejected
-        expr: sum by (broker, symbol, side, code) (increase(order_rejects_total[15m])) > 0
+        expr: sum by (broker, symbol, side, code, reason) (increase(order_rejects_total[15m])) > 0
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Order rejected by broker"
-          description: "Broker {{ $labels.broker }} rejected {{ $labels.side }} {{ $labels.symbol }} (code={{ $labels.code }})."
+          description: "Broker {{ $labels.broker }} rejected {{ $labels.side }} {{ $labels.symbol }} (code={{ $labels.code }}, reason={{ $labels.reason }})."
       - alert: OpenOrdersStuck
         expr: max_over_time(open_orders[30m]) > 0
         for: 30m
