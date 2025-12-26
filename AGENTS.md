@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Made AI filter refresh async so the trader keeps the last valid symbols during updates.
 - Reduced AI filter lookback_days to 2 to speed live scoring.
 - Enforced exclusive learner execution with GPU preference for online training.
 - Added AI filter device logging for GPU/CPU confirmation.

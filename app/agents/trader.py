@@ -2,6 +2,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 from app.execution.executor import ExecutionEngine
 from app.execution.order_queue import OrderQueue
@@ -73,6 +74,9 @@ class TradingAgent:
         self._ai_filter_last_run_at: datetime | None = None
         self._ai_filter_last_log_at: datetime | None = None
         self._ai_filter_last_count: int = 0
+        self._ai_filter_executor = ThreadPoolExecutor(max_workers=1)
+        self._ai_filter_future = None
+        self._ai_filter_inflight_at: datetime | None = None
         self._checkpoint_at: datetime | None = None
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
@@ -740,6 +744,7 @@ class TradingAgent:
             return
         if self._news_cache_at is None:
             return
+        last = self._news_cache_at
         count = len(self._news_cache)
         logging.info("News catalyst cache updated; symbols=%d", count)
 
@@ -768,8 +773,27 @@ class TradingAgent:
         self._symbols_by_strategy = {}
         ai_cfg = dyn_cfg.get("ai_filter", {})
         if ai_cfg.get("enabled", False) and score_symbols is not None:
-            logging.info("AI filter run starting; universe=%d", len(universe))
-            ordered, scores = score_symbols(universe, api_key, api_secret, ai_cfg)
+            if self._ai_filter_future is None:
+                logging.info("AI filter run starting; universe=%d", len(universe))
+                self._ai_filter_future = self._ai_filter_executor.submit(
+                    score_symbols,
+                    universe,
+                    api_key,
+                    api_secret,
+                    ai_cfg,
+                )
+                self._ai_filter_inflight_at = now
+                return
+            if not self._ai_filter_future.done():
+                return
+            try:
+                ordered, scores = self._ai_filter_future.result()
+            except Exception as exc:
+                logging.warning("AI filter run failed: %s", exc)
+                ordered = []
+                scores = {}
+            self._ai_filter_future = None
+            self._ai_filter_inflight_at = None
             logging.info(
                 "AI filter scored %d symbols (enabled); top=%s",
                 len(ordered),
