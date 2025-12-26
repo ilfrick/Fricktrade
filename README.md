@@ -55,6 +55,7 @@ flowchart LR
         AgentBT[Agent backtest engine]
     end
     subgraph Broker["Broker Layer"]
+        Router[Broker Router]
         Alpaca[Alpaca]
         IBKR[IBKR]
     end
@@ -81,8 +82,9 @@ flowchart LR
     RLTrain --> ModelStore
     OrchPretrain --> ModelStore
     AIFilterTrain --> ModelStore
-    Trader --> Strat --> Orchestrator --> Risk --> Queue --> Orders --> Exec --> Alpaca
-    Exec --> IBKR
+    Trader --> Strat --> Orchestrator --> Risk --> Queue --> Orders --> Exec --> Router
+    Router --> Alpaca
+    Router --> IBKR
     Alpaca --> Queue
     IBKR --> Queue
     Queue --> Orchestrator
@@ -225,6 +227,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added multi-broker routing with broker-aware metrics, backtest support, and config/UI updates.
 - Verified healthwatch metrics and sent test alert via Alertmanager.
 - Restarted healthwatch after fixing targets config.
 - Rebuilt dev stack with healthwatch/autoheal and resolved API port conflict.
