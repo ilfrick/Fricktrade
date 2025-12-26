@@ -250,6 +250,13 @@ class TradingAgent:
             SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="account_blocked").inc()
             logging.info("Skipping %s for %s: account blocked", action, symbol)
             return None
+        if action == "sell":
+            positions = portfolio.get("positions", {})
+            current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
+            if current_qty <= 0:
+                SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="no_position").inc()
+                logging.info("Skipping %s for %s: no position", action, symbol)
+                return None
         if self._is_action_blocked(symbol, action):
             SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="limit_block").inc()
             logging.info("Skipping %s for %s: limits block action", action, symbol)
