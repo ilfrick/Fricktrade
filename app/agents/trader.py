@@ -1014,9 +1014,12 @@ class TradingAgent:
                 extras.add(symbol)
         for symbol in self.cfg.get("data", {}).get("symbols", []):
             extras.add(symbol)
-        ordered = []
+        extras_ordered = sorted(extras)
+        if len(extras_ordered) >= max_universe:
+            return extras_ordered
+        ordered: list[str] = []
         seen = set()
-        for symbol in universe + sorted(extras):
+        for symbol in extras_ordered + universe:
             if symbol in seen:
                 continue
             ordered.append(symbol)

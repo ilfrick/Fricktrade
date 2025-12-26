@@ -198,6 +198,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Ensured dynamic universe always keeps positions/orders and hardened broker-backed news fetching.
 - Fixed architecture diagram to show broker-backed news inputs.
 - Fixed OrderQueue snapshot response handling so tests pass.
 - Updated the architecture diagram to show broker-backed news and broker universe inputs.
