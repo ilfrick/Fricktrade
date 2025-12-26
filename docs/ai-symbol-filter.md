@@ -10,6 +10,7 @@ Scores a large universe of symbols and returns an ordered list for trading.
 - Adds a news catalyst flag per symbol to the feature vector.
 - Scores each symbol and sorts by descending score.
 - Optionally performs lightweight online updates on the latest bars.
+- While a refresh is in-flight, the trading loop keeps using the last valid symbol list.
 
 ## Feature Window
 - Uses the last `window` returns and volumes for each symbol.
