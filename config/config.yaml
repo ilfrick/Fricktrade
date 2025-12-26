@@ -286,7 +286,7 @@ data:
     ai_filter:
       enabled: true
       interval: 1m
-      lookback_days: 30
+      lookback_days: 2
       window: 20
       retrain_hours: 6
       model_path: /data/ai_symbol_filter.pt

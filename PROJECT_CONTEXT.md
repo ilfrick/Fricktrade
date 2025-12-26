@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Reduced AI filter lookback_days to 2 and redeployed the v2.0 stack.
 - Added broker API health metrics/alerts and rebuilt/restarted the v2.0 stack.
 - Verified healthwatch metrics and sent test alert via Alertmanager.
 - Restarted healthwatch after fixing targets config.
@@ -64,7 +65,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and redeployed the live stack with scalping settings.
 - Ran pytest with warnings output (10 passed, 4 warnings).
 - Applied scalping-oriented configuration defaults (tighter stops, faster cadence).
-- Rebuilt and redeployed the dev stack to apply symbol venue refresh.
+- Rebuilt and redeployed the live stack to apply symbol venue refresh.
 - Added automatic Alpaca symbol-to-venue refresh for per-symbol market gating.
 - Rebuilt and restarted the live stack after adding per-symbol venue gating.
 - Added per-symbol venue gating to prevent orders when a symbol’s market is closed.

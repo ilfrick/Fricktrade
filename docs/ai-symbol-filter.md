@@ -15,6 +15,7 @@ Scores a large universe of symbols and returns an ordered list for trading.
 - Uses the last `window` returns and volumes for each symbol.
 - Feature vector: mean return, std return, momentum sum, last return,
   volume z-score, catalyst flag.
+- Keep `lookback_days` low for live runs to reduce scoring latency (current default: 2).
 
 ## Configuration
 `config/config.yaml`:
