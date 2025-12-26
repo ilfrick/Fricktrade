@@ -9,6 +9,10 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["trader:8001"]
+  - job_name: healthwatch
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["healthwatch:9105"]
 
 alerting:
   alertmanagers:

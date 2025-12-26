@@ -25,3 +25,8 @@
 ## Containers restarting
 - Check logs for stack traces.
 - Validate config YAML for invalid values.
+
+## Healthwatch alerts firing
+- Confirm `healthwatch` container is running.
+- Check `healthwatch_service_up` metrics in Prometheus.
+- Verify service URLs in `healthwatch.targets`.

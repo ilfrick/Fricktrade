@@ -218,6 +218,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added healthwatch + autoheal with alerts for service restarts.
 - Rebuilt and restarted live stack to restore trader service.
 - Restructured README and docs into a progressive guide with new ops/testing/deploy pages.
 - Rebuilt dev tests image and re-ran pytest (13 passed, 14 warnings).

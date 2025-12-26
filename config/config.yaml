@@ -367,6 +367,18 @@ checkpointing:
   retention:
     max_age_hours: 72
     max_files: 200
+
+healthwatch:
+  enabled: true
+  interval_seconds: 30
+  timeout_seconds: 5
+  port: 9105
+  targets:
+    trader: http://trader:8001/metrics
+    api: http://api:8000/health
+    prometheus: http://prometheus:9090/-/healthy
+    grafana: http://grafana:3000/api/health
+    alertmanager: http://alertmanager:9093/-/healthy
     interval: 5m
     rate_limit_seconds: 15
 news:
