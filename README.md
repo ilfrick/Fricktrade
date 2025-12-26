@@ -26,10 +26,11 @@ flowchart LR
         YF[yfinance live data]
         AlpacaBars[Alpaca historical bars]
         AlpacaAssets[Alpaca assets/universe]
+        BrokerUniverse[Broker universes<br/>enabled brokers (Alpaca today)]
         Ingest[Ingest pipeline]
         Scan[Dynamic symbol scanner]
         AIFilter[AI symbol filter<br/>online updates + news]
-        News[News catalyst fetcher<br/>broker-backed]
+        News[News catalyst fetcher<br/>broker-backed (Alpaca today)]
     end
     subgraph Models["Model Store"]
         ModelStore[/data + /app/models/]
@@ -73,6 +74,8 @@ flowchart LR
     AlpacaBars --> AIFilterTrain
     AlpacaAssets --> Scan
     AlpacaAssets --> AIFilter
+    BrokerUniverse --> Scan
+    BrokerUniverse --> AIFilter
     Scan --> Trader
     AIFilter --> Trader
     AIFilter --> AIFeatures --> Orchestrator
@@ -85,6 +88,8 @@ flowchart LR
     Trader --> Strat --> Orchestrator --> Risk --> Queue --> Orders --> Exec --> Router
     Router --> Alpaca
     Router --> IBKR
+    Alpaca --> BrokerUniverse
+    IBKR --> BrokerUniverse
     Alpaca --> Queue
     IBKR --> Queue
     Queue --> Orchestrator
@@ -227,6 +232,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Updated the architecture diagram to show broker-backed news and broker universe inputs.
 - Added broker-backed news catalysts and a broker-aware universe option for AI symbol filtering.
 - Added multi-broker routing with broker-aware metrics, backtest support, and config/UI updates.
 - Verified healthwatch metrics and sent test alert via Alertmanager.
