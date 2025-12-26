@@ -218,6 +218,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Rebuilt dev tests image and re-ran pytest (13 passed, 14 warnings).
 - Re-ran pytest after checkpoint fix (13 passed, 14 warnings).
 - Ran dev pytest after checkpoint tests (10 passed, 14 warnings).
 - Ran pytest after adding checkpoint tests (10 passed).
