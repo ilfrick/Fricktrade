@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Fixed architecture diagram to show broker-backed news inputs.
 - Fixed OrderQueue snapshot response handling so tests pass.
 - Updated the architecture diagram to show broker-backed news and broker universe inputs.
 - Added broker-backed news catalysts and a broker-aware universe option for the AI symbol filter.
