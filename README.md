@@ -592,6 +592,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Started v2.0 training run (in progress).
 - Rebuilt and redeployed the dev stack with scalping settings.
 - Rebuilt and redeployed the live stack with scalping settings.
 - Ran pytest with warnings output (10 passed, 4 warnings).
