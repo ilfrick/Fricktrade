@@ -26,6 +26,7 @@ from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols
 from app.data.scanner import ScanFilters, load_symbol_venues, load_universe, scan_symbols
+from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 try:
     from app.data.ai_filter import score_symbols
 except Exception:
@@ -72,6 +73,7 @@ class TradingAgent:
         self._ai_filter_last_run_at: datetime | None = None
         self._ai_filter_last_log_at: datetime | None = None
         self._ai_filter_last_count: int = 0
+        self._checkpoint_at: datetime | None = None
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -79,6 +81,7 @@ class TradingAgent:
                 self._strategy_params,
                 cfg.get("data", {}),
             )
+        self._load_checkpoint()
 
     def _build_strategy(self, name: str, params: dict):
         if name == "rl_policy":
@@ -549,6 +552,7 @@ class TradingAgent:
             self._log_news_cache()
             self._refresh_dynamic_symbols(portfolio)
             self._refresh_symbol_venues()
+            self._maybe_checkpoint()
             self._log_ai_filter_heartbeat()
             symbols = self._resolve_active_symbols()
             symbols = self._merge_symbols_with_positions(symbols, portfolio)
@@ -642,6 +646,35 @@ class TradingAgent:
             self._ai_filter_last_count,
         )
         self._ai_filter_last_log_at = now
+
+    def _maybe_checkpoint(self) -> None:
+        payload = {
+            "dynamic_symbols": self._dynamic_symbols,
+            "dynamic_symbols_at": _dt_to_str(self._dynamic_symbols_at),
+            "symbols": self._symbols,
+            "symbols_by_strategy": self._symbols_by_strategy,
+            "symbol_venues": self._symbol_venues,
+            "symbol_venues_at": _dt_to_str(self._symbol_venues_at),
+            "news_cache": self._news_cache,
+            "news_cache_at": _dt_to_str(self._news_cache_at),
+            "last_trade_at": _dt_to_str(self._last_trade_at),
+        }
+        self._checkpoint_at = maybe_save_checkpoint("trader", payload, self.cfg, self._checkpoint_at)
+
+    def _load_checkpoint(self) -> None:
+        data = load_checkpoint("trader", self.cfg)
+        if not data:
+            return
+        payload = data.get("payload", {}) or {}
+        self._dynamic_symbols = list(payload.get("dynamic_symbols", []))
+        self._dynamic_symbols_at = _dt_from_str(payload.get("dynamic_symbols_at"))
+        self._symbols = list(payload.get("symbols", []))
+        self._symbols_by_strategy = dict(payload.get("symbols_by_strategy", {}) or {})
+        self._symbol_venues = dict(payload.get("symbol_venues", {}) or {})
+        self._symbol_venues_at = _dt_from_str(payload.get("symbol_venues_at"))
+        self._news_cache = dict(payload.get("news_cache", {}) or {})
+        self._news_cache_at = _dt_from_str(payload.get("news_cache_at"))
+        self._last_trade_at = _dt_from_str(payload.get("last_trade_at"))
 
     def _update_orchestrator(self, symbol: str, market_state: dict) -> None:
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
@@ -1040,3 +1073,18 @@ class TradingAgent:
             price = float(limit_price) if limit_price else float(last_price)
             reserved += qty * price
         return reserved
+
+
+def _dt_to_str(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
+def _dt_from_str(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None

@@ -13,6 +13,7 @@ execution, and metrics updates.
 - Skips trading when markets are closed.
 - Runs per-symbol signals, combines them, applies guardrails, sizes orders,
   and submits via `ExecutionEngine`.
+- Saves periodic checkpoints of in-memory state for reboot resilience.
 
 ## Key Components
 - Strategy selection: `strategy.name` or `strategy.names`.
@@ -31,3 +32,4 @@ execution, and metrics updates.
 - `data.dynamic_symbols.*`
 - `risk.*`
 - `trading_limits.*`
+- `checkpointing.*`
