@@ -188,6 +188,15 @@ docker compose up -d --build
 - API health: `http://localhost:18081/health`
 - Config UI: `http://localhost:18081/ui`
 - Grafana: `http://localhost:3002`
+- Healthwatch metrics: `http://localhost:9105/metrics` (internal in Docker; use Prometheus to view)
+
+Services:
+- `trader`: live trading loop
+- `api`: FastAPI config/health/UI
+- `prometheus`, `grafana`, `alertmanager`: monitoring
+- `calendar-updater`: weekly market holidays refresh
+- `tests-when-closed`: runs tests/backtests when markets are closed
+- `healthwatch`: health probes + Prometheus metrics
 
 ## Common Commands
 Download data:
@@ -218,6 +227,8 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Rebuilt dev stack with healthwatch/autoheal and resolved API port conflict.
+- Rebuilt and restarted live stack with healthwatch/autoheal.
 - Added healthwatch + autoheal with alerts for service restarts.
 - Rebuilt and restarted live stack to restore trader service.
 - Restructured README and docs into a progressive guide with new ops/testing/deploy pages.
