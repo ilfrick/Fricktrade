@@ -32,7 +32,7 @@ except Exception:
     score_symbols = None
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.strategies.rl_policy_fees import FeeAwareRLPolicyStrategy
-from app.utils.market import is_market_open
+from app.utils.market import is_market_open, is_venue_open
 from app.utils.restart import should_restart
 from app.agents.orchestrator import RLStrategyOrchestrator
 
@@ -563,6 +563,8 @@ class TradingAgent:
                 time.sleep(interval_seconds)
                 continue
             for sym in symbols:
+                if not self._is_symbol_market_open(sym):
+                    continue
                 market_state = market_data_provider(sym)
                 self._enrich_market_state(market_state, portfolio, sym)
                 market_state["strategy_symbols"] = self._symbols_by_strategy
@@ -579,6 +581,15 @@ class TradingAgent:
             if qty != 0:
                 merged.add(symbol)
         return list(merged)
+
+    def _is_symbol_market_open(self, symbol: str) -> bool:
+        market_cfg = self.cfg.get("market", {})
+        venue_map = market_cfg.get("symbol_venues", {}) or {}
+        default_venue = str(market_cfg.get("default_symbol_venue", "")).strip()
+        venue = str(venue_map.get(symbol, default_venue)).strip()
+        if not venue:
+            return is_market_open(self.cfg)
+        return is_venue_open(self.cfg, venue)
 
     def _log_ai_filter_heartbeat(self) -> None:
         dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})

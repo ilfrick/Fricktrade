@@ -25,6 +25,15 @@ def is_market_open(cfg: dict, now: datetime | None = None) -> bool:
     return all(checks) if mode == "all" else any(checks)
 
 
+def is_venue_open(cfg: dict, venue_name: str, now: datetime | None = None) -> bool:
+    market_cfg = cfg.get("market", {})
+    venues = _normalize_venues(market_cfg)
+    for venue in venues:
+        if str(venue.get("name", "")).lower() == venue_name.lower():
+            return _is_venue_open(venue, now=now)
+    return False
+
+
 def _normalize_venues(market_cfg: dict) -> list[dict]:
     venues = market_cfg.get("venues", [])
     if isinstance(venues, list):
