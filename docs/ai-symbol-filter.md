@@ -52,6 +52,7 @@ News features:
 
 Universe selection:
 - `data.dynamic_symbols.universe` (use `brokers_active` to start from enabled broker universes plus positions/orders)
+- `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap before scoring)
 
 ## Usage
 - Enable dynamic symbols: `data.dynamic_symbols.enabled: true`.

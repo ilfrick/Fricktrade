@@ -38,6 +38,7 @@ Centralize runtime settings for all subsystems.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
 - AI filter: `data.dynamic_symbols.ai_filter.enabled`.
 - Multi-broker universe: `data.dynamic_symbols.universe: brokers_active`.
+- Universe price filter: `data.dynamic_symbols.universe_price_filter` (limits broker universe by price_min and cash cap).
 - Multi-broker news: `news.provider: brokers`.
 - Online learning: `learning.online.enabled`.
 - Checkpointing: `checkpointing.enabled`.

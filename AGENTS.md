@@ -198,6 +198,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Added universe price filtering by cash-aware price bounds for dynamic symbols.
 - Added Grafana panel for broker API call activity.
 - Fixed Mermaid label text so the architecture diagram renders in master.
 - Ensured dynamic universe always keeps positions/orders and hardened broker-backed news fetching.

@@ -19,6 +19,7 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.sources.*`
 - `data.dynamic_symbols.*`
 - `data.dynamic_symbols.universe` (`brokers_active` merges enabled broker universes with positions/orders)
+- `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap)
 - `news.*`
   - `news.provider: brokers` aggregates catalysts across enabled brokers (Alpaca-backed today)
 

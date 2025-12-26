@@ -130,6 +130,41 @@ def load_universe(
     return [s for s in universe if s]
 
 
+def filter_universe_by_price(
+    symbols: Iterable[str],
+    api_key: str,
+    api_secret: str,
+    feed: str,
+    price_min: float,
+    price_max: float,
+    timeout_seconds: int = 10,
+    retries: int = 2,
+) -> list[str]:
+    symbols = [s for s in symbols if s]
+    if not symbols:
+        return []
+    if not api_key or not api_secret:
+        return symbols
+    client = StockHistoricalDataClient(api_key, api_secret)
+    filtered: list[str] = []
+    for chunk in _chunked(symbols, 100):
+        snapshots = _fetch_snapshots(client, chunk, feed, timeout_seconds, retries)
+        if snapshots is None:
+            continue
+        for symbol in chunk:
+            snap = snapshots.get(symbol)
+            if snap is None:
+                continue
+            price = getattr(getattr(snap, "latest_trade", None), "price", None) or getattr(
+                getattr(snap, "minute_bar", None), "close", None
+            )
+            if price is None:
+                continue
+            if price_min <= float(price) <= price_max:
+                filtered.append(symbol)
+    return filtered
+
+
 def load_symbol_venues(
     api_key: str,
     api_secret: str,
