@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Monitoring v2.0 training run (in progress).
 - Started v2.0 training run (in progress).
 - Rebuilt and redeployed the dev stack with scalping settings.
 - Rebuilt and redeployed the live stack with scalping settings.
