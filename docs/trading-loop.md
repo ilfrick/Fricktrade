@@ -8,6 +8,7 @@ execution, and metrics updates.
 - Entry: `app/agents/trader.py`.
 - Loads strategies, orchestrator, broker adapters, and venue gating.
 - Per-symbol venue gating uses `market.symbol_venues` and falls back to `market.default_symbol_venue`.
+- Symbol venue mappings can be refreshed from the broker via `market.symbol_venues_auto`.
 - Refreshes symbols (scanner or AI filter), news cache, and open orders.
 - Skips trading when markets are closed.
 - Runs per-symbol signals, combines them, applies guardrails, sizes orders,

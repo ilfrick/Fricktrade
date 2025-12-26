@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added automatic Alpaca symbol-to-venue refresh for per-symbol market gating.
 - Rebuilt and restarted the live stack after adding per-symbol venue gating.
 - Added per-symbol venue gating to prevent orders when a symbol’s market is closed.
 - RL orchestrator sweep running in dev (in progress).
