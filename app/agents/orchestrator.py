@@ -411,10 +411,10 @@ class RLStrategyOrchestrator:
         if not state:
             return
         prev_price = state.get("price")
-        if prev_price is None:
+        if prev_price is None or prev_price <= 0:
             return
         current_price = _last_price(market_state)
-        if current_price is None:
+        if current_price is None or current_price <= 0:
             return
         move_pct = (current_price - prev_price) / prev_price * 100.0
         if abs(move_pct) < self.cfg.min_price_move_pct:

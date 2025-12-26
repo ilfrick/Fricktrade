@@ -592,6 +592,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Guarded RL orchestrator price update against zero/invalid prices after backtest failure.
 - Started v2.0 backtest run (in progress).
 - Added checkpointing with retention for trader/learner state to resume across reboots.
 - Waiting on v2.0 training completion (in progress).
