@@ -26,11 +26,11 @@ flowchart LR
         YF[yfinance live data]
         AlpacaBars[Alpaca historical bars]
         AlpacaAssets[Alpaca assets/universe]
-        BrokerUniverse[Broker universes<br/>enabled brokers (Alpaca today)]
+        BrokerUniverse[Broker universes<br/>enabled brokers - Alpaca today]
         Ingest[Ingest pipeline]
         Scan[Dynamic symbol scanner]
         AIFilter[AI symbol filter<br/>online updates + news]
-        News[News catalyst fetcher<br/>broker-backed (Alpaca today)]
+        News[News catalyst fetcher<br/>broker-backed - Alpaca today]
     end
     subgraph Models["Model Store"]
         ModelStore[/data + /app/models/]
@@ -234,6 +234,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Fixed Mermaid label text so the architecture diagram renders in master.
 - Ensured dynamic universe always keeps positions/orders and hardened broker-backed news fetching.
 - Fixed architecture diagram to show broker-backed news inputs.
 - Fixed OrderQueue snapshot response handling so tests pass.
