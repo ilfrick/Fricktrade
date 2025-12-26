@@ -25,3 +25,15 @@ Centralize runtime settings for all subsystems.
 - `backtest.*`
 - `monitoring.*`
 - `checkpointing.*` (periodic state checkpoints + retention)
+
+## Editing Configuration
+- Edit `config/config.yaml` directly or use the web UI at `/ui`.
+- Most keys support `${ENV_VAR}` interpolation.
+- After changes, rebuild/restart containers to apply: `docker compose up -d --build`.
+
+## Common Toggles
+- Strategy selection: `strategy.name` or `strategy.names`.
+- Dynamic symbols: `data.dynamic_symbols.enabled`.
+- AI filter: `data.dynamic_symbols.ai_filter.enabled`.
+- Online learning: `learning.online.enabled`.
+- Checkpointing: `checkpointing.enabled`.

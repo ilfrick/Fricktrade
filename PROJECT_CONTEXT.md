@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Restructured README and docs into a progressive guide with new ops/testing/deploy pages.
 - Rebuilt dev tests image and re-ran pytest (13 passed, 14 warnings).
 - Re-ran pytest after checkpoint fix (13 passed, 14 warnings).
 - Ran dev pytest after checkpoint tests (10 passed, 14 warnings).

@@ -218,6 +218,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Restructured README and docs into a progressive guide with new ops/testing/deploy pages.
 - Rebuilt dev tests image and re-ran pytest (13 passed, 14 warnings).
 - Re-ran pytest after checkpoint fix (13 passed, 14 warnings).
 - Ran dev pytest after checkpoint tests (10 passed, 14 warnings).

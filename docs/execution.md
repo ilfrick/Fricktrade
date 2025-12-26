@@ -14,3 +14,9 @@ Place, cancel, and close orders through the active broker.
 - `execution.open_orders.skip_if_pending`
 - `execution.open_orders.strategy_guard`
 - `execution.open_orders.interval_seconds`
+
+## Order Flow
+1) Strategy signal -> orchestrator selection.
+2) Risk checks + sizing.
+3) Order queue submits one order at a time.
+4) Broker response feeds back to orchestrator.

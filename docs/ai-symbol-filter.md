@@ -46,3 +46,8 @@ News features:
 - `data.dynamic_symbols.ai_filter.news.keywords`
 - `data.dynamic_symbols.ai_filter.news.timeout_seconds`
 - `data.dynamic_symbols.ai_filter.news.retries`
+
+## Usage
+- Enable dynamic symbols: `data.dynamic_symbols.enabled: true`.
+- Enable AI filter: `data.dynamic_symbols.ai_filter.enabled: true`.
+- Leave `data.symbols: []` to rely on the filter output.
