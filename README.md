@@ -2,12 +2,20 @@
 
 Autotrader is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana). It combines multiple strategies, an RL-based orchestrator, broker adapters, risk controls, and monitoring into a Docker-first stack for live trading, backtesting, and continuous learning.
 
+## Start Here
+- Getting started: `docs/getting-started.md`
+- Configuration guide: `docs/configuration.md`
+- Operations: `docs/operations.md`
+- Testing: `docs/testing.md`
+- Deployment: `docs/deployment.md`
+- Troubleshooting: `docs/troubleshooting.md`
+
 ## Goals
 - Trade intraday with configurable strategies and strict risk controls.
 - Operate live or in backtest mode with shared core logic.
 - Provide observability (Prometheus + Grafana) and operational controls (FastAPI UI).
 - Support GPU acceleration where available, with CPU fallback.
-- Be resilient to restarts via periodic state checkpoints.
+- Resume safely after reboots via periodic state checkpoints.
 
 ## Repository Layout
 - `app/`: core trading agent code
@@ -94,50 +102,52 @@ flowchart LR
     API <--> Trader
 ```
 
+## How It Works (High Level)
+1) Resolve symbols (static list or dynamic scanner/AI filter).
+2) Check market hours and per-symbol venue gates.
+3) Generate signals from strategies and select with the RL orchestrator.
+4) Apply risk controls and open-order guards.
+5) Submit orders via FIFO order queue and broker execution.
+6) Record metrics, update models, and checkpoint state.
+
 ## Core Components
 ### Trading Loop
-- Entry point: `app/agents/trader.py`
-- Resolves active symbols (static list or dynamic scanner/AI filter)
-- Applies per-symbol venue gating and market-hours checks
-- Runs strategies, orchestrator selection, and risk checks
-- Submits orders via the execution engine and order queue
-- Updates metrics and checkpointed state
+- Entry point: `app/agents/trader.py`.
+- Runs the end-to-end cycle with per-symbol venue gating.
+- See: `docs/trading-loop.md`.
 
 ### Strategies
-- `rl_policy`: RL policy inference with optional GPU acceleration
-- `rl_policy_fees`: fee-aware RL policy with broker fee guardrails
-- `intraday_momentum`: price/volume threshold strategy
-- `pattern_trading`: momentum breakout with filters and trailing exits
+- `rl_policy`: RL policy inference with optional GPU acceleration.
+- `rl_policy_fees`: fee-aware RL policy with broker fee guardrails.
+- `intraday_momentum`: price/volume threshold strategy.
+- `pattern_trading`: momentum breakout with filters and trailing exits.
+- See: `docs/strategies.md`.
 
 ### Orchestrator
-- RL-based strategy selection that consumes strategy signals and AI-filter features
-- Records per-symbol decisions and updates on price movement + order feedback
-- Checkpoints biases/models on an interval
+- RL-based strategy selection using strategy signals + AI filter features.
+- Online updates and periodic checkpoints for resilience.
+- See: `docs/learning.md`.
 
 ### Execution
-- `app/execution/executor.py`: broker-agnostic execution
-- `app/execution/order_queue.py`: FIFO submission, broker feedback loop
-- Open-order guardrails + cancel/replace logic
+- Broker-agnostic execution engine + FIFO queue.
+- Cancel/replace + pending-order guardrails.
+- See: `docs/execution.md`.
 
 ### Data & Scanning
-- Live data from yfinance in trade mode
-- Historical bars from Alpaca for training/backtesting/ingestion
-- Dynamic scanner and AI filter for symbol selection
-- News catalyst support (Alpaca news)
-
-### Learning
-- Offline RL training and online updates
-- GPU acceleration if available
-- Best-model selection via `learning.use_best_model`
+- Live data via yfinance in trade mode.
+- Historical data via Alpaca for training/backtesting.
+- Dynamic scanner + AI symbol filter with news catalysts.
+- See: `docs/data.md` and `docs/ai-symbol-filter.md`.
 
 ### Monitoring & API
-- Prometheus metrics (`app/monitoring/metrics.py`)
-- Grafana dashboards for orders, positions, PnL, and account status
-- FastAPI `/health`, `/config`, `/config/update`, `/restart`, `/ui`
+- Prometheus metrics + Grafana dashboards.
+- FastAPI config/health UI.
+- See: `docs/monitoring.md` and `docs/api.md`.
 
-### Resilience & Storage
-- Periodic checkpoints for trader/learner state (`checkpointing.*`)
-- Retention pruning by age and count to avoid disk growth
+### Resilience
+- Per-minute checkpoints for trader/learner/orchestrator state.
+- Retention pruning to avoid disk growth.
+- See: `docs/operations.md`.
 
 ## Configuration Overview
 All configuration lives in `config/config.yaml`.
@@ -155,15 +165,7 @@ Key sections:
 - `monitoring.*`: metrics and alerts
 - `checkpointing.*`: checkpoint cadence + retention
 
-See `docs/configuration.md` for full details.
-
-## Safeguards
-- Market-hours gating by venue
-- Per-symbol venue mapping (manual + broker refresh)
-- Risk manager limits (loss caps, exposure, leverage)
-- Cool-down windows and stop logic
-- Fee-aware guardrails for RL strategy
-- Open-order guard and order-queue serialization
+See `docs/configuration.md` for full details and guidance.
 
 ## Quick Start (Docker)
 1) Copy env template:
@@ -182,12 +184,10 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Services:
-- `trader`: live trading loop
-- `api`: FastAPI config/health/UI
-- `prometheus`, `grafana`, `alertmanager`: monitoring
-- `calendar-updater`: weekly market holidays refresh
-- `tests-when-closed`: runs tests/backtests when markets are closed
+4) Verify:
+- API health: `http://localhost:18081/health`
+- Config UI: `http://localhost:18081/ui`
+- Grafana: `http://localhost:3002`
 
 ## Common Commands
 Download data:
@@ -210,14 +210,15 @@ Evaluate:
 docker compose run --rm trader python3 -m app.main evaluate --config /app/config/config.yaml
 ```
 
-## Documentation
-- `docs/README.md` for the full index
-- Subpages cover: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration
+## Documentation Index
+- `docs/README.md`
+- Subpages: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration
 
 
 ## History
 
 Recent changes (newest first):
+- Restructured README and docs into a progressive guide with new ops/testing/deploy pages.
 - Rebuilt dev tests image and re-ran pytest (13 passed, 14 warnings).
 - Re-ran pytest after checkpoint fix (13 passed, 14 warnings).
 - Ran dev pytest after checkpoint tests (10 passed, 14 warnings).

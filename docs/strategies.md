@@ -23,3 +23,7 @@ Generate buy/sell/hold/exit signals from market state.
 - `pattern_trading.*`
 - `orchestrator.*`
 - `orchestrator.rl.time_penalty_per_bar`
+
+## Usage
+- Single strategy: set `strategy.name: rl_policy` (or another name).
+- Multiple strategies: set `strategy.names: [rl_policy, rl_policy_fees]` and choose `strategy.combine`.

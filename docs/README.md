@@ -1,16 +1,22 @@
 # Autotrader Documentation
 
-This folder contains focused subpages for each major subsystem.
+Start here if you are new:
+- `getting-started.md`
+- `configuration.md`
+- `testing.md`
+- `deployment.md`
+- `operations.md`
+- `troubleshooting.md`
 
-- [AI Symbol Filter](ai-symbol-filter.md)
-- [Trading Loop](trading-loop.md)
-- [Strategies](strategies.md)
-- [Execution](execution.md)
-- [Risk Controls](risk.md)
-- [Brokers](brokers.md)
-- [Backtesting](backtesting.md)
-- [Data Pipeline](data.md)
-- [Learning](learning.md)
-- [API](api.md)
-- [Monitoring](monitoring.md)
-- [Configuration](configuration.md)
+Subsystem reference:
+- `trading-loop.md`
+- `strategies.md`
+- `execution.md`
+- `risk.md`
+- `brokers.md`
+- `data.md`
+- `ai-symbol-filter.md`
+- `learning.md`
+- `backtesting.md`
+- `monitoring.md`
+- `api.md`

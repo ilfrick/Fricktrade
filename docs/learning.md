@@ -20,3 +20,17 @@ Train and evaluate RL policies, and support online updates.
 - `learning.use_best_model`
 - `learning.training.*`
 - `learning.online.*`
+
+## Train
+```bash
+docker compose run --rm trader python3 -m app.main train --config /app/config/config.yaml
+```
+
+## Evaluate
+```bash
+docker compose run --rm trader python3 -m app.main evaluate --config /app/config/config.yaml
+```
+
+## Online Updates
+The learner service runs online updates when enabled:
+- `learning.online.enabled: true`

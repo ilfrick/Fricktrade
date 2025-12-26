@@ -20,3 +20,7 @@ Expose Prometheus metrics and Grafana dashboards.
 ## Configuration
 `config/config.yaml`:
 - `monitoring.prometheus_port`
+
+## Access
+- Grafana: `http://localhost:3002`
+- Prometheus: `http://localhost:9090`

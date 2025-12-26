@@ -19,3 +19,13 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.sources.*`
 - `data.dynamic_symbols.*`
 - `news.*`
+
+## Ingest Example
+```bash
+docker compose run --rm trader python3 -m app.main ingest --config /app/config/config.yaml
+```
+
+## Download Example
+```bash
+docker compose run --rm trader python3 -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
+```

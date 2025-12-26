@@ -30,3 +30,12 @@ Run historical simulations with the real trading loop or legacy SMA engine.
 - `backtest.plan.liquidity_tiers`
 - `backtest.plan.sample_per_tier`
 - `backtest.plan.seed`
+
+## Run
+```bash
+docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml
+```
+
+## Data Requirements
+- CSVs in `backtest.data_dir` with timestamp and OHLCV columns.
+- If `data.symbols` is empty, the engine can fall back to CSV symbols.

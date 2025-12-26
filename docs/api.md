@@ -15,6 +15,11 @@ Expose health/config endpoints and the web UI.
 - `/restart`
 - `/ui`
 
+## Run
+```bash
+docker compose run --rm api
+```
+
 ## Configuration
 `config/config.yaml`:
 - `api.*` (if present)

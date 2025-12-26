@@ -23,3 +23,8 @@ Enforce exposure, leverage, and safety limits before execution.
 - `trading_limits.max_order_notional`
 - `trading_limits.min_order_notional`
 - `trading_limits.enforce_account_flags`
+
+## Tuning Notes
+- Lower `max_position_size_pct` for more diversified risk.
+- Tighten `hard_stop_pct` and `trailing_stop_pct` for faster exits.
+- Use `trading_limits.allow_shorts: false` to block shorts.
