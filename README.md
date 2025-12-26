@@ -1,33 +1,22 @@
 # Autotrader (Multi-Market)
 
-An intraday trading agent with shorting support, Alpaca + IBKR integration, configurable risk controls, backtesting, local data download (yfinance), and Grafana monitoring. Supports multi-market trading gates (NYSE, Nasdaq, Borsa Italiana).
+Autotrader is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana). It combines multiple strategies, an RL-based orchestrator, broker adapters, risk controls, and monitoring into a Docker-first stack for live trading, backtesting, and continuous learning.
 
-## Features
-
-- Intraday strategy engine with shorting support
-- Broker adapters: Alpaca (paper/live) + Interactive Brokers (paper/live)
-- Risk manager with configurable limits and circuit breakers
-- Cash-aware position sizing based on broker equity/cash and exposure caps
-- Pattern Trading strategy for momentum breakouts with configurable filters
-- Backtesting on locally downloaded data
-- Data download via yfinance (US and EU tickers supported)
-- Prometheus metrics + Grafana dashboard
-- Optional CUDA acceleration for analytics/backtests (profile `gpu`)
-- Market-open gating for NYSE, Nasdaq, and Borsa Italiana (configurable)
+## Goals
+- Trade intraday with configurable strategies and strict risk controls.
+- Operate live or in backtest mode with shared core logic.
+- Provide observability (Prometheus + Grafana) and operational controls (FastAPI UI).
+- Support GPU acceleration where available, with CPU fallback.
+- Be resilient to restarts via periodic state checkpoints.
 
 ## Repository Layout
-
 - `app/`: core trading agent code
-- `config/config.yaml`: all risk/trading parameters
+- `config/config.yaml`: all runtime configuration
 - `docker/`: Dockerfiles (CPU + GPU)
 - `grafana/`: Grafana provisioning + dashboard
-- `prometheus/`: Prometheus scrape config
+- `prometheus/`: Prometheus scrape + alerting config
 - `scripts/`: helper scripts
-
-## Documentation
-
-- `docs/README.md` for the full index.
-- Subpages in `docs/` cover: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration.
+- `docs/`: subsystem documentation
 
 ## Architecture
 
@@ -48,7 +37,7 @@ flowchart LR
     subgraph Core["Trading Loop"]
         Trader[TradingAgent]
         Strat[Strategies<br/>rl_policy / rl_policy_fees / intraday_momentum / pattern_trading]
-        Orchestrator[Strategy Orchestrator<br/>ML + rules]
+        Orchestrator[RL Strategy Orchestrator]
         Risk[Risk Manager]
         Exec[Execution Engine]
         Queue[Order Queue<br/>FIFO + feedback]
@@ -105,8 +94,78 @@ flowchart LR
     API <--> Trader
 ```
 
-## Quick Start (Docker)
+## Core Components
+### Trading Loop
+- Entry point: `app/agents/trader.py`
+- Resolves active symbols (static list or dynamic scanner/AI filter)
+- Applies per-symbol venue gating and market-hours checks
+- Runs strategies, orchestrator selection, and risk checks
+- Submits orders via the execution engine and order queue
+- Updates metrics and checkpointed state
 
+### Strategies
+- `rl_policy`: RL policy inference with optional GPU acceleration
+- `rl_policy_fees`: fee-aware RL policy with broker fee guardrails
+- `intraday_momentum`: price/volume threshold strategy
+- `pattern_trading`: momentum breakout with filters and trailing exits
+
+### Orchestrator
+- RL-based strategy selection that consumes strategy signals and AI-filter features
+- Records per-symbol decisions and updates on price movement + order feedback
+- Checkpoints biases/models on an interval
+
+### Execution
+- `app/execution/executor.py`: broker-agnostic execution
+- `app/execution/order_queue.py`: FIFO submission, broker feedback loop
+- Open-order guardrails + cancel/replace logic
+
+### Data & Scanning
+- Live data from yfinance in trade mode
+- Historical bars from Alpaca for training/backtesting/ingestion
+- Dynamic scanner and AI filter for symbol selection
+- News catalyst support (Alpaca news)
+
+### Learning
+- Offline RL training and online updates
+- GPU acceleration if available
+- Best-model selection via `learning.use_best_model`
+
+### Monitoring & API
+- Prometheus metrics (`app/monitoring/metrics.py`)
+- Grafana dashboards for orders, positions, PnL, and account status
+- FastAPI `/health`, `/config`, `/config/update`, `/restart`, `/ui`
+
+### Resilience & Storage
+- Periodic checkpoints for trader/learner state (`checkpointing.*`)
+- Retention pruning by age and count to avoid disk growth
+
+## Configuration Overview
+All configuration lives in `config/config.yaml`.
+
+Key sections:
+- `market.*`: venue gating, hours, symbol venue mapping
+- `data.*`: symbols, dynamic scan, sources, AI filter
+- `news.*`: catalyst fetch config
+- `strategy.*`: strategy selection and params
+- `orchestrator.*`: RL orchestrator settings
+- `risk.*`: risk limits, stops, cool-downs
+- `execution.*`: order handling and open-order guard
+- `learning.*`: RL training and online updates
+- `backtest.*`: backtest range and engine settings
+- `monitoring.*`: metrics and alerts
+- `checkpointing.*`: checkpoint cadence + retention
+
+See `docs/configuration.md` for full details.
+
+## Safeguards
+- Market-hours gating by venue
+- Per-symbol venue mapping (manual + broker refresh)
+- Risk manager limits (loss caps, exposure, leverage)
+- Cool-down windows and stop logic
+- Fee-aware guardrails for RL strategy
+- Open-order guard and order-queue serialization
+
+## Quick Start (Docker)
 1) Copy env template:
 
 ```bash
@@ -114,7 +173,6 @@ cp .env.example .env
 ```
 
 2) Set broker credentials in `.env`:
-
 - `ALPACA_API_KEY`
 - `ALPACA_API_SECRET`
 
@@ -122,476 +180,45 @@ cp .env.example .env
 
 ```bash
 docker compose up -d --build
-
-By default the `trader` service uses the GPU-enabled image. To force CPU execution for RL
-inference/training, set `learning.device: cpu` in `config/config.yaml` (or via the web UI).
-To disable GPU acceleration in backtests, set `backtest.use_gpu: false`.
 ```
 
-4) Open Grafana:
+Services:
+- `trader`: live trading loop
+- `api`: FastAPI config/health/UI
+- `prometheus`, `grafana`, `alertmanager`: monitoring
+- `calendar-updater`: weekly market holidays refresh
+- `tests-when-closed`: runs tests/backtests when markets are closed
 
-- URL: `http://localhost:3002`
-- User: `admin`
-- Pass: `admin`
-
-## Configuration (Risk + Trading)
-
-All critical parameters live in `config/config.yaml`.
-
-Key knobs:
-
-- `risk.max_daily_loss_pct`
-- `risk.max_position_size_pct`
-- `risk.max_portfolio_leverage`
-- `risk.max_short_exposure_pct`
-- `risk.max_positions`
-- `risk.cooldown_seconds`
-- `risk.hard_stop_pct`
-- `risk.trailing_stop_pct`
-- `risk.circuit_breaker_drawdown_pct`
-- `strategy.params.*`
-
-You manage strategy and risk by editing `config/config.yaml` and restarting the trader container, or use the web UI.
-Multi-strategy mode is enabled by default via `strategy.names` (intraday momentum + pattern trading + RL policy) and can be adjusted as needed. Combine behavior is set with `strategy.combine: priority|vote`.
-The `api` service exposes:
-- Web UI at `http://localhost:18081/ui`
-- Read-only config at `http://localhost:18081/config`
-- YAML config at `http://localhost:18081/config/raw`
-- Config update endpoint at `http://localhost:18081/config/update` (POST JSON: `{ "yaml": "..." }`)
-- Restart endpoint at `http://localhost:18081/restart`
-
-## Notes on Markets and Brokers
-
-IBKR provides broad EU equity access including Borsa Italiana. Alpaca does not generally support EU stocks; use Alpaca for US markets or paper testing.
-Trading only starts when at least one configured market is open (see `market.venues` and `market.open_mode`).
-Holiday lists are empty by default; populate `market.venues[].holidays` per venue.
-
-## Data Download (yfinance)
-
+## Common Commands
+Download data:
 ```bash
 docker compose run --rm trader python3 -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
 ```
 
-Data is saved to `/data` inside the container (mapped to `./data`).
-
-If Yahoo blocks the container, set a proxy and slow down requests in `config/config.yaml`:
-
-- `data.proxy` (e.g. `http://user:pass@proxy:8080`)
-- `data.rate_limit_seconds` (e.g. `5`)
-
-## Backtesting
-
-Backtesting defaults to `backtest.mode: agent`, which runs the actual trading logic (strategies + orchestrator +
-risk + sizing) on CSV data. Set `backtest.mode: sma` to use the legacy SMA baseline.
-
+Backtest:
 ```bash
 docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml
 ```
 
-## Learning (RL)
-
-Train a PPO policy on local OHLCV data:
-
+Train RL policy:
 ```bash
 docker compose run --rm trader python3 -m app.main train --config /app/config/config.yaml
 ```
 
-Enable learning in `config/config.yaml` by setting `learning.enabled: true`. A rule-based guardrail is configurable under `learning.guardrail`. When `learning.device` is set to `auto`, CUDA is used if available.
-Training produces a report at `learning.training.report_path` with return, Sharpe, and drawdown metrics, plus charts in `learning.training.report_plot_dir`.
-Models and reports are persisted under `./models` on the host.
-Use `learning.training.resume: true` to reuse an existing model on restart, or set it to `false` to retrain from scratch.
-The trainer writes a best-performing copy to `learning.best_model_path` when evaluation metrics improve; the trader loads it by default unless `learning.use_best_model: false`.
-
-## Open Orders Awareness
-
-The trader periodically fetches open orders and will skip new signals for symbols with pending orders (configurable via `execution.open_orders.*`). Pending buy orders are also treated as reserved cash for sizing.
-
-## Pattern Trading Mode
-
-Enable Pattern Trading by setting `strategy.name: pattern_trading` and configure:
-- `pattern_trading.selection.*` for price/volume/gain/liquidity/catalyst filters
-- `pattern_trading.pattern.*` for MA trend + pullback rules
-- `pattern_trading.entry.*` for breakout and volume confirmation
-- `pattern_trading.risk.*` for stop, partial take profit, and trailing stop
-
-News catalysts use Alpaca’s news API by default (configure in `news.*`). If news data is unavailable, symbols are filtered out when `pattern_trading.selection.require_catalyst: true`.
-
-Session gain is configurable via `data.session_gain_mode`:
-- `gap`: compare current price to prior close
-- `session`: compare to session open
-
-## Dynamic Symbols (Alpaca Scanner)
-
-Dynamic scanning is enabled by default to let the agent adapt the traded symbol list. Pattern strategy filters only
-apply to the pattern strategy; other strategies use `data.dynamic_symbols.filters`.
-
-```yaml
-data:
-  dynamic_symbols:
-    enabled: true
-    provider: alpaca
-    feed: iex
-    refresh_minutes: 5
-    universe: alpaca_active
-    cash_aware: true
-    cash_buffer_pct: 95
-    cash_cap_mode: cash
-    cash_max_pct: 100
-    fallback:
-      enabled: true
-      relative_volume_min: 0.0
-      premarket_gain_min_pct: 0.0
-      min_shares_traded: 100000
-      max_spread_pct: 2.0
-      require_catalyst: false
-```
-
-The scanner applies `pattern_trading.selection.*` filters only for the pattern strategy; other strategies use
-`data.dynamic_symbols.filters` for price/volume/gain/spread/catalyst checks before replacing their symbol lists.
-Maximum price is no longer capped by config; it is derived solely from available cash via `cash_aware`.
-When `cash_aware: true`, the scanner caps the maximum price using available cash. Set `cash_cap_mode: risk`
-to also respect `risk.max_position_size_pct`.
-If no candidates match the main filters, the optional `fallback` block relaxes filters to keep an affordable symbol list.
-
-## Logging & Alerts
-
-Log files are written to `logging.file_path` (default `/data/logs/trader.log`) with rotation settings under `logging.max_bytes` and `logging.backup_count`.
-Prometheus alert rules live in `prometheus/alerts.yml`, and Grafana provisions an “Autotrader Alerts & Logs” dashboard for active alerts and error metrics.
-Email alerting is configured via Alertmanager (`alertmanager/alertmanager.yml`) and runs on port `9093`.
-
-## Multi-Strategy Mode
-
-Set `strategy.names` to a list of strategies and choose how to combine them:
-- `strategy.combine: priority` uses the first non-hold signal in the list order.
-- `strategy.combine: vote` picks the majority action across strategies.
-
-Available strategy names:
-- `intraday_momentum`
-- `pattern_trading`
-- `rl_policy` (requires `learning.enabled: true`)
-- `rl_policy_fees` (RL policy with fee-aware guardrail)
-
-## AI Strategy Orchestrator
-
-The RL orchestrator scores each strategy against the current market context (market state, strategy signals,
-AI-filter-style features, and order feedback) and selects the top candidates per symbol.
-Enable it under `orchestrator.*` in `config/config.yaml`:
-
-```yaml
-orchestrator:
-  mode: select
-  top_k: 2
-  min_score: 0.0
-  rl:
-    enabled: true
-    model_type: lstm
-    device: auto
-    model_path: /data/orchestrator_model.pt
-    best_model_path: /data/orchestrator_model_best.pt
-    use_best_model: true
-    time_penalty_per_bar: 0.05
-    pretrain:
-      enabled: true
-      in_trader: false
-      lookback_days: 30
-      interval: 5m
-```
-
-RL mode trains per-bar to maximize time-penalized returns using rewards based on the next price move. The default LSTM model uses
-a rolling sequence of market features for each symbol. It maintains a replay buffer,
-updates the model each bar, and checkpoints the best-performing model automatically. Pretraining pulls fresh
-historical data via yfinance to warm start the policy.
-
-Pretraining runs out-of-band by default (`orchestrator.rl.pretrain.in_trader: false`). To pretrain manually:
-
-```bash
-docker compose run --rm trader python3 -m app.main pretrain-orchestrator --config /app/config/config.yaml
-```
-
-For multi-year 5m pretraining, set the pretrain provider to Alpaca (yfinance intraday is capped at ~60 days):
-
-```yaml
-orchestrator:
-  rl:
-    pretrain:
-      provider: alpaca
-      alpaca_api_key: ${ALPACA_API_KEY}
-      alpaca_api_secret: ${ALPACA_API_SECRET}
-```
-
-RL orchestrator sweep:
-
-```bash
-docker compose run --rm trader python3 scripts/orchestrator_sweep.py --config /app/config/config.yaml
-```
-
-To pretrain with randomly selected Alpaca symbols, set:
-
-```yaml
-orchestrator:
-  rl:
-    pretrain:
-      symbols_source: alpaca_active_random
-      interval: 5m
-      window_days: 60
-      coverage_days: 365
-      step_days: 30
-```
-
-Rule-based orchestrator weights are no longer used; the RL orchestrator handles selection end-to-end.
-
-## Fee-Aware RL Strategy
-
-`rl_policy_fees` wraps the RL policy with a fee guardrail based on broker-specific commission settings. Configure
-fees per broker and the guard thresholds:
-
-```yaml
-brokers:
-  alpaca:
-    fees:
-      commission_pct: 0.0
-      per_trade_fee: 0.0
-      per_share_fee: 0.0
-      min_fee: 0.0
-      spread_pct: 0.0
-strategy:
-  fee_aware:
-    min_edge_pct: 0.02
-    edge_multiplier: 1.0
-    min_notional: 50.0
-```
-
-Evaluate an existing model and regenerate charts:
-
+Evaluate:
 ```bash
 docker compose run --rm trader python3 -m app.main evaluate --config /app/config/config.yaml
 ```
 
-### Online Updates
+## Documentation
+- `docs/README.md` for the full index
+- Subpages cover: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration
 
-Run online updates in a separate process:
-
-```bash
-docker compose run --rm learner
-```
-
-GPU online updates (requires NVIDIA Docker runtime):
-
-```bash
-docker compose --profile gpu up -d learner-gpu
-```
-
-To verify GPU visibility inside the container:
-
-```bash
-docker compose exec -T learner-gpu python3 - <<'PY'
-import torch
-print(torch.cuda.is_available(), torch.cuda.get_device_name(0))
-PY
-```
-
-### Data Ingestion
-
-Pull data from configured sources (`yfinance`, `alpaca`, `stooq`, `alphavantage`). Alpaca supports multi-year intraday bars.
-
-```bash
-docker compose run --rm trader python3 -m app.main ingest --config /app/config/config.yaml
-```
-
-### Config Reference (Learning + Data + Markets)
-
-```yaml
-market:
-  open_mode: any
-  venues:
-    - name: BorsaItaliana
-      timezone: Europe/Rome
-      trading_hours:
-        open: "09:00"
-        close: "17:30"
-      holidays: []
-    - name: NYSE
-      timezone: America/New_York
-      trading_hours:
-        open: "09:30"
-        close: "16:00"
-      holidays: []
-    - name: Nasdaq
-      timezone: America/New_York
-      trading_hours:
-        open: "09:30"
-        close: "16:00"
-      holidays: []
-
-learning:
-  enabled: false
-  model_path: "/app/models/ppo_policy.zip"
-  device: "auto"
-  window_size: 50
-  features:
-    include_returns: true
-    sma_periods: [5, 20]
-    ema_periods: [10]
-    rsi_periods: [14]
-  guardrail:
-    enabled: true
-    mode: "confirm"
-    params:
-      lookback_minutes: 30
-      entry_threshold_pct: 0.8
-      exit_threshold_pct: 0.4
-      allow_shorts: true
-  online:
-    enabled: false
-    update_interval_minutes: 60
-    timesteps: 1000
-    eval_split: 0.1
-  training:
-    data_dir: "/data"
-    interval: "1m"
-    timesteps: 200000
-    initial_cash: 100000
-    commission_pct: 0.05
-    slippage_bps: 2
-    eval_split: 0.2
-    resume: true
-    report_path: "/app/models/training_report.json"
-    report_plot_dir: "/app/models/reports"
-
-data:
-  output_dir: "/data"
-  symbols: ["AAPL", "MSFT"]
-  sources:
-    - provider: yfinance
-      enabled: true
-      symbols: ["AAPL", "MSFT"]
-      interval: "1m"
-      lookback_days: 7
-      rate_limit_seconds: 2
-    - provider: stooq
-      enabled: false
-      symbols: ["eni", "pkn"]
-      interval: "1d"
-      rate_limit_seconds: 2
-    - provider: alphavantage
-      enabled: false
-      api_key: "${ALPHAVANTAGE_API_KEY}"
-      symbols: ["AAPL", "MSFT"]
-      interval: "1d"
-      rate_limit_seconds: 15
-```
-
-### GPU Backtesting (CUDA)
-
-```bash
-./scripts/backtest_gpu.sh
-```
-
-Requires NVIDIA Docker runtime. If you don’t have a GPU, ignore this.
-
-## Live/Paper Trading
-
-- Alpaca: set `brokers.alpaca.base_url` to paper/live
-- IBKR: set `brokers.ibkr.host/port/client_id`
-
-Run trading loop:
-
-```bash
-docker compose run --rm trader python3 -m app.main trade --config /app/config/config.yaml
-```
-
-The trader iterates over every symbol listed in `data.symbols` each cycle. Trading is paused when all configured markets are closed.
-Orders are sized based on available cash and the configured risk caps (`risk.max_position_size_pct`, `risk.max_short_exposure_pct`).
-
-## Monitoring
-
-Prometheus scrapes `trader:8001/metrics`.
-Grafana auto-provisions a dashboard with:
-
-- Trades total
-- Trades rate by symbol/side
-- Cumulative trades by symbol
-- Active symbols (from config)
-- Account equity, cash, invested
-- Skipped orders by reason (e.g., insufficient cash, risk limits)
-- Open orders by symbol/side
-- Active broker (alpaca or ibkr)
-- PnL %
-- Drawdown %
-
-## Deployment
-
-- Production: run `docker compose up -d --build` on a server
-- Ensure broker API connectivity and correct timezone
-- Adjust risk parameters before live trading
-
-## Security and Safety
-
-- Keep API keys in `.env` only
-- Start in paper trading mode
-- Set conservative risk limits
-- Use circuit breakers and trailing stops
-
-## Industrial-Grade Protections Included
-
-- Daily loss limits and circuit breakers
-- Max position sizing and leverage caps
-- Short exposure limits
-- Cooldown windows between trades
-- Trailing/hard stop settings (configurable)
-
-## Git Repo Creation
-
-Use the following steps to create a private repo and push:
-
-```bash
-git init
-git add .
-git commit -m "Initial Autotrader"
-
-git remote add origin https://github.com/ilfrick/Autotrader.git
-
-git push -u origin master
-```
-
-If you use the GitHub CLI:
-
-```bash
-gh repo create Autotrader --private --source . --remote origin --push
-```
-
-## Disclaimer
-
-This software is for research/education. You are responsible for compliance with regulations, broker requirements, and all trading risk.
-
-## Holiday Calendars
-
-Per-venue holidays are stored under `market.venues[].holidays` in `config/config.yaml`. A `calendar-updater`
-service refreshes these lists weekly (configurable) from online sources:
-
-- NYSE: `https://www.nyse.com/markets/hours-calendars`
-- Nasdaq: `https://www.nasdaqtrader.com/Trader.aspx?id=Calendar`
-- Borsa Italiana: `https://date.nager.at` (Italy public holidays + Good Friday)
-
-Update interval and horizon are controlled by:
-
-```yaml
-market:
-  holiday_update:
-    enabled: true
-    interval_days: 7
-    years_ahead: 1
-```
-
-One-off refresh:
-
-```bash
-docker compose run --rm calendar-updater python -m app.utils.holiday_update --config /app/config/config.yaml --once
-```
 
 ## History
 
 Recent changes (newest first):
+- Ran pytest after adding checkpoint tests (10 passed).
 - v2.0 backtest failed before rebuild; image needs refresh after orchestrator guard.
 - Guarded RL orchestrator price update against zero/invalid prices after backtest failure.
 - Started v2.0 backtest run (in progress).
