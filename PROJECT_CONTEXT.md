@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Guarded RL orchestrator price update against zero/invalid prices after backtest failure.
 - Started v2.0 backtest run (in progress).
 - Added checkpointing with retention for trader/learner state to resume across reboots.
 - Waiting on v2.0 training completion (in progress).
