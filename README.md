@@ -218,6 +218,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Ran dev pytest after checkpoint tests (10 passed, 14 warnings).
 - Ran pytest after adding checkpoint tests (10 passed).
 - v2.0 backtest failed before rebuild; image needs refresh after orchestrator guard.
 - Guarded RL orchestrator price update against zero/invalid prices after backtest failure.
