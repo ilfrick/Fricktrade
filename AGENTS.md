@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Seeded symbols from checkpoint so active symbols persist during AI filter startup.
 - Initialized dynamic symbol cache to prevent checkpoint crashes after async refresh.
 - Made AI filter refresh async so the trader keeps the last valid symbols during updates.
 - Reduced AI filter lookback_days to 2 to speed live scoring.

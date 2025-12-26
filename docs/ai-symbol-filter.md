@@ -11,6 +11,7 @@ Scores a large universe of symbols and returns an ordered list for trading.
 - Scores each symbol and sorts by descending score.
 - Optionally performs lightweight online updates on the latest bars.
 - While a refresh is in-flight, the trading loop keeps using the last valid symbol list.
+- On startup, the trader seeds the symbol list from the last saved checkpoint while the filter runs.
 
 ## Feature Window
 - Uses the last `window` returns and volumes for each symbol.
