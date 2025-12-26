@@ -198,6 +198,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Fixed OrderQueue snapshot response handling so tests pass.
 - Updated the architecture diagram to show broker-backed news and broker universe inputs.
 - Added broker-backed news catalysts and a broker-aware universe option for the AI symbol filter.
 - Fixed multi-broker symbol aggregation, action-based routing, and fallback routing.

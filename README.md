@@ -232,6 +232,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Fixed OrderQueue snapshot response handling so tests pass.
 - Updated the architecture diagram to show broker-backed news and broker universe inputs.
 - Added broker-backed news catalysts and a broker-aware universe option for AI symbol filtering.
 - Added multi-broker routing with broker-aware metrics, backtest support, and config/UI updates.
