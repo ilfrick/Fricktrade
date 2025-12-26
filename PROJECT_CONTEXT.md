@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added broker API health metrics/alerts and rebuilt/restarted the v2.0 stack.
 - Verified healthwatch metrics and sent test alert via Alertmanager.
 - Restarted healthwatch after fixing targets config.
 - Rebuilt dev stack with healthwatch/autoheal and resolved API port conflict.
