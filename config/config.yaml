@@ -278,6 +278,7 @@ data:
     max_symbols: 150
     max_universe: 50000
     universe: alpaca_active
+    universe_price_filter: true
     cash_aware: true
     cash_buffer_pct: 95
     cash_cap_mode: cash

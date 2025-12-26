@@ -227,6 +227,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added universe price filtering by cash-aware price bounds for dynamic symbols.
 - Added Grafana panel for broker API call activity.
 - Fixed OrderQueue snapshot response handling so tests pass.
 - Ensured dynamic universe always keeps positions/orders and hardened news fetching.

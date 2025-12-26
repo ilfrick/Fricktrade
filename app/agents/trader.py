@@ -26,7 +26,7 @@ from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols_for_config
-from app.data.scanner import ScanFilters, load_symbol_venues, load_universe, scan_symbols
+from app.data.scanner import ScanFilters, filter_universe_by_price, load_symbol_venues, load_universe, scan_symbols
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 try:
     from app.data.ai_filter import score_symbols
@@ -770,7 +770,7 @@ class TradingAgent:
 
         universe_cfg = dyn_cfg.get("universe", self._symbols)
         max_universe = int(dyn_cfg.get("max_universe", 500))
-        universe = self._resolve_universe(universe_cfg, api_key, api_secret, max_universe, portfolio)
+        universe = self._resolve_universe(universe_cfg, api_key, api_secret, max_universe, portfolio, dyn_cfg)
         if not universe:
             return
 
@@ -883,8 +883,27 @@ class TradingAgent:
         api_secret: str,
         max_universe: int,
         portfolio: dict,
+        dyn_cfg: dict | None = None,
     ) -> list[str]:
         universe = load_universe(api_key, api_secret, universe_cfg, max_universe=max_universe)
+        if dyn_cfg and dyn_cfg.get("universe_price_filter", False):
+            filters_cfg = dyn_cfg.get("filters", {}) or {}
+            price_min = float(filters_cfg.get("price_min", 0.0))
+            price_max = self._apply_cash_cap(price_min, float("inf"), portfolio, dyn_cfg)
+            filtered = filter_universe_by_price(
+                universe,
+                api_key=api_key,
+                api_secret=api_secret,
+                feed=str(dyn_cfg.get("feed", "iex")),
+                price_min=price_min,
+                price_max=price_max,
+                timeout_seconds=int(dyn_cfg.get("timeout_seconds", 10)),
+                retries=int(dyn_cfg.get("retries", 2)),
+            )
+            if filtered:
+                universe = filtered
+            else:
+                logging.warning("Universe price filter returned no symbols; keeping base universe.")
         extras = set()
         for symbol in portfolio.get("positions", {}).keys():
             extras.add(symbol)

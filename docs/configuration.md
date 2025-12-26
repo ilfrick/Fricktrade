@@ -36,5 +36,6 @@ Centralize runtime settings for all subsystems.
 - Strategy selection: `strategy.name` or `strategy.names`.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
 - AI filter: `data.dynamic_symbols.ai_filter.enabled`.
+- Universe price filter: `data.dynamic_symbols.universe_price_filter` (limits broker universe by price_min and cash cap).
 - Online learning: `learning.online.enabled`.
 - Checkpointing: `checkpointing.enabled`.

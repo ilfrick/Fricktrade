@@ -18,6 +18,7 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.output_dir`
 - `data.sources.*`
 - `data.dynamic_symbols.*`
+- `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap)
 - `news.*`
 
 ## Ingest Example
