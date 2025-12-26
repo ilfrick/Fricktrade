@@ -9,7 +9,7 @@ SKIPPED_ORDERS = Counter(
 ORDER_REJECTS = Counter(
     "order_rejects_total",
     "Orders rejected by broker",
-    ["broker", "symbol", "side", "code"],
+    ["broker", "symbol", "side", "code", "reason"],
 )
 PNL = Gauge("pnl_percent", "Current PnL percent")
 DRAWDOWN = Gauge("drawdown_percent", "Current drawdown percent")
