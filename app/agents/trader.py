@@ -225,8 +225,8 @@ class TradingAgent:
             ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
         self._record_orchestrator(symbol, signals, market_state)
         filtered_signals = [signal for signal in signals if signal.get("name") in names]
-        action, reduce_pct = self._combine_signals(filtered_signals, weights, order=names)
-        broker_name = self._resolve_broker_for_symbol(symbol, names, filtered_signals)
+        action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names)
+        broker_name = self._resolve_broker_for_symbol(symbol, names, filtered_signals, action_strategy)
         market_state["broker"] = broker_name
         guardrail = self._get_guardrail(symbol)
         if guardrail:
@@ -523,25 +523,26 @@ class TradingAgent:
         symbol: str,
         selected_strategies: list[str] | None = None,
         signals: list[dict] | None = None,
+        action_strategy: str | None = None,
     ) -> str:
         if len(self._broker_map) <= 1:
             return self._broker_name
         routing = self._routing_cfg or {}
         symbol_map = routing.get("symbols", {}) or {}
         if symbol in symbol_map:
-            return str(symbol_map[symbol])
+            return self._maybe_fallback_broker(str(symbol_map[symbol]))
         strategy_map = routing.get("strategies", {}) or {}
-        strategy = None
-        if selected_strategies:
+        strategy = action_strategy
+        if not strategy and selected_strategies:
             strategy = selected_strategies[0]
         if not strategy and signals:
             strategy = signals[0].get("name")
         if strategy and strategy in strategy_map:
-            return str(strategy_map[strategy])
+            return self._maybe_fallback_broker(str(strategy_map[strategy]))
         default = routing.get("default")
         if default:
-            return str(default)
-        return self._broker_name
+            return self._maybe_fallback_broker(str(default))
+        return self._maybe_fallback_broker(self._broker_name)
 
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
@@ -551,17 +552,28 @@ class TradingAgent:
             return data
         return portfolio
 
+    def _maybe_fallback_broker(self, broker_name: str) -> str:
+        if not self._routing_cfg.get("fallback_enabled", False):
+            return broker_name
+        broker = self._broker_map.get(broker_name)
+        if broker and broker.is_connected():
+            return broker_name
+        for name, alt in self._broker_map.items():
+            if alt.is_connected():
+                return name
+        return broker_name
+
     def _combine_signals(
         self,
         signals: list[dict],
         weights: dict[str, float] | None = None,
         order: list[str] | None = None,
-    ) -> tuple[str, float]:
+    ) -> tuple[str, float, str | None]:
         if not signals:
-            return "hold", 1.0
+            return "hold", 1.0, None
         for signal in signals:
             if signal.get("action") == "exit":
-                return "exit", 1.0
+                return "exit", 1.0, signal.get("name")
         mode = self._combine_mode
         if mode == "priority":
             order = order or self._strategy_names
@@ -570,27 +582,33 @@ class TradingAgent:
                     if signal.get("name") == name:
                         action = signal.get("action", "hold")
                         reduce_pct = float(signal.get("reduce_pct", 1.0))
-                        return action, reduce_pct
-            return "hold", 1.0
+                        return action, reduce_pct, name
+            return "hold", 1.0, None
         weights = weights or {}
         buy_score = 0.0
         sell_score = 0.0
         sells = []
+        top_signal = None
+        top_weight = None
         for signal in signals:
             action = signal.get("action")
             name = signal.get("name")
             weight = float(weights.get(name, 1.0))
+            if top_weight is None or weight > top_weight:
+                top_weight = weight
+                top_signal = signal
             if action == "buy":
                 buy_score += weight
             elif action == "sell":
                 sell_score += weight
                 sells.append(signal)
         if buy_score == sell_score:
-            return "hold", 1.0
+            return "hold", 1.0, top_signal.get("name") if top_signal else None
         if buy_score > sell_score:
-            return "buy", 1.0
+            return "buy", 1.0, top_signal.get("name") if top_signal else None
         reduce_pct = max(float(s.get("reduce_pct", 1.0)) for s in sells) if sells else 1.0
-        return "sell", reduce_pct
+        strategy = sells[0].get("name") if sells else (top_signal.get("name") if top_signal else None)
+        return "sell", reduce_pct, strategy
 
     def _update_account_metrics(self) -> None:
         try:
@@ -1168,7 +1186,11 @@ class TradingAgent:
                 market_value = qty * float(price)
             else:
                 market_value = float(market_value)
-            positions[symbol] = {"qty": qty, "value": market_value}
+            if symbol in positions:
+                positions[symbol]["qty"] += qty
+                positions[symbol]["value"] += market_value
+            else:
+                positions[symbol] = {"qty": qty, "value": market_value}
             gross_exposure += abs(market_value)
             if market_value < 0:
                 short_exposure += abs(market_value)

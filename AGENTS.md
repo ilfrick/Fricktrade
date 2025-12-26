@@ -196,6 +196,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Fixed multi-broker symbol aggregation, action-based routing, and fallback routing.
 - Guarded routing default to only select enabled brokers.
 - Added multi-broker routing support with broker-aware metrics and alerts.
 - Added rejection reason labels to order rejection alerts and logs.
