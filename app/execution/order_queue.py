@@ -145,20 +145,6 @@ class OrderQueue:
             )
         )
 
-
-def _reject_reason(code: str, exc: Exception) -> str:
-    mapping = {
-        "40310100": "pdt_protection",
-    }
-    if code in mapping:
-        return mapping[code]
-    text = str(exc).lower()
-    if "pattern day trading" in text or "pdt" in text:
-        return "pdt_protection"
-    if "insufficient" in text or "insufficient buying power" in text:
-        return "insufficient_funds"
-    return "unknown"
-
     def _response_from_snapshot(self, snapshot: dict, fallback_status: str) -> dict | None:
         if not snapshot:
             return None
@@ -177,3 +163,17 @@ def _reject_reason(code: str, exc: Exception) -> str:
             "filled_qty": snapshot.get("filled_qty"),
             "filled_avg_price": snapshot.get("filled_avg_price"),
         }
+
+
+def _reject_reason(code: str, exc: Exception) -> str:
+    mapping = {
+        "40310100": "pdt_protection",
+    }
+    if code in mapping:
+        return mapping[code]
+    text = str(exc).lower()
+    if "pattern day trading" in text or "pdt" in text:
+        return "pdt_protection"
+    if "insufficient" in text or "insufficient buying power" in text:
+        return "insufficient_funds"
+    return "unknown"

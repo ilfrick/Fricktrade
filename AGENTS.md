@@ -196,6 +196,8 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Fixed OrderQueue snapshot response handling so tests pass.
+- Ensured dynamic universe always keeps positions/orders and hardened news fetching.
 - Added rejection reason labels to order rejection alerts and logs.
 - Added order rejection metrics/alerts with broker and error code.
 - Guarded sell actions to skip when no long position exists.

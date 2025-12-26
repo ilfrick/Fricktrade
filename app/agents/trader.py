@@ -25,7 +25,7 @@ from app.monitoring.metrics import (
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
-from app.data.news import fetch_catalyst_symbols
+from app.data.news import fetch_catalyst_symbols_for_config
 from app.data.scanner import ScanFilters, load_symbol_venues, load_universe, scan_symbols
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 try:
@@ -735,16 +735,10 @@ class TradingAgent:
         ttl_minutes = int(news_cfg.get("cache_minutes", 15))
         if self._news_cache_at and (now - self._news_cache_at).total_seconds() < ttl_minutes * 60:
             return
-        self._news_cache = fetch_catalyst_symbols(
-            symbols=symbols,
-            provider=news_cfg.get("provider", "alpaca"),
-            base_url=news_cfg.get("base_url", "https://data.alpaca.markets"),
-            api_key=news_cfg.get("api_key", ""),
-            api_secret=news_cfg.get("api_secret", ""),
-            lookback_hours=int(news_cfg.get("lookback_hours", 12)),
-            keywords=news_cfg.get("keywords", []),
-            timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
-            retries=int(news_cfg.get("retries", 2)),
+        self._news_cache = fetch_catalyst_symbols_for_config(
+            symbols,
+            news_cfg,
+            self.cfg.get("brokers", {}),
         )
         self._news_cache_at = now
 
@@ -776,7 +770,7 @@ class TradingAgent:
 
         universe_cfg = dyn_cfg.get("universe", self._symbols)
         max_universe = int(dyn_cfg.get("max_universe", 500))
-        universe = load_universe(api_key, api_secret, universe_cfg, max_universe=max_universe)
+        universe = self._resolve_universe(universe_cfg, api_key, api_secret, max_universe, portfolio)
         if not universe:
             return
 
@@ -791,6 +785,7 @@ class TradingAgent:
                     api_key,
                     api_secret,
                     ai_cfg,
+                    self.cfg.get("brokers", {}),
                 )
                 self._ai_filter_inflight_at = now
                 return
@@ -881,6 +876,38 @@ class TradingAgent:
             return price_max
         return capped
 
+    def _resolve_universe(
+        self,
+        universe_cfg: object,
+        api_key: str,
+        api_secret: str,
+        max_universe: int,
+        portfolio: dict,
+    ) -> list[str]:
+        universe = load_universe(api_key, api_secret, universe_cfg, max_universe=max_universe)
+        extras = set()
+        for symbol in portfolio.get("positions", {}).keys():
+            extras.add(symbol)
+        for order in self._open_orders_cache:
+            symbol = order.get("symbol")
+            if symbol:
+                extras.add(symbol)
+        for symbol in self.cfg.get("data", {}).get("symbols", []):
+            extras.add(symbol)
+        extras_ordered = sorted(extras)
+        if len(extras_ordered) >= max_universe:
+            return extras_ordered
+        ordered: list[str] = []
+        seen = set()
+        for symbol in extras_ordered + universe:
+            if symbol in seen:
+                continue
+            ordered.append(symbol)
+            seen.add(symbol)
+            if len(ordered) >= max_universe:
+                break
+        return ordered
+
     def _resolve_active_symbols(self) -> list[str]:
         if not self._symbols_by_strategy:
             return self._symbols
@@ -916,16 +943,10 @@ class TradingAgent:
         retries = int(dyn_cfg.get("retries", 2))
         catalyst_map = {}
         if filters.require_catalyst:
-            catalyst_map = fetch_catalyst_symbols(
-                symbols=universe,
-                provider=self.cfg.get("news", {}).get("provider", "alpaca"),
-                base_url=self.cfg.get("news", {}).get("base_url", "https://data.alpaca.markets"),
-                api_key=self.cfg.get("news", {}).get("api_key", ""),
-                api_secret=self.cfg.get("news", {}).get("api_secret", ""),
-                lookback_hours=int(self.cfg.get("news", {}).get("lookback_hours", 12)),
-                keywords=self.cfg.get("news", {}).get("keywords", []),
-                timeout_seconds=int(self.cfg.get("news", {}).get("timeout_seconds", 10)),
-                retries=int(self.cfg.get("news", {}).get("retries", 2)),
+            catalyst_map = fetch_catalyst_symbols_for_config(
+                universe,
+                self.cfg.get("news", {}),
+                self.cfg.get("brokers", {}),
             )
         candidates = scan_symbols(
             universe,

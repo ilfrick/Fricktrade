@@ -142,6 +142,7 @@ strategy:
   names:
   - rl_policy
   - rl_policy_fees
+  - pattern_trading
   combine: vote
   fee_aware:
     min_edge_pct: 0.005
@@ -354,11 +355,11 @@ data:
     - pkn
     interval: 5m
     rate_limit_seconds: 2
+    api_key: '***'
   - provider: alphavantage
     enabled: false
     api_key: ${ALPHAVANTAGE_API_KEY}
     symbols: []
-
 checkpointing:
   enabled: true
   interval_seconds: 60
@@ -367,7 +368,6 @@ checkpointing:
   retention:
     max_age_hours: 72
     max_files: 200
-
 healthwatch:
   enabled: true
   interval_seconds: 30
