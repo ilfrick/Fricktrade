@@ -123,13 +123,13 @@ brokers:
       spread_pct: 0.0
 risk:
   max_daily_loss_pct: 2.0
-  max_position_size_pct: 25.0
+  max_position_size_pct: 10.0
   max_portfolio_leverage: 1.5
   max_short_exposure_pct: 30.0
-  max_positions: 20
-  cooldown_seconds: 30
-  hard_stop_pct: 4.0
-  trailing_stop_pct: 2.0
+  max_positions: 30
+  cooldown_seconds: 5
+  hard_stop_pct: 1.5
+  trailing_stop_pct: 0.7
   circuit_breaker_drawdown_pct: 5.0
 trading_limits:
   enabled: true
@@ -148,10 +148,10 @@ strategy:
     edge_multiplier: 0.5
     min_notional: 50.0
   params:
-    lookback_minutes: 30
-    entry_threshold_pct: 0.8
-    exit_threshold_pct: 0.4
-    position_horizon_minutes: 90
+    lookback_minutes: 10
+    entry_threshold_pct: 0.5
+    exit_threshold_pct: 0.25
+    position_horizon_minutes: 20
     allow_shorts: true
 orchestrator:
   mode: select
@@ -206,7 +206,7 @@ learning:
   use_best_model: true
   device: auto
   window_size: 50
-  reward_time_penalty_per_step: 0.05
+  reward_time_penalty_per_step: 0.15
   features:
     include_returns: true
     sma_periods:
@@ -266,7 +266,7 @@ backtest:
 data:
   provider: yfinance
   symbols: []
-  interval: 5m
+  interval: 1m
   lookback_days: 7
   session_gain_mode: gap
   dynamic_symbols:
@@ -285,7 +285,7 @@ data:
     retries: 2
     ai_filter:
       enabled: true
-      interval: 5m
+      interval: 1m
       lookback_days: 30
       window: 20
       retrain_hours: 6
@@ -309,15 +309,15 @@ data:
       retries: 2
       feed: iex
       objective: return_time_penalty
-      time_penalty_per_bar: 0.05
+      time_penalty_per_bar: 0.15
       allow_orchestrator_fetch: false
     filters:
       price_min: 0.0
-      relative_volume_min: 1.0
+      relative_volume_min: 2.0
       premarket_gain_min_pct: 1.0
-      min_shares_traded: 100000
-      max_spread_pct: 1.0
-      strict_spread: false
+      min_shares_traded: 500000
+      max_spread_pct: 0.3
+      strict_spread: true
       require_catalyst: false
     fallback:
       enabled: true

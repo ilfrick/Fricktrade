@@ -592,6 +592,7 @@ docker compose run --rm calendar-updater python -m app.utils.holiday_update --co
 ## History
 
 Recent changes (newest first):
+- Applied scalping-oriented configuration defaults (tighter stops, faster cadence).
 - Rebuilt and redeployed the dev stack to apply symbol venue refresh.
 - Added automatic Alpaca symbol-to-venue refresh for per-symbol market gating.
 - Rebuilt and restarted the live stack after adding per-symbol venue gating.
