@@ -14,12 +14,18 @@ from app.monitoring.metrics import (
     ACCOUNT_TOTAL,
     ACCOUNT_CASH,
     ACCOUNT_INVESTED,
+    ACCOUNT_TOTAL_BY_BROKER,
+    ACCOUNT_CASH_BY_BROKER,
+    ACCOUNT_INVESTED_BY_BROKER,
     POSITION_QTY,
     POSITION_VALUE,
+    POSITION_QTY_BY_BROKER,
+    POSITION_VALUE_BY_BROKER,
     SYMBOL_ACTIVE,
     STRATEGY_ACTIVE,
     ORCHESTRATOR_STRATEGY_ACTIVE,
     OPEN_ORDERS,
+    OPEN_ORDERS_BY_BROKER,
     BROKER_ACTIVE,
 )
 from app.risk.manager import RiskManager
@@ -51,8 +57,12 @@ class TradingAgent:
         self._strategy_by_symbol: dict[str, dict[str, object]] = {}
         self._guardrail_by_symbol: dict[str, object] = {}
         self.executor = ExecutionEngine(broker)
-        self._broker_name = self._resolve_broker_name()
-        self._order_queue = OrderQueue(broker, self._broker_name)
+        self._routing_cfg = cfg.get("execution", {}).get("brokers", {}).get("routing", {})
+        self._broker_map = self._resolve_broker_map()
+        self._broker_names = list(self._broker_map.keys())
+        self._broker_name = self._resolve_default_broker_name()
+        self._order_queues = {name: OrderQueue(item, name) for name, item in self._broker_map.items()}
+        self._order_queue = self._order_queues.get(self._broker_name)
         self._last_market_open = None
         self._started_at = datetime.utcnow()
         self._news_cache: dict[str, bool] = {}
@@ -63,6 +73,7 @@ class TradingAgent:
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
         self._open_orders_labels: set[tuple[str, str]] = set()
+        self._open_orders_labels_by_broker: set[tuple[str, str, str]] = set()
         self._dynamic_symbols_at: datetime | None = None
         self._dynamic_symbols: list[str] = []
         self._symbols: list[str] = []
@@ -72,6 +83,7 @@ class TradingAgent:
         self._orchestrator_state: dict[str, dict[str, object]] = {}
         self._last_trade_at: datetime | None = None
         self._position_symbols: set[str] = set()
+        self._position_symbols_by_broker: dict[str, set[str]] = {}
         self._ai_filter_last_run_at: datetime | None = None
         self._ai_filter_last_log_at: datetime | None = None
         self._ai_filter_last_count: int = 0
@@ -182,7 +194,8 @@ class TradingAgent:
 
     def run_once(self, symbol: str, market_state: dict):
         exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
-        if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol):
+        broker_hint = self._resolve_broker_for_symbol(symbol, self._strategy_names, None)
+        if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol, broker=broker_hint):
             SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
             logging.info("Skipping %s: open orders pending (strategy guard)", symbol)
             return None
@@ -213,24 +226,26 @@ class TradingAgent:
         self._record_orchestrator(symbol, signals, market_state)
         filtered_signals = [signal for signal in signals if signal.get("name") in names]
         action, reduce_pct = self._combine_signals(filtered_signals, weights, order=names)
+        broker_name = self._resolve_broker_for_symbol(symbol, names, filtered_signals)
+        market_state["broker"] = broker_name
         guardrail = self._get_guardrail(symbol)
         if guardrail:
             guard_action = guardrail.generate_signal(market_state).get("action", "hold")
             mode = self.learning_cfg.get("guardrail", {}).get("mode", "confirm")
             action = self._apply_guardrail(action, guard_action, mode)
         if action == "hold":
-            if self._cancel_pending_if_needed(symbol, action):
-                self._remove_pending_orders(symbol)
+            if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
+                self._remove_pending_orders(symbol, broker=broker_name)
             return None
         if action == "exit":
-            if self._cancel_pending_if_needed(symbol, action):
-                self._remove_pending_orders(symbol)
-            self.broker.close_position(symbol)
+            if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
+                self._remove_pending_orders(symbol, broker=broker_name)
+            self.broker.close_position(symbol, broker=broker_name)
             return None
 
-        if self._has_pending_order(symbol):
-            if self._cancel_pending_if_needed(symbol, action):
-                self._remove_pending_orders(symbol)
+        if self._has_pending_order(symbol, broker=broker_name):
+            if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
+                self._remove_pending_orders(symbol, broker=broker_name)
             else:
                 SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
                 logging.info("Skipping %s: open orders pending", symbol)
@@ -245,8 +260,10 @@ class TradingAgent:
             logging.info("Skipping %s for %s: no price available", action, symbol)
             return None
 
-        portfolio = market_state.get("portfolio", {})
-        if self._is_account_blocked():
+        portfolio = self._portfolio_for_broker(market_state.get("portfolio", {}), broker_name)
+        market_state["portfolio"] = portfolio
+        self._recalculate_exposure(market_state, portfolio, symbol)
+        if self._is_account_blocked(broker_name):
             SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="account_blocked").inc()
             logging.info("Skipping %s for %s: account blocked", action, symbol)
             return None
@@ -294,7 +311,8 @@ class TradingAgent:
             logging.info("Skipping %s for %s: risk limits exceeded", action, symbol)
             return None
 
-        order_id = self._order_queue.enqueue(symbol, action, qty=qty)
+        order_queue = self._order_queues.get(broker_name, self._order_queue)
+        order_id = order_queue.enqueue(symbol, action, qty=qty)
         if order_id and action in ("buy", "sell"):
             TRADES.labels(symbol=symbol, side=action).inc()
             self._last_trade_at = now
@@ -302,8 +320,8 @@ class TradingAgent:
             SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_failed").inc()
         return order_id
 
-    def _cancel_pending_if_needed(self, symbol: str, action: str) -> bool:
-        pending = self._pending_orders(symbol)
+    def _cancel_pending_if_needed(self, symbol: str, action: str, broker: str | None = None) -> bool:
+        pending = self._pending_orders(symbol, broker=broker)
         if not pending:
             return False
         if action in ("hold", "exit"):
@@ -319,27 +337,42 @@ class TradingAgent:
         for order in orders:
             order_id = order.get("order_id")
             try:
-                self.broker.cancel_order(str(order_id))
-                self._order_queue.mark_cancel_requested(str(order_id))
+                broker_name = order.get("broker") or self._broker_name
+                broker = self._broker_map.get(broker_name, self.broker)
+                broker.cancel_order(str(order_id))
+                queue = self._order_queues.get(broker_name, self._order_queue)
+                if queue:
+                    queue.mark_cancel_requested(str(order_id))
                 canceled = True
             except Exception as exc:
                 logging.warning("Cancel order failed for %s (%s): %s", symbol, order_id, exc)
         return canceled
 
     def _flush_order_responses(self) -> None:
-        responses = self._order_queue.pop_responses()
-        if not responses:
+        for queue in self._order_queues.values():
+            responses = queue.pop_responses()
+            if not responses:
+                continue
+            for response in responses:
+                try:
+                    self._orchestrator.on_order_update(response.__dict__)
+                except Exception as exc:
+                    logging.warning("Orchestrator order feedback failed: %s", exc)
+
+    def _pending_orders(self, symbol: str, broker: str | None = None) -> list[dict]:
+        pending = [order for order in self._open_orders_cache if order.get("symbol") == symbol]
+        if broker:
+            pending = [order for order in pending if order.get("broker") == broker]
+        return pending
+
+    def _remove_pending_orders(self, symbol: str, broker: str | None = None) -> None:
+        if broker:
+            self._open_orders_cache = [
+                order
+                for order in self._open_orders_cache
+                if order.get("symbol") != symbol or order.get("broker") != broker
+            ]
             return
-        for response in responses:
-            try:
-                self._orchestrator.on_order_update(response.__dict__)
-            except Exception as exc:
-                logging.warning("Orchestrator order feedback failed: %s", exc)
-
-    def _pending_orders(self, symbol: str) -> list[dict]:
-        return [order for order in self._open_orders_cache if order.get("symbol") == symbol]
-
-    def _remove_pending_orders(self, symbol: str) -> None:
         self._open_orders_cache = [order for order in self._open_orders_cache if order.get("symbol") != symbol]
 
     def _size_order(
@@ -363,7 +396,7 @@ class TradingAgent:
         limits = self.cfg.get("trading_limits", {})
         if limits.get("enabled") and not limits.get("allow_shorts", True):
             allow_shorts = False
-        cash = max(0.0, cash - self._reserved_cash(symbol, last_price))
+        cash = max(0.0, cash - self._reserved_cash(symbol, last_price, portfolio.get("broker")))
 
         if action == "buy":
             if equity <= 0 or cash <= 0:
@@ -388,13 +421,13 @@ class TradingAgent:
     def _limits_enabled(self) -> bool:
         return bool(self.cfg.get("trading_limits", {}).get("enabled", False))
 
-    def _is_account_blocked(self) -> bool:
+    def _is_account_blocked(self, broker: str | None = None) -> bool:
         if not self._limits_enabled():
             return False
         limits = self.cfg.get("trading_limits", {})
         if not limits.get("enforce_account_flags", True):
             return False
-        account = self._account_snapshot or {}
+        account = self._account_for_broker(broker)
         for key in ("account_blocked", "trading_blocked", "trade_suspended_by_user"):
             if str(account.get(key, "")).lower() in {"true", "1", "yes"} or account.get(key) is True:
                 return True
@@ -416,7 +449,7 @@ class TradingAgent:
         current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
         if current_qty > 0:
             return True
-        account = self._account_snapshot or {}
+        account = self._account_for_broker(portfolio.get("broker"))
         shorting_enabled = account.get("shorting_enabled")
         if shorting_enabled is False:
             return False
@@ -425,6 +458,16 @@ class TradingAgent:
         if not limits.get("allow_shorts", True):
             return False
         return True
+
+    def _account_for_broker(self, broker: str | None) -> dict:
+        account = self._account_snapshot or {}
+        if broker and isinstance(account, dict):
+            brokers = account.get("brokers")
+            if isinstance(brokers, dict):
+                raw = brokers.get(broker, {}).get("raw")
+                if isinstance(raw, dict):
+                    return raw
+        return account
 
     def _violates_order_limits(self, symbol: str, action: str, qty: int, last_price: float) -> bool:
         if not self._limits_enabled():
@@ -458,11 +501,52 @@ class TradingAgent:
         name = cfg.get("name", "intraday_momentum")
         return [str(name)]
 
-    def _resolve_broker_name(self) -> str:
+    def _resolve_broker_map(self) -> dict[str, object]:
+        if hasattr(self.broker, "brokers"):
+            return getattr(self.broker, "brokers")
+        return {self._resolve_default_broker_name(): self.broker}
+
+    def _resolve_default_broker_name(self) -> str:
+        routing_default = str(self._routing_cfg.get("default", "")).strip()
+        if routing_default:
+            return routing_default
         brokers_cfg = self.cfg.get("brokers", {})
         if brokers_cfg.get("ibkr", {}).get("enabled", False):
             return "ibkr"
         return "alpaca"
+
+    def _resolve_broker_for_symbol(
+        self,
+        symbol: str,
+        selected_strategies: list[str] | None = None,
+        signals: list[dict] | None = None,
+    ) -> str:
+        if len(self._broker_map) <= 1:
+            return self._broker_name
+        routing = self._routing_cfg or {}
+        symbol_map = routing.get("symbols", {}) or {}
+        if symbol in symbol_map:
+            return str(symbol_map[symbol])
+        strategy_map = routing.get("strategies", {}) or {}
+        strategy = None
+        if selected_strategies:
+            strategy = selected_strategies[0]
+        if not strategy and signals:
+            strategy = signals[0].get("name")
+        if strategy and strategy in strategy_map:
+            return str(strategy_map[strategy])
+        default = routing.get("default")
+        if default:
+            return str(default)
+        return self._broker_name
+
+    def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
+        brokers = portfolio.get("brokers")
+        if isinstance(brokers, dict) and broker_name in brokers:
+            data = dict(brokers[broker_name])
+            data.setdefault("broker", broker_name)
+            return data
+        return portfolio
 
     def _combine_signals(
         self,
@@ -511,19 +595,23 @@ class TradingAgent:
         except Exception as exc:
             logging.warning("Account metrics update failed: %s", exc)
             return
-        total = cash = None
+        total_val = cash_val = None
         if isinstance(account, dict):
-            if "equity" in account:
-                total = account.get("equity")
-                cash = account.get("cash")
+            if "brokers" in account and isinstance(account["brokers"], dict):
+                total_val = float(account.get("equity") or 0.0)
+                cash_val = float(account.get("cash") or 0.0)
+                for name, details in account["brokers"].items():
+                    equity = float(details.get("equity") or 0.0)
+                    cash = float(details.get("cash") or 0.0)
+                    ACCOUNT_TOTAL_BY_BROKER.labels(broker=name).set(equity)
+                    ACCOUNT_CASH_BY_BROKER.labels(broker=name).set(cash)
+                    ACCOUNT_INVESTED_BY_BROKER.labels(broker=name).set(equity - cash)
+            elif "equity" in account:
+                total_val = float(account.get("equity") or 0.0)
+                cash_val = float(account.get("cash") or 0.0)
             elif "NetLiquidation" in account:
-                total = account.get("NetLiquidation")
-                cash = account.get("TotalCashValue")
-        try:
-            total_val = float(total) if total is not None else None
-            cash_val = float(cash) if cash is not None else None
-        except (TypeError, ValueError):
-            return
+                total_val = float(account.get("NetLiquidation") or 0.0)
+                cash_val = float(account.get("TotalCashValue") or 0.0)
         if total_val is None or cash_val is None:
             return
         ACCOUNT_TOTAL.set(total_val)
@@ -546,6 +634,25 @@ class TradingAgent:
             POSITION_QTY.labels(symbol=symbol).set(0)
             POSITION_VALUE.labels(symbol=symbol).set(0)
         self._position_symbols = current
+        brokers = portfolio.get("brokers", {})
+        if isinstance(brokers, dict):
+            for broker_name, data in brokers.items():
+                broker_positions = data.get("positions", {}) if isinstance(data, dict) else {}
+                current_broker = self._position_symbols_by_broker.get(broker_name, set())
+                new_broker = set()
+                for symbol, pos in broker_positions.items():
+                    qty = float(pos.get("qty", 0.0) or 0.0)
+                    value = float(pos.get("value", 0.0) or 0.0)
+                    if qty == 0 and value == 0:
+                        continue
+                    POSITION_QTY_BY_BROKER.labels(broker=broker_name, symbol=symbol).set(qty)
+                    POSITION_VALUE_BY_BROKER.labels(broker=broker_name, symbol=symbol).set(value)
+                    new_broker.add(symbol)
+                removed = current_broker - new_broker
+                for symbol in removed:
+                    POSITION_QTY_BY_BROKER.labels(broker=broker_name, symbol=symbol).set(0)
+                    POSITION_VALUE_BY_BROKER.labels(broker=broker_name, symbol=symbol).set(0)
+                self._position_symbols_by_broker[broker_name] = new_broker
 
     def loop(self, symbol: str | list[str], market_data_provider, interval_seconds: int = 60):
         self._symbols = symbol if isinstance(symbol, list) else [symbol]
@@ -557,7 +664,8 @@ class TradingAgent:
             symbols = self._resolve_active_symbols()
             for name in self._strategy_names:
                 STRATEGY_ACTIVE.labels(strategy=name).set(1)
-            BROKER_ACTIVE.labels(broker=self._broker_name).set(1)
+            for broker_name in self._broker_names:
+                BROKER_ACTIVE.labels(broker=broker_name).set(1)
             self._update_account_metrics()
             self._update_position_metrics(portfolio)
             self._refresh_news_cache(symbols)
@@ -571,7 +679,16 @@ class TradingAgent:
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             self._refresh_open_orders_cache(symbols)
-            self._order_queue.update(self._open_orders_cache)
+            if len(self._broker_map) > 1:
+                orders_by_broker: dict[str, list[dict]] = {}
+                for order in self._open_orders_cache:
+                    broker_name = order.get("broker") or self._broker_name
+                    orders_by_broker.setdefault(str(broker_name), []).append(order)
+                for broker_name, queue in self._order_queues.items():
+                    queue.update(orders_by_broker.get(broker_name, []))
+            else:
+                if self._order_queue:
+                    self._order_queue.update(self._open_orders_cache)
             self._flush_order_responses()
             market_open = is_market_open(self.cfg)
             if market_open != self._last_market_open:
@@ -988,25 +1105,47 @@ class TradingAgent:
         market_state["catalyst"] = self._news_cache.get(symbol, False)
         market_state["open_orders"] = self._open_orders_cache
 
+    def _recalculate_exposure(self, market_state: dict, portfolio: dict, symbol: str) -> None:
+        equity = float(portfolio.get("equity", 0.0) or 0.0)
+        positions = portfolio.get("positions", {})
+        last_price = market_state.get("last_price")
+        if last_price is None:
+            prices = market_state.get("prices", [])
+            last_price = prices[-1] if prices else None
+        current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
+        current_value = current_qty * last_price if last_price else 0.0
+        short_exposure = float(portfolio.get("short_exposure", 0.0) or 0.0)
+        gross_exposure = float(portfolio.get("gross_exposure", 0.0) or 0.0)
+        market_state["exposure_pct"] = (abs(current_value) / equity * 100.0) if equity else 0.0
+        market_state["short_exposure_pct"] = (short_exposure / equity * 100.0) if equity else 0.0
+        market_state["leverage"] = (gross_exposure / equity) if equity else 1.0
+
     def _get_portfolio_snapshot(self) -> dict:
         account = self.broker.get_account()
         self._account_snapshot = account if isinstance(account, dict) else {}
-        equity = cash = None
+        equity_val = 0.0
+        cash_val = 0.0
+        brokers: dict[str, dict] = {}
         if isinstance(account, dict):
-            if "equity" in account:
-                equity = account.get("equity")
-                cash = account.get("cash")
+            if "brokers" in account and isinstance(account["brokers"], dict):
+                for name, data in account["brokers"].items():
+                    brokers[name] = {
+                        "equity": float(data.get("equity") or 0.0),
+                        "cash": float(data.get("cash") or 0.0),
+                        "positions": {},
+                        "gross_exposure": 0.0,
+                        "short_exposure": 0.0,
+                    }
+                equity_val = float(account.get("equity") or sum(v["equity"] for v in brokers.values()))
+                cash_val = float(account.get("cash") or sum(v["cash"] for v in brokers.values()))
+            elif "equity" in account:
+                equity_val = float(account.get("equity") or 0.0)
+                cash_val = float(account.get("cash") or 0.0)
             elif "NetLiquidation" in account:
-                equity = account.get("NetLiquidation")
-                cash = account.get("TotalCashValue")
-        try:
-            equity_val = float(equity) if equity is not None else 0.0
-            cash_val = float(cash) if cash is not None else 0.0
-        except (TypeError, ValueError):
-            equity_val = 0.0
-            cash_val = 0.0
+                equity_val = float(account.get("NetLiquidation") or 0.0)
+                cash_val = float(account.get("TotalCashValue") or 0.0)
 
-        positions = {}
+        positions: dict[str, dict] = {}
         gross_exposure = 0.0
         short_exposure = 0.0
         try:
@@ -1030,6 +1169,12 @@ class TradingAgent:
             gross_exposure += abs(market_value)
             if market_value < 0:
                 short_exposure += abs(market_value)
+            broker_name = pos.get("broker")
+            if broker_name and broker_name in brokers:
+                brokers[broker_name]["positions"][symbol] = {"qty": qty, "value": market_value}
+                brokers[broker_name]["gross_exposure"] += abs(market_value)
+                if market_value < 0:
+                    brokers[broker_name]["short_exposure"] += abs(market_value)
 
         return {
             "equity": equity_val,
@@ -1037,6 +1182,7 @@ class TradingAgent:
             "positions": positions,
             "gross_exposure": gross_exposure,
             "short_exposure": short_exposure,
+            "brokers": brokers,
         }
 
     def _refresh_open_orders_cache(self, symbols: list[str]) -> None:
@@ -1050,17 +1196,36 @@ class TradingAgent:
         interval_seconds = int(exec_cfg.get("interval_seconds", 30))
         if self._open_orders_at and (now - self._open_orders_at).total_seconds() < interval_seconds:
             return
-        try:
-            self._open_orders_cache = self.broker.get_open_orders()
-        except Exception as exc:
-            logging.warning("Open orders snapshot failed: %s", exc)
-            self._open_orders_cache = []
+        orders: list[dict] = []
+        if len(self._broker_map) > 1:
+            for name, broker in self._broker_map.items():
+                try:
+                    broker_orders = broker.get_open_orders()
+                except Exception as exc:
+                    logging.warning("Open orders snapshot failed for %s: %s", name, exc)
+                    continue
+                for order in broker_orders:
+                    item = dict(order)
+                    item["broker"] = name
+                    orders.append(item)
+        else:
+            try:
+                orders = self.broker.get_open_orders()
+            except Exception as exc:
+                logging.warning("Open orders snapshot failed: %s", exc)
+                orders = []
+            broker_name = self._broker_name
+            for order in orders:
+                order.setdefault("broker", broker_name)
+        self._open_orders_cache = orders
         self._open_orders_at = now
         self._update_open_orders_metrics(symbols)
 
     def _update_open_orders_metrics(self, symbols: list[str]) -> None:
         previous_labels = set(self._open_orders_labels)
+        previous_broker_labels = set(self._open_orders_labels_by_broker)
         counts: dict[tuple[str, str], int] = {}
+        broker_counts: dict[tuple[str, str, str], int] = {}
         for order in self._open_orders_cache:
             symbol = order.get("symbol")
             side = (order.get("side") or "").lower()
@@ -1068,15 +1233,27 @@ class TradingAgent:
                 continue
             key = (symbol, side)
             counts[key] = counts.get(key, 0) + 1
+            broker = order.get("broker") or self._broker_name
+            broker_key = (str(broker), symbol, side)
+            broker_counts[broker_key] = broker_counts.get(broker_key, 0) + 1
         new_labels = set(counts.keys())
+        new_broker_labels = set(broker_counts.keys())
         for symbol, side in previous_labels - new_labels:
             try:
                 OPEN_ORDERS.remove(symbol, side)
             except ValueError:
                 pass
+        for broker, symbol, side in previous_broker_labels - new_broker_labels:
+            try:
+                OPEN_ORDERS_BY_BROKER.remove(broker, symbol, side)
+            except ValueError:
+                pass
         for (symbol, side), count in counts.items():
             OPEN_ORDERS.labels(symbol=symbol, side=side).set(count)
+        for (broker, symbol, side), count in broker_counts.items():
+            OPEN_ORDERS_BY_BROKER.labels(broker=broker, symbol=symbol, side=side).set(count)
         self._open_orders_labels = new_labels
+        self._open_orders_labels_by_broker = new_broker_labels
 
     def _reset_open_orders_metrics(self, symbols: list[str]) -> None:
         for symbol, side in self._open_orders_labels:
@@ -1085,20 +1262,30 @@ class TradingAgent:
             except ValueError:
                 pass
         self._open_orders_labels.clear()
+        for broker, symbol, side in self._open_orders_labels_by_broker:
+            try:
+                OPEN_ORDERS_BY_BROKER.remove(broker, symbol, side)
+            except ValueError:
+                pass
+        self._open_orders_labels_by_broker.clear()
 
-    def _has_pending_order(self, symbol: str) -> bool:
+    def _has_pending_order(self, symbol: str, broker: str | None = None) -> bool:
         exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
         if not exec_cfg.get("skip_if_pending", True):
             return False
         for order in self._open_orders_cache:
             if order.get("symbol") == symbol:
+                if broker and order.get("broker") != broker:
+                    continue
                 return True
         return False
 
-    def _reserved_cash(self, symbol: str, last_price: float) -> float:
+    def _reserved_cash(self, symbol: str, last_price: float, broker: str | None = None) -> float:
         reserved = 0.0
         for order in self._open_orders_cache:
             if order.get("symbol") != symbol:
+                continue
+            if broker and order.get("broker") != broker:
                 continue
             side = (order.get("side") or "").lower()
             if side != "buy":

@@ -6,6 +6,7 @@ from app.agents.orchestrator import RLStrategyOrchestrator
 from app.utils.config import load_config
 from app.brokers.alpaca import AlpacaBroker
 from app.brokers.ibkr import IBKRBroker
+from app.brokers.router import BrokerRouter
 from app.agents.trader import TradingAgent
 from app.data.scanner import load_universe
 
@@ -29,17 +30,25 @@ def run_pretrain(config_path: str) -> None:
 
 
 def _build_broker(cfg: dict):
-    if cfg["brokers"]["ibkr"]["enabled"]:
-        return IBKRBroker(
+    brokers: dict[str, object] = {}
+    if cfg.get("brokers", {}).get("alpaca", {}).get("enabled", True):
+        brokers["alpaca"] = AlpacaBroker(
+            cfg["brokers"]["alpaca"]["api_key"],
+            cfg["brokers"]["alpaca"]["api_secret"],
+            cfg["brokers"]["alpaca"]["base_url"],
+        )
+    if cfg.get("brokers", {}).get("ibkr", {}).get("enabled", False):
+        brokers["ibkr"] = IBKRBroker(
             cfg["brokers"]["ibkr"]["host"],
             cfg["brokers"]["ibkr"]["port"],
             cfg["brokers"]["ibkr"]["client_id"],
         )
-    return AlpacaBroker(
-        cfg["brokers"]["alpaca"]["api_key"],
-        cfg["brokers"]["alpaca"]["api_secret"],
-        cfg["brokers"]["alpaca"]["base_url"],
-    )
+    exec_cfg = cfg.get("execution", {}).get("brokers", {})
+    if exec_cfg.get("enabled", False) and len(brokers) > 1:
+        return BrokerRouter(brokers, exec_cfg.get("routing", {}))
+    if "ibkr" in brokers and len(brokers) == 1:
+        return brokers["ibkr"]
+    return brokers.get("alpaca")
 
 
 def _resolve_data_cfg(cfg: dict, orchestrator_cfg: dict) -> dict:

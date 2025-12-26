@@ -8,6 +8,7 @@ import yfinance as yf
 from app.agents.trader import TradingAgent
 from app.brokers.alpaca import AlpacaBroker
 from app.brokers.ibkr import IBKRBroker
+from app.brokers.router import BrokerRouter
 from app.backtest.engine import run_backtest
 from app.backtest.agent_engine import run_agent_backtest
 from app.data.downloader import download_yfinance
@@ -111,19 +112,27 @@ def _session_gain_pct(data, prices: list[float], mode: str) -> float:
 
 
 def _build_broker(cfg: dict):
-    if cfg["brokers"]["ibkr"]["enabled"]:
-        return IBKRBroker(
+    brokers: dict[str, object] = {}
+    if cfg.get("brokers", {}).get("alpaca", {}).get("enabled", True):
+        paper = os.getenv("TRADING_MODE", "paper").lower() == "paper"
+        brokers["alpaca"] = AlpacaBroker(
+            cfg["brokers"]["alpaca"]["api_key"],
+            cfg["brokers"]["alpaca"]["api_secret"],
+            cfg["brokers"]["alpaca"]["base_url"],
+            paper=paper,
+        )
+    if cfg.get("brokers", {}).get("ibkr", {}).get("enabled", False):
+        brokers["ibkr"] = IBKRBroker(
             cfg["brokers"]["ibkr"]["host"],
             cfg["brokers"]["ibkr"]["port"],
             cfg["brokers"]["ibkr"]["client_id"],
         )
-    paper = os.getenv("TRADING_MODE", "paper").lower() == "paper"
-    return AlpacaBroker(
-        cfg["brokers"]["alpaca"]["api_key"],
-        cfg["brokers"]["alpaca"]["api_secret"],
-        cfg["brokers"]["alpaca"]["base_url"],
-        paper=paper,
-    )
+    exec_cfg = cfg.get("execution", {}).get("brokers", {})
+    if exec_cfg.get("enabled", False) and len(brokers) > 1:
+        return BrokerRouter(brokers, exec_cfg.get("routing", {}))
+    if "ibkr" in brokers and len(brokers) == 1:
+        return brokers["ibkr"]
+    return brokers.get("alpaca")
 
 
 def main():

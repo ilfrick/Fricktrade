@@ -86,6 +86,74 @@ class SimBroker:
         self.positions.pop(symbol, None)
 
 
+class SimBrokerRouter:
+    def __init__(self, brokers: dict[str, SimBroker], routing: dict | None = None):
+        self._brokers = brokers
+        self._routing = routing or {}
+
+    @property
+    def brokers(self) -> dict[str, SimBroker]:
+        return dict(self._brokers)
+
+    def get_account(self) -> dict:
+        total_equity = 0.0
+        total_cash = 0.0
+        per_broker = {}
+        for name, broker in self._brokers.items():
+            account = broker.get_account()
+            equity = float(account.get("equity") or 0.0)
+            cash = float(account.get("cash") or 0.0)
+            total_equity += equity
+            total_cash += cash
+            per_broker[name] = {"equity": equity, "cash": cash, "raw": account}
+        return {"equity": total_equity, "cash": total_cash, "brokers": per_broker}
+
+    def get_positions(self) -> list[dict]:
+        results: list[dict] = []
+        for name, broker in self._brokers.items():
+            for pos in broker.get_positions():
+                item = dict(pos)
+                item["broker"] = name
+                results.append(item)
+        return results
+
+    def get_open_orders(self) -> list[dict]:
+        return []
+
+    def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
+        broker_name = kwargs.get("broker") or self._resolve_broker(symbol, kwargs.get("strategy"))
+        broker = self._brokers.get(str(broker_name))
+        if broker is None:
+            raise ValueError(f"Unknown broker {broker_name!r} for {symbol}")
+        return broker.place_order(symbol, side, qty, order_type, **kwargs)
+
+    def close_position(self, symbol: str, **kwargs) -> None:
+        broker_name = kwargs.get("broker")
+        if broker_name:
+            broker = self._brokers.get(str(broker_name))
+            if broker:
+                broker.close_position(symbol)
+            return
+        for name, broker in self._brokers.items():
+            if symbol in broker.positions:
+                broker.close_position(symbol)
+
+    def cancel_order(self, order_id: str, **kwargs) -> None:
+        return
+
+    def _resolve_broker(self, symbol: str, strategy: str | None) -> str:
+        symbol_map = self._routing.get("symbols", {}) or {}
+        if symbol in symbol_map:
+            return str(symbol_map[symbol])
+        strategy_map = self._routing.get("strategies", {}) or {}
+        if strategy and strategy in strategy_map:
+            return str(strategy_map[strategy])
+        default = self._routing.get("default")
+        if default:
+            return str(default)
+        return next(iter(self._brokers.keys()))
+
+
 def run_agent_backtest(cfg: dict) -> BacktestResult | BacktestPlanResult:
     data_cfg = cfg["data"]
     backtest_cfg = cfg["backtest"]
@@ -134,7 +202,7 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
 
     timeline = _build_timeline(frames, start, end)
     sim_cfg = _backtest_cfg_override(cfg)
-    broker = SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"])
+    broker = _build_sim_broker(cfg, backtest_cfg)
     agent = TradingAgent(broker, sim_cfg)
 
     interval_minutes = _interval_minutes(interval or "1m")
@@ -217,6 +285,21 @@ def _symbols_from_data_dir(data_dir: Path, interval: str | None) -> list[str]:
     return sorted(set(symbols))
 
 
+def _build_sim_broker(cfg: dict, backtest_cfg: dict):
+    exec_cfg = cfg.get("execution", {}).get("brokers", {})
+    brokers_cfg = cfg.get("brokers", {})
+    enabled = []
+    if brokers_cfg.get("alpaca", {}).get("enabled", True):
+        enabled.append("alpaca")
+    if brokers_cfg.get("ibkr", {}).get("enabled", False):
+        enabled.append("ibkr")
+    if exec_cfg.get("enabled", False) and len(enabled) > 1:
+        per_cash = float(backtest_cfg["initial_cash"]) / len(enabled)
+        brokers = {name: SimBroker(per_cash, backtest_cfg["commission_pct"]) for name in enabled}
+        return SimBrokerRouter(brokers, exec_cfg.get("routing", {}))
+    return SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"])
+
+
 def _load_csv(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, parse_dates=[0])
     df.rename(columns={df.columns[0]: "Datetime"}, inplace=True)
@@ -296,7 +379,7 @@ def _resolve_dynamic_symbols(cfg: dict) -> list[str]:
     if not symbols:
         return symbols
     sim_cfg = _backtest_cfg_override(cfg)
-    broker = SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"])
+    broker = _build_sim_broker(cfg, backtest_cfg)
     agent = TradingAgent(broker, sim_cfg)
     agent._symbols = symbols or []
     now = datetime.strptime(backtest_cfg["start"], "%Y-%m-%d")

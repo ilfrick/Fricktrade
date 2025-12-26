@@ -14,6 +14,7 @@ execution, and metrics updates.
 - Runs per-symbol signals, combines them, applies guardrails, sizes orders,
   and submits via `ExecutionEngine`.
 - `sell` actions are ignored when no long position exists (prevents short attempts).
+- Multi-broker routing uses `execution.brokers.routing` to choose the broker per symbol.
 - Saves periodic checkpoints of in-memory state for reboot resilience.
 
 ## Key Components

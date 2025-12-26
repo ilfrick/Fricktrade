@@ -20,6 +20,7 @@ Centralize runtime settings for all subsystems.
 - `risk.*`
 - `trading_limits.*`
 - `execution.*`
+- `execution.brokers.*` (multi-broker routing)
 - `learning.*`
 - `brokers.*`
 - `backtest.*`
@@ -38,3 +39,4 @@ Centralize runtime settings for all subsystems.
 - AI filter: `data.dynamic_symbols.ai_filter.enabled`.
 - Online learning: `learning.online.enabled`.
 - Checkpointing: `checkpointing.enabled`.
+- Multi-broker routing: `execution.brokers.enabled`.

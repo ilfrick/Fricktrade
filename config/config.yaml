@@ -417,6 +417,13 @@ execution:
     interval_seconds: 30
     skip_if_pending: true
     strategy_guard: true
+  brokers:
+    enabled: false
+    routing:
+      default: alpaca
+      symbols: {}
+      strategies: {}
+      fallback_enabled: false
 monitoring:
   prometheus_port: 8001
   metrics_path: /metrics
