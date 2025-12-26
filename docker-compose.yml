@@ -41,7 +41,7 @@ services:
       - ./config:/app/config
     command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "api"]
     ports:
-      - "0.0.0.0:18082:8000"
+      - "0.0.0.0:18083:8000"
     labels:
       - "autoheal=true"
     healthcheck:
