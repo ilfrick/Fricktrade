@@ -227,6 +227,8 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Verified healthwatch metrics and sent test alert via Alertmanager.
+- Restarted healthwatch after fixing targets config.
 - Rebuilt dev stack with healthwatch/autoheal and resolved API port conflict.
 - Rebuilt and restarted live stack with healthwatch/autoheal.
 - Added healthwatch + autoheal with alerts for service restarts.

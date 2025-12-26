@@ -379,8 +379,6 @@ healthwatch:
     prometheus: http://prometheus:9090/-/healthy
     grafana: http://grafana:3000/api/health
     alertmanager: http://alertmanager:9093/-/healthy
-    interval: 5m
-    rate_limit_seconds: 15
 news:
   enabled: true
   provider: alpaca
