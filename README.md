@@ -227,6 +227,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added Grafana panel for broker API call activity.
 - Fixed OrderQueue snapshot response handling so tests pass.
 - Ensured dynamic universe always keeps positions/orders and hardened news fetching.
 - Verified healthwatch metrics and sent test alert via Alertmanager.
