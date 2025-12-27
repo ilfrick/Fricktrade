@@ -924,6 +924,8 @@ class TradingAgent:
             self._ai_filter_last_count = len(ordered)
             if not ordered:
                 ordered = list(universe)
+            max_symbols = int(dyn_cfg.get("max_symbols", 50))
+            ordered = self._merge_with_positions(ordered, portfolio, max_symbols)
             self._symbols_by_strategy["__global__"] = ordered
             for name in self._strategy_names:
                 self._symbols_by_strategy[name] = ordered
