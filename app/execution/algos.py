@@ -14,11 +14,13 @@ class AlgoSlice:
 def twap_slices(total_qty: int, duration_seconds: int, slice_count: int) -> list[AlgoSlice]:
     if total_qty <= 0 or slice_count <= 0:
         return []
+    slice_count = min(slice_count, total_qty)
     now = datetime.utcnow()
-    qty_per = max(1, total_qty // slice_count)
+    qty_per = total_qty // slice_count
+    remainder = total_qty % slice_count
     slices: list[AlgoSlice] = []
     for idx in range(slice_count):
-        qty = qty_per if idx < slice_count - 1 else max(1, total_qty - qty_per * (slice_count - 1))
+        qty = qty_per + (1 if idx < remainder else 0)
         delay = int(duration_seconds * idx / max(slice_count - 1, 1))
         slices.append(AlgoSlice(qty=qty, earliest_at=now + timedelta(seconds=delay)))
     return slices
@@ -42,15 +44,24 @@ def vwap_slices(total_qty: int, volume_profile: Iterable[float], duration_second
     profile = list(volume_profile)
     if total_qty <= 0 or not profile:
         return []
+    slice_count = min(len(profile), total_qty)
+    profile = profile[:slice_count]
     total = sum(profile) or 1.0
+    weights = list(profile)
+    quantities = [int(total_qty * (w / total)) for w in weights]
+    remainder = total_qty - sum(quantities)
+    if remainder > 0:
+        order = sorted(range(len(weights)), key=lambda i: weights[i], reverse=True)
+        for idx in order:
+            if remainder <= 0:
+                break
+            quantities[idx] += 1
+            remainder -= 1
     now = datetime.utcnow()
     slices: list[AlgoSlice] = []
-    for idx, weight in enumerate(profile):
-        qty = max(1, int(total_qty * (weight / total)))
+    for idx, qty in enumerate(quantities):
+        if qty <= 0:
+            continue
         delay = int(duration_seconds * idx / max(len(profile) - 1, 1))
         slices.append(AlgoSlice(qty=qty, earliest_at=now + timedelta(seconds=delay)))
-    # adjust remainder
-    diff = total_qty - sum(s.qty for s in slices)
-    if diff != 0 and slices:
-        slices[-1].qty = max(1, slices[-1].qty + diff)
     return slices
