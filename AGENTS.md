@@ -202,6 +202,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Capped AI-filter symbol list to dynamic_symbols.max_symbols to prevent oversized active symbol sets.
 - Fixed yfinance downloads by only passing proxy when configured.
 - Guarded factor model and AI filter features against zero prices to avoid divide warnings.
 - Guarded intraday momentum strategy against zero prices to prevent backtest errors.

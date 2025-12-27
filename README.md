@@ -240,6 +240,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Capped AI-filter symbol list to dynamic_symbols.max_symbols to prevent oversized active symbol metrics.
 - Fixed yfinance downloads by only passing proxy when configured.
 - Guarded factor model and AI filter features against zero prices to avoid divide warnings.
 - Guarded intraday momentum strategy against zero prices during backtests.
