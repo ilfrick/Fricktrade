@@ -39,7 +39,7 @@ flowchart LR
         Trader[TradingAgent]
         Strat[Strategies<br/>rl_policy / rl_policy_fees / intraday_momentum / pattern_trading / trend_following / factor_model / stat_arb_pairs / market_maker]
         Orchestrator[RL Strategy Orchestrator]
-        Risk[Risk Manager]
+        Risk[Risk Manager<br/>vol targeting]
         Algo[Execution Algos<br/>TWAP / VWAP / POV]
         Exec[Execution Engine]
         Queue[Order Queue<br/>FIFO + feedback]
