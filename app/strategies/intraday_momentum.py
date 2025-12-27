@@ -16,6 +16,8 @@ class IntradayMomentumStrategy(Strategy):
             return {"action": "hold"}
 
         start_price = prices[0]
+        if not start_price:
+            return {"action": "hold"}
         latest_price = prices[-1]
         change_pct = (latest_price - start_price) / start_price * 100.0
 
