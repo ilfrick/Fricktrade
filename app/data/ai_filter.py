@@ -471,6 +471,8 @@ def build_feature_vector_from_series(
 ) -> np.ndarray | None:
     if prices is None or len(prices) < window + 1:
         return None
+    if any(price <= 0 for price in prices):
+        return None
     volumes = volumes or []
     if len(volumes) < len(prices):
         pad_val = float(volumes[-1]) if volumes else 0.0
