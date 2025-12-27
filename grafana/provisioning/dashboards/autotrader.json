@@ -125,7 +125,7 @@
       },
       "targets": [
         {
-          "expr": "count(symbol_active)",
+          "expr": "count(symbol_active == 1)",
           "refId": "A"
         }
       ],
@@ -175,7 +175,7 @@
       },
       "targets": [
         {
-          "expr": "symbol_active",
+          "expr": "symbol_active == 1",
           "refId": "A"
         }
       ]

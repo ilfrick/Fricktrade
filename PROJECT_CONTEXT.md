@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Adjusted Grafana active symbol panels to show only active (value=1) series.
 - Capped AI-filter symbol list to dynamic_symbols.max_symbols to prevent 10k+ active symbol metrics.
 - Fixed yfinance downloads by only passing proxy when configured to avoid unsupported keyword errors.
 - Guarded factor model and AI filter features against zero prices to avoid divide warnings.
