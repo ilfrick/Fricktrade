@@ -131,6 +131,11 @@ risk:
   hard_stop_pct: 1.5
   trailing_stop_pct: 0.7
   circuit_breaker_drawdown_pct: 5.0
+  vol_targeting:
+    enabled: true
+    target_vol_pct: 2.0
+    min_scale: 0.5
+    max_scale: 1.5
 trading_limits:
   enabled: true
   allow_shorts: false
@@ -143,6 +148,10 @@ strategy:
   - rl_policy
   - rl_policy_fees
   - pattern_trading
+  - trend_following
+  - factor_model
+  - stat_arb_pairs
+  - market_maker
   combine: vote
   fee_aware:
     min_edge_pct: 0.005
@@ -154,6 +163,28 @@ strategy:
     exit_threshold_pct: 0.25
     position_horizon_minutes: 20
     allow_shorts: true
+    trend_following:
+      fast_window: 10
+      slow_window: 30
+      breakout_pct: 0.3
+      exit_pct: 0.2
+    factor_model:
+      momentum_weight: 0.6
+      liquidity_weight: 0.3
+      volatility_weight: 0.1
+      buy_threshold: 0.2
+      sell_threshold: -0.2
+    stat_arb_pairs:
+      lookback: 50
+      z_entry: 1.5
+      z_exit: 0.5
+      refresh_minutes: 30
+      max_pairs: 25
+    market_maker:
+      base_spread_pct: 0.4
+      inventory_target_pct: 0.0
+      skew_pct: 0.15
+      min_qty: 1
 orchestrator:
   mode: select
   top_k: 2
@@ -413,6 +444,23 @@ pattern_trading:
     partial_take_profit_pct: 0.1
     trailing_stop_pct: 0.02
 execution:
+  algos:
+    enabled: true
+    default: twap
+    min_notional: 250.0
+    twap:
+      duration_seconds: 120
+      slices: 4
+    vwap:
+      duration_seconds: 180
+      profile:
+      - 1
+      - 2
+      - 2
+      - 1
+    pov:
+      max_participation: 0.1
+      estimated_volume: 10000
   open_orders:
     enabled: true
     interval_seconds: 30

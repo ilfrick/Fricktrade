@@ -1,5 +1,5 @@
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
+from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
 
 from app.brokers.base import Broker
@@ -58,12 +58,25 @@ class AlpacaBroker(Broker):
         return results
 
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
-        order_req = MarketOrderRequest(
-            symbol=symbol,
-            qty=qty,
-            side=OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL,
-            time_in_force=TimeInForce.DAY,
-        )
+        order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+        if str(order_type).lower() == "limit":
+            limit_price = kwargs.get("limit_price")
+            if limit_price is None:
+                raise ValueError("limit_price required for limit orders")
+            order_req = LimitOrderRequest(
+                symbol=symbol,
+                qty=qty,
+                side=order_side,
+                time_in_force=TimeInForce.DAY,
+                limit_price=float(limit_price),
+            )
+        else:
+            order_req = MarketOrderRequest(
+                symbol=symbol,
+                qty=qty,
+                side=order_side,
+                time_in_force=TimeInForce.DAY,
+            )
         order = record_broker_call(
             self._name,
             "place_order",

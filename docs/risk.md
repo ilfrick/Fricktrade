@@ -15,6 +15,10 @@ Enforce exposure, leverage, and safety limits before execution.
 - `risk.max_portfolio_leverage`
 - `risk.cooldown_seconds`
 - `risk.circuit_breaker_drawdown_pct`
+- `risk.vol_targeting.enabled`
+- `risk.vol_targeting.target_vol_pct`
+- `risk.vol_targeting.min_scale`
+- `risk.vol_targeting.max_scale`
 - `trading_limits.enabled`
 - `trading_limits.allow_shorts`
 - `trading_limits.blocked_symbols`
@@ -28,3 +32,4 @@ Enforce exposure, leverage, and safety limits before execution.
 - Lower `max_position_size_pct` for more diversified risk.
 - Tighten `hard_stop_pct` and `trailing_stop_pct` for faster exits.
 - Use `trading_limits.allow_shorts: false` to block shorts.
+- Enable `risk.vol_targeting.enabled` to scale position sizing by realized volatility.

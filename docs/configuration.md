@@ -34,8 +34,11 @@ Centralize runtime settings for all subsystems.
 
 ## Common Toggles
 - Strategy selection: `strategy.name` or `strategy.names`.
+- Strategy params: `strategy.params.*` (including trend following, factor model, stat arb pairs, market maker).
+- Vol targeting: `risk.vol_targeting.enabled`.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
 - AI filter: `data.dynamic_symbols.ai_filter.enabled`.
 - Universe price filter: `data.dynamic_symbols.universe_price_filter` (limits broker universe by price_min and cash cap).
+- Execution algos: `execution.algos.enabled`.
 - Online learning: `learning.online.enabled`.
 - Checkpointing: `checkpointing.enabled`.

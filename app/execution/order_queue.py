@@ -13,6 +13,8 @@ class OrderRequest:
     side: str
     qty: float
     order_type: str = "market"
+    limit_price: float | None = None
+    earliest_at: datetime = field(default_factory=datetime.utcnow)
     created_at: datetime = field(default_factory=datetime.utcnow)
     order_id: str | None = None
 
@@ -40,13 +42,29 @@ class OrderQueue:
         self._cancel_requested: set[str] = set()
         self._responses: list[OrderResponse] = []
 
-    def enqueue(self, symbol: str, side: str, qty: float) -> str | None:
-        request = OrderRequest(symbol=symbol, side=side, qty=qty)
+    def enqueue(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        order_type: str = "market",
+        limit_price: float | None = None,
+        earliest_at: datetime | None = None,
+    ) -> str | None:
+        request = OrderRequest(
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            order_type=order_type,
+            limit_price=limit_price,
+            earliest_at=earliest_at or datetime.utcnow(),
+        )
         self._queue.append(request)
+        self._queue.sort(key=lambda r: r.earliest_at)
         if self._active is None:
             self._start_next()
             return self._active.order_id if self._active else None
-        logging.info("Order queued: %s %s qty=%s", side, symbol, qty)
+        logging.info("Order queued: %s %s qty=%s type=%s", side, symbol, qty, order_type)
         return None
 
     def mark_cancel_requested(self, order_id: str) -> None:
@@ -93,9 +111,18 @@ class OrderQueue:
     def _start_next(self) -> None:
         if not self._queue:
             return
-        request = self._queue.pop(0)
+        request = self._queue[0]
+        if request.earliest_at > datetime.utcnow():
+            return
+        self._queue.pop(0)
         try:
-            order_id = self._broker.place_order(request.symbol, request.side, request.qty, request.order_type)
+            order_id = self._broker.place_order(
+                request.symbol,
+                request.side,
+                request.qty,
+                request.order_type,
+                limit_price=request.limit_price,
+            )
         except Exception as exc:
             code = "unknown"
             try:

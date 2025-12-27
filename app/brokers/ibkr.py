@@ -1,4 +1,4 @@
-from ib_insync import IB, Stock, MarketOrder
+from ib_insync import IB, Stock, MarketOrder, LimitOrder
 
 from app.brokers.base import Broker
 from app.monitoring.broker_metrics import record_broker_call
@@ -52,7 +52,14 @@ class IBKRBroker(Broker):
 
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         contract = Stock(symbol, "SMART", "EUR")
-        order = MarketOrder("BUY" if side.lower() == "buy" else "SELL", qty)
+        order_action = "BUY" if side.lower() == "buy" else "SELL"
+        if str(order_type).lower() == "limit":
+            limit_price = kwargs.get("limit_price")
+            if limit_price is None:
+                raise ValueError("limit_price required for limit orders")
+            order = LimitOrder(order_action, qty, float(limit_price))
+        else:
+            order = MarketOrder(order_action, qty)
         trade = record_broker_call(self._name, "place_order", self.ib.placeOrder, contract, order)
         self.ib.sleep(0.5)
         return str(trade.order.permId)

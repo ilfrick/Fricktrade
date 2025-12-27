@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.execution.executor import ExecutionEngine
 from app.execution.order_queue import OrderQueue
+from app.execution.algos import pov_slices, twap_slices, vwap_slices
 from app.monitoring.metrics import (
     TRADES,
     SKIPPED_ORDERS,
@@ -24,6 +25,10 @@ from app.monitoring.metrics import (
 )
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
+from app.strategies.trend_following import TrendFollowingStrategy
+from app.strategies.factor_model import FactorModelStrategy
+from app.strategies.stat_arb_pairs import StatArbPairsStrategy
+from app.strategies.market_maker import MarketMakerStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols_for_config
 from app.data.scanner import ScanFilters, filter_universe_by_price, load_symbol_venues, load_universe, scan_symbols
@@ -130,6 +135,14 @@ class TradingAgent:
             return None
         if name == "pattern_trading":
             return PatternTradingStrategy(self.cfg.get("pattern_trading", {}))
+        if name == "trend_following":
+            return TrendFollowingStrategy(params)
+        if name == "factor_model":
+            return FactorModelStrategy(params)
+        if name == "stat_arb_pairs":
+            return StatArbPairsStrategy(params)
+        if name == "market_maker":
+            return MarketMakerStrategy(params)
         return IntradayMomentumStrategy(
             params["lookback_minutes"],
             params["entry_threshold_pct"],
@@ -181,6 +194,45 @@ class TradingAgent:
                 return "hold"
         return action
 
+    def _select_order_meta(self, signals: list[dict], order: list[str]) -> dict:
+        for name in order:
+            for signal in signals:
+                if signal.get("name") != name:
+                    continue
+                return {
+                    "order_type": signal.get("order_type"),
+                    "limit_price": signal.get("limit_price"),
+                    "algo": signal.get("algo"),
+                }
+        return {}
+
+    def _plan_execution(self, action: str, qty: int, last_price: float, market_state: dict, algo_name: str | None):
+        algo_cfg = self.cfg.get("execution", {}).get("algos", {})
+        if not algo_cfg.get("enabled", False):
+            return []
+        if action not in ("buy", "sell"):
+            return []
+        notional = qty * last_price
+        min_notional = float(algo_cfg.get("min_notional", 0.0))
+        if notional < min_notional:
+            return []
+        name = algo_name or str(algo_cfg.get("default", "twap"))
+        if name == "twap":
+            duration = int(algo_cfg.get("twap", {}).get("duration_seconds", 120))
+            slices = int(algo_cfg.get("twap", {}).get("slices", 4))
+            return twap_slices(qty, duration, slices)
+        if name == "vwap":
+            duration = int(algo_cfg.get("vwap", {}).get("duration_seconds", 120))
+            profile = algo_cfg.get("vwap", {}).get("profile", [1, 1, 1, 1])
+            return vwap_slices(qty, profile, duration)
+        if name == "pov":
+            max_participation = float(algo_cfg.get("pov", {}).get("max_participation", 0.1))
+            est_volume = float(market_state.get("session_volume", 0.0) or 0.0)
+            if est_volume <= 0:
+                est_volume = float(algo_cfg.get("pov", {}).get("estimated_volume", 0.0))
+            return pov_slices(qty, max_participation, est_volume)
+        return []
+
     def run_once(self, symbol: str, market_state: dict):
         exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
         if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol):
@@ -214,6 +266,7 @@ class TradingAgent:
         self._record_orchestrator(symbol, signals, market_state)
         filtered_signals = [signal for signal in signals if signal.get("name") in names]
         action, reduce_pct = self._combine_signals(filtered_signals, weights, order=names)
+        order_meta = self._select_order_meta(filtered_signals, names)
         guardrail = self._get_guardrail(symbol)
         if guardrail:
             guard_action = guardrail.generate_signal(market_state).get("action", "hold")
@@ -267,9 +320,9 @@ class TradingAgent:
             logging.info("Skipping %s for %s: shorting disabled", action, symbol)
             return None
         if action == "sell":
-            qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, reduce_pct=reduce_pct)
+            qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, market_state, reduce_pct=reduce_pct)
         else:
-            qty, skip_reason = self._size_order(action, last_price, portfolio, symbol)
+            qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, market_state)
         if qty <= 0:
             if skip_reason:
                 SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=skip_reason).inc()
@@ -295,7 +348,36 @@ class TradingAgent:
             logging.info("Skipping %s for %s: risk limits exceeded", action, symbol)
             return None
 
-        order_id = self._order_queue.enqueue(symbol, action, qty=qty)
+        order_type = str(order_meta.get("order_type") or "market").lower()
+        limit_price = order_meta.get("limit_price")
+        algo_name = order_meta.get("algo")
+        if order_type == "limit" and limit_price is None:
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="limit_price_missing").inc()
+            logging.info("Skipping %s for %s: limit price missing", action, symbol)
+            return None
+        slices = []
+        algo_label = str(algo_name or "").lower()
+        if order_type == "market" and algo_label not in {"none", "off"}:
+            slices = self._plan_execution(action, qty, last_price, market_state, algo_name)
+        if slices:
+            order_id = None
+            for order_slice in slices:
+                self._order_queue.enqueue(
+                    symbol,
+                    action,
+                    qty=order_slice.qty,
+                    order_type=order_type,
+                    limit_price=limit_price,
+                    earliest_at=order_slice.earliest_at,
+                )
+        else:
+            order_id = self._order_queue.enqueue(
+                symbol,
+                action,
+                qty=qty,
+                order_type=order_type,
+                limit_price=limit_price,
+            )
         if order_id and action in ("buy", "sell"):
             TRADES.labels(symbol=symbol, side=action).inc()
             self._last_trade_at = now
@@ -349,6 +431,7 @@ class TradingAgent:
         last_price: float,
         portfolio: dict,
         symbol: str,
+        market_state: dict,
         reduce_pct: float = 1.0,
     ) -> tuple[int, str | None]:
         if last_price <= 0:
@@ -359,6 +442,7 @@ class TradingAgent:
         current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
         current_value = current_qty * last_price
         max_pos_pct = float(self.cfg["risk"]["max_position_size_pct"])
+        max_pos_pct *= self._vol_target_scale(market_state)
         max_short_pct = float(self.cfg["risk"]["max_short_exposure_pct"])
         allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
         limits = self.cfg.get("trading_limits", {})
@@ -385,6 +469,33 @@ class TradingAgent:
             return 0, "no_position"
 
         return 0, "unsupported"
+
+    def _vol_target_scale(self, market_state: dict) -> float:
+        cfg = self.cfg.get("risk", {}).get("vol_targeting", {})
+        if not cfg.get("enabled", False):
+            return 1.0
+        prices = market_state.get("prices", []) or []
+        if len(prices) < 3:
+            return 1.0
+        returns = []
+        for idx in range(1, len(prices)):
+            prev = prices[idx - 1]
+            curr = prices[idx]
+            if not prev:
+                continue
+            returns.append((curr - prev) / prev)
+        if not returns:
+            return 1.0
+        mean = sum(returns) / len(returns)
+        var = sum((r - mean) ** 2 for r in returns) / max(len(returns) - 1, 1)
+        realized = (var ** 0.5) * 100.0
+        target = float(cfg.get("target_vol_pct", 2.0))
+        if realized <= 0:
+            return 1.0
+        scale = target / realized
+        min_scale = float(cfg.get("min_scale", 0.5))
+        max_scale = float(cfg.get("max_scale", 1.5))
+        return max(min(scale, max_scale), min_scale)
 
     def _limits_enabled(self) -> bool:
         return bool(self.cfg.get("trading_limits", {}).get("enabled", False))

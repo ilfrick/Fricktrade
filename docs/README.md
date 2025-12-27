@@ -11,6 +11,7 @@ Start here if you are new:
 Subsystem reference:
 - `trading-loop.md`
 - `strategies.md`
+- `strategy_models.md`
 - `execution.md`
 - `risk.md`
 - `brokers.md`

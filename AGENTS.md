@@ -144,6 +144,9 @@ docker compose run --rm api
 - Learning config lives under `learning` (enable policy, guardrail mode, feature set, and optional online updates). `learning.device: auto` uses CUDA if available.
 - Pattern Trading config lives under `pattern_trading` and is enabled via `strategy.name: pattern_trading`.
 - Multi-strategy config uses `strategy.names` with `strategy.combine` set to `priority` or `vote` (enabled by default in `config/config.yaml`).
+- Additional strategies include `trend_following`, `factor_model`, `stat_arb_pairs`, and `market_maker` under `strategy.params.*`.
+- Execution algos (TWAP/VWAP/POV) are configured under `execution.algos`.
+- Volatility targeting is configured under `risk.vol_targeting`.
 - AI strategy orchestration uses `orchestrator.*` to score strategies per symbol and select the top candidates each cycle. ML mode (`orchestrator.ml.enabled`) trains per bar with replay buffer + best-model checkpoints; default model is LSTM with `orchestrator.ml.seq_len`.
 - Fee-aware RL is available as `rl_policy_fees`, using broker-specific fee config under `brokers.<name>.fees` plus guardrails in `strategy.fee_aware`.
 - Orchestrator pretraining runs out-of-band by default (`orchestrator.ml.pretrain.in_trader: false`); use `python -m app.main pretrain-orchestrator` in Docker to warm-start the model.
@@ -189,13 +192,16 @@ docker compose run --rm api
 
 ## Testing
 
-No automated tests are present. For changes, prefer manual checks via:
+Pytest covers core components. For changes, run:
+- `pytest` or `python -m pytest` (local/testenv).
 - `python -m app.main backtest` in Docker.
 - `/health` and `/config` endpoints via the `api` service.
 
 ## History
 
 Recent changes (newest first):
+- Enabled production strategy set (trend following, factor model, stat-arb pairs, market making) with execution algos and volatility targeting.
+- Added tests for strategy models and execution algos.
 - Cleared stale active-symbol metrics so Grafana only shows current symbols.
 - Ensured held positions stay in dynamic symbols even when scanner filters exclude them.
 - Raised minimum trade price to 2.0 across dynamic scanning and pattern selection.
