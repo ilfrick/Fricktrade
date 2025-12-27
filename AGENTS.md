@@ -200,6 +200,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Guarded intraday momentum strategy against zero prices to prevent backtest errors.
 - Enabled production strategy set (trend following, factor model, stat-arb pairs, market making) with execution algos and volatility targeting.
 - Added tests for strategy models and execution algos.
 - Cleared stale active-symbol metrics so Grafana only shows current symbols.
