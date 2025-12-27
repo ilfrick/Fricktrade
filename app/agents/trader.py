@@ -73,6 +73,7 @@ class TradingAgent:
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
         self._open_orders_labels: set[tuple[str, str]] = set()
+        self._active_symbol_labels: set[str] = set()
         self._open_orders_labels_by_broker: set[tuple[str, str, str]] = set()
         self._dynamic_symbols_at: datetime | None = None
         self._dynamic_symbols: list[str] = []
@@ -697,8 +698,12 @@ class TradingAgent:
             self._log_ai_filter_heartbeat()
             symbols = self._resolve_active_symbols()
             symbols = self._merge_symbols_with_positions(symbols, portfolio)
+            current_symbols = set(symbols)
+            for sym in self._active_symbol_labels - current_symbols:
+                SYMBOL_ACTIVE.labels(symbol=sym).set(0)
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
+            self._active_symbol_labels = current_symbols
             self._refresh_open_orders_cache(symbols)
             if len(self._broker_map) > 1:
                 orders_by_broker: dict[str, list[dict]] = {}
