@@ -200,6 +200,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Fixed yfinance downloads by only passing proxy when configured.
 - Guarded factor model and AI filter features against zero prices to avoid divide warnings.
 - Guarded intraday momentum strategy against zero prices to prevent backtest errors.
 - Enabled production strategy set (trend following, factor model, stat-arb pairs, market making) with execution algos and volatility targeting.

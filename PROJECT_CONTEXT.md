@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Fixed yfinance downloads by only passing proxy when configured to avoid unsupported keyword errors.
 - Guarded factor model and AI filter features against zero prices to avoid divide warnings.
 - Guarded intraday momentum strategy against zero prices to prevent backtest crashes.
 - Added production strategy set (trend following, factor model, stat-arb pairs, market making) and execution algos (TWAP/VWAP/POV).
