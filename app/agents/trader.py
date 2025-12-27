@@ -1126,10 +1126,10 @@ class TradingAgent:
             retries=retries,
         )
         if candidates:
-            return candidates
+            return self._merge_with_positions(candidates, portfolio, max_symbols)
         fallback_cfg = dyn_cfg.get("fallback", {})
         if not fallback_cfg.get("enabled", False):
-            return []
+            return self._merge_with_positions([], portfolio, max_symbols)
         logging.info("Dynamic symbols fallback enabled; relaxing filters.")
         fallback_filters = ScanFilters(
             price_min=float(fallback_cfg.get("price_min", price_min)),
@@ -1155,7 +1155,22 @@ class TradingAgent:
         )
         if candidates:
             logging.info("Dynamic symbols fallback found %d candidates.", len(candidates))
-        return candidates
+        return self._merge_with_positions(candidates, portfolio, max_symbols)
+
+    def _merge_with_positions(self, candidates: list[str], portfolio: dict, max_symbols: int) -> list[str]:
+        held = [s for s in portfolio.get("positions", {}).keys() if s]
+        if not held and not candidates:
+            return []
+        ordered: list[str] = []
+        seen = set()
+        for symbol in held + candidates:
+            if symbol in seen:
+                continue
+            ordered.append(symbol)
+            seen.add(symbol)
+            if len(ordered) >= max_symbols:
+                break
+        return ordered
 
     def _enrich_market_state(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         equity = float(portfolio.get("equity", 0.0) or 0.0)
