@@ -202,6 +202,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Guarded factor model and AI filter features against zero prices to avoid divide warnings.
 - Guarded intraday momentum strategy against zero prices to prevent backtest errors.
 - Added production strategy set (trend, factor, stat-arb, market making) with execution algos and vol targeting.
 - Added tests for strategy models and execution algos.

@@ -32,6 +32,8 @@ class FactorModelStrategy(Strategy):
         volumes = market_state.get("volumes", []) or []
         if len(prices) < 3:
             return {"action": "hold"}
+        if any(price <= 0 for price in prices):
+            return {"action": "hold"}
         close = np.array(prices, dtype=float)
         returns = np.diff(close) / close[:-1]
         momentum = float(returns[-3:].mean()) if returns.size else 0.0
