@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Guarded intraday momentum strategy against zero prices to prevent backtest crashes.
 - Added production strategy set (trend, factor, stat-arb, market making) with execution algos and vol targeting.
 - Added limit-order support for brokers and order queue scheduling for algo slices.
 - Added tests for strategy models and execution algos.

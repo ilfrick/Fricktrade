@@ -240,6 +240,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Guarded intraday momentum strategy against zero prices during backtests.
 - Added production strategy set (trend, factor, stat-arb, market making) with execution algos and vol targeting.
 - Added limit-order support for brokers and time-sliced order queue scheduling.
 - Added tests for strategy models and execution algos.
