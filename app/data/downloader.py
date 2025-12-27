@@ -18,6 +18,7 @@ def _download_with_retries(
     retries: int = 3,
 ):
     last_err = None
+    proxy_args = {"proxy": proxy} if proxy else {}
     for attempt in range(1, retries + 1):
         try:
             data = yf.download(
@@ -27,7 +28,7 @@ def _download_with_retries(
                 auto_adjust=True,
                 progress=False,
                 threads=False,
-                proxy=proxy or None,
+                **proxy_args,
             )
             if data is not None and not data.empty:
                 return data
@@ -43,7 +44,7 @@ def _download_with_retries(
                 interval=interval,
                 auto_adjust=True,
                 actions=False,
-                proxy=proxy or None,
+                **proxy_args,
             )
             if data is not None and not data.empty:
                 return data
@@ -82,6 +83,7 @@ def download_yfinance(
     files = []
     clamped_days = _clamp_lookback(interval, lookback_days)
     period = f"{clamped_days}d"
+    proxy_args = {"proxy": proxy} if proxy else {}
     for symbol in symbols:
         if start:
             data = yf.download(
@@ -92,7 +94,7 @@ def download_yfinance(
                 auto_adjust=True,
                 progress=False,
                 threads=False,
-                proxy=proxy or None,
+                **proxy_args,
             )
         else:
             data = _download_with_retries(symbol, period, interval, proxy)
