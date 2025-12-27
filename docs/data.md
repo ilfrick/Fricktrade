@@ -20,6 +20,7 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.dynamic_symbols.*`
 - `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap)
 - `news.*`
+- Held positions are always included in dynamic symbol results, even if scanner filters would exclude them.
 
 ## Ingest Example
 ```bash
