@@ -198,6 +198,7 @@ No automated tests are present. For changes, prefer manual checks via:
 ## History
 
 Recent changes (newest first):
+- Raised minimum trade price to 2.0 across dynamic scanning and pattern selection.
 - Added universe price filtering by cash-aware price bounds for dynamic symbols.
 - Added Grafana panel for broker API call activity.
 - Fixed Mermaid label text so the architecture diagram renders in master.
