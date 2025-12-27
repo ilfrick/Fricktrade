@@ -14,9 +14,16 @@ Place, cancel, and close orders through the active broker.
 - `execution.open_orders.skip_if_pending`
 - `execution.open_orders.strategy_guard`
 - `execution.open_orders.interval_seconds`
+- `execution.algos.enabled`
+- `execution.algos.default`
+- `execution.algos.min_notional`
+- `execution.algos.twap.*`
+- `execution.algos.vwap.*`
+- `execution.algos.pov.*`
 
 ## Order Flow
 1) Strategy signal -> orchestrator selection.
 2) Risk checks + sizing.
 3) Order queue submits one order at a time.
 4) Broker response feeds back to orchestrator.
+5) If an execution algo is enabled and notional exceeds the threshold, orders are time-sliced.

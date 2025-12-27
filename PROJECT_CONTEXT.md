@@ -40,6 +40,9 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added production strategy set (trend, factor, stat-arb, market making) with execution algos and vol targeting.
+- Added limit-order support for brokers and order queue scheduling for algo slices.
+- Added tests for strategy models and execution algos.
 - Cleared stale active-symbol metrics so Grafana only shows current symbols.
 - Ensured held positions stay in dynamic symbols even when scanner filters exclude them.
 - Raised minimum trade price to 2.0 across dynamic scanning and pattern selection.

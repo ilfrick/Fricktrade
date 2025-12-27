@@ -5,6 +5,10 @@ Generate buy/sell/hold/exit signals from market state.
 
 ## Implementations
 - Intraday momentum: `app/strategies/intraday_momentum.py`.
+- Trend following: `app/strategies/trend_following.py`.
+- Factor model: `app/strategies/factor_model.py`.
+- Stat-arb pairs: `app/strategies/stat_arb_pairs.py`.
+- Market maker: `app/strategies/market_maker.py`.
 - RL policy: `app/strategies/rl_policy.py`.
 - Fee-aware RL policy: `app/strategies/rl_policy_fees.py`.
 - Pattern trading: `app/strategies/pattern_trading.py`.

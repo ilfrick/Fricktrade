@@ -43,3 +43,5 @@ Centralize runtime settings for all subsystems.
 - Online learning: `learning.online.enabled`.
 - Checkpointing: `checkpointing.enabled`.
 - Multi-broker routing: `execution.brokers.enabled`.
+- Execution algos: `execution.algos.enabled`.
+- Volatility targeting: `risk.vol_targeting.enabled`.

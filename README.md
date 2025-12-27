@@ -37,9 +37,10 @@ flowchart LR
     end
     subgraph Core["Trading Loop"]
         Trader[TradingAgent]
-        Strat[Strategies<br/>rl_policy / rl_policy_fees / intraday_momentum / pattern_trading]
+        Strat[Strategies<br/>rl_policy / rl_policy_fees / intraday_momentum / pattern_trading / trend_following / factor_model / stat_arb_pairs / market_maker]
         Orchestrator[RL Strategy Orchestrator]
         Risk[Risk Manager]
+        Algo[Execution Algos<br/>TWAP / VWAP / POV]
         Exec[Execution Engine]
         Queue[Order Queue<br/>FIFO + feedback]
         Orders[Open order tracking<br/>cancel/skip]
@@ -85,7 +86,7 @@ flowchart LR
     RLTrain --> ModelStore
     OrchPretrain --> ModelStore
     AIFilterTrain --> ModelStore
-    Trader --> Strat --> Orchestrator --> Risk --> Queue --> Orders --> Exec --> Router
+    Trader --> Strat --> Orchestrator --> Risk --> Algo --> Queue --> Orders --> Exec --> Router
     Router --> Alpaca
     Router --> IBKR
     Alpaca --> BrokerUniverse
@@ -117,6 +118,10 @@ flowchart LR
 - `rl_policy_fees`: fee-aware RL policy with broker fee guardrails
 - `intraday_momentum`: price/volume threshold strategy
 - `pattern_trading`: momentum breakout with filters and trailing exits
+- `trend_following`: moving-average trend breakout
+- `factor_model`: momentum + liquidity + volatility composite
+- `stat_arb_pairs`: rolling correlation pair trading
+- `market_maker`: inventory-skewed limit quoting
 
 ### Orchestrator
 - RL-based strategy selection that consumes strategy signals and AI-filter features
@@ -127,6 +132,7 @@ flowchart LR
 - `app/execution/executor.py`: broker-agnostic execution
 - `app/execution/order_queue.py`: FIFO submission, broker feedback loop
 - Open-order guardrails + cancel/replace logic
+- Optional TWAP/VWAP/POV slicing for larger orders
 
 ### Data & Scanning
 - Live data from yfinance in trade mode
@@ -234,6 +240,9 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added production strategy set (trend, factor, stat-arb, market making) with execution algos and vol targeting.
+- Added limit-order support for brokers and time-sliced order queue scheduling.
+- Added tests for strategy models and execution algos.
 - Cleared stale active-symbol metrics so Grafana only shows current symbols.
 - Ensured held positions stay in dynamic symbols even when scanner filters exclude them.
 - Raised minimum trade price to 2.0 across dynamic scanning and pattern selection.

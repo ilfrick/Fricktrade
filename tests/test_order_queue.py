@@ -7,7 +7,7 @@ class _StubBroker:
     def __init__(self) -> None:
         self.orders = []
 
-    def place_order(self, symbol: str, side: str, qty: float, order_type: str):
+    def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs):
         order_id = f"order-{len(self.orders) + 1}"
         self.orders.append({"order_id": order_id, "symbol": symbol, "side": side, "qty": qty})
         return order_id
