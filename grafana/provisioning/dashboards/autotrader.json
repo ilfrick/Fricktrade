@@ -19,7 +19,9 @@
       "targets": [
         {
           "expr": "broker_market_open",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "format": "table"
         }
       ],
       "options": {
