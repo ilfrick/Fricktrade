@@ -202,6 +202,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Tweaked broker market status panel to show only current status (no history).
 - Added Grafana broker market status panel and broker_market_open metric.
 - Adjusted Grafana active symbol panels to show only active (value=1) series.
 - Capped AI-filter symbol list to dynamic_symbols.max_symbols to prevent oversized active symbol sets.
