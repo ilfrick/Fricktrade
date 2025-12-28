@@ -8,11 +8,44 @@
   "timezone": "browser",
   "panels": [
     {
+      "type": "table",
+      "title": "Broker Market Status",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "broker_market_open",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": "closed",
+                "1": "open"
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
       "type": "stat",
       "title": "Trades Total",
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 4,
         "w": 6,
         "h": 5
       },
@@ -35,7 +68,7 @@
       "title": "Total Equity",
       "gridPos": {
         "x": 6,
-        "y": 0,
+        "y": 4,
         "w": 6,
         "h": 5
       },
@@ -63,7 +96,7 @@
       "title": "Available Cash",
       "gridPos": {
         "x": 12,
-        "y": 0,
+        "y": 4,
         "w": 6,
         "h": 5
       },
@@ -91,7 +124,7 @@
       "title": "Invested",
       "gridPos": {
         "x": 18,
-        "y": 0,
+        "y": 4,
         "w": 6,
         "h": 5
       },
@@ -119,7 +152,7 @@
       "title": "Active Symbols",
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 9,
         "w": 6,
         "h": 5
       },
@@ -142,7 +175,7 @@
       "title": "Active Strategies",
       "gridPos": {
         "x": 6,
-        "y": 5,
+        "y": 9,
         "w": 6,
         "h": 5
       },
@@ -169,7 +202,7 @@
       "title": "Symbols Traded",
       "gridPos": {
         "x": 12,
-        "y": 5,
+        "y": 9,
         "w": 12,
         "h": 5
       },
@@ -185,7 +218,7 @@
       "title": "Trades by Symbol/Side",
       "gridPos": {
         "x": 0,
-        "y": 10,
+        "y": 14,
         "w": 12,
         "h": 6
       },
@@ -201,7 +234,7 @@
       "title": "Trades Rate (5m)",
       "gridPos": {
         "x": 12,
-        "y": 10,
+        "y": 14,
         "w": 12,
         "h": 8
       },
@@ -226,7 +259,7 @@
       "title": "Cumulative Trades by Symbol",
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 20,
         "w": 12,
         "h": 8
       },
@@ -251,7 +284,7 @@
       "title": "PnL % / Drawdown %",
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 20,
         "w": 12,
         "h": 8
       },
@@ -280,7 +313,7 @@
       "title": "Skipped Orders Rate (5m)",
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 28,
         "w": 12,
         "h": 6
       },
@@ -305,7 +338,7 @@
       "title": "Open Orders",
       "gridPos": {
         "x": 12,
-        "y": 24,
+        "y": 28,
         "w": 12,
         "h": 6
       },
@@ -330,7 +363,7 @@
       "title": "Active Broker",
       "gridPos": {
         "x": 0,
-        "y": 30,
+        "y": 34,
         "w": 6,
         "h": 4
       },
@@ -357,7 +390,7 @@
       "title": "Orchestrator Strategies",
       "gridPos": {
         "x": 6,
-        "y": 30,
+        "y": 34,
         "w": 6,
         "h": 4
       },
@@ -384,7 +417,7 @@
       "title": "Current Portfolio",
       "gridPos": {
         "x": 12,
-        "y": 30,
+        "y": 34,
         "w": 12,
         "h": 6
       },
@@ -434,7 +467,7 @@
       "title": "Pending Orders",
       "gridPos": {
         "x": 12,
-        "y": 36,
+        "y": 40,
         "w": 12,
         "h": 6
       },
@@ -471,7 +504,7 @@
       "title": "Broker API Calls (1m)",
       "gridPos": {
         "x": 0,
-        "y": 34,
+        "y": 38,
         "w": 12,
         "h": 6
       },

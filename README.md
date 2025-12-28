@@ -233,6 +233,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added Grafana broker market status panel and broker_market_open metric.
 - Adjusted Grafana active symbol panels to show only active (value=1) series.
 - Capped AI-filter symbol list to dynamic_symbols.max_symbols to prevent oversized active symbol metrics.
 - Fixed yfinance downloads by only passing proxy when configured.
