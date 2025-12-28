@@ -28,6 +28,7 @@ from app.monitoring.metrics import (
     OPEN_ORDERS,
     OPEN_ORDERS_BY_BROKER,
     BROKER_ACTIVE,
+    BROKER_MARKET_OPEN,
 )
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
@@ -829,6 +830,16 @@ class TradingAgent:
                     self._order_queue.update(self._open_orders_cache)
             self._flush_order_responses()
             market_open = is_market_open(self.cfg)
+            brokers_cfg = self.cfg.get("brokers", {})
+            broker_names = [
+                name
+                for name, cfg in brokers_cfg.items()
+                if not isinstance(cfg, dict) or cfg.get("enabled", True)
+            ]
+            if not broker_names:
+                broker_names = self._broker_names or [self._broker_name]
+            for name in broker_names:
+                BROKER_MARKET_OPEN.labels(broker=name).set(1 if market_open else 0)
             if market_open != self._last_market_open:
                 state = "open" if market_open else "closed"
                 logging.info("Market is %s; %s trading loop.", state, "starting" if market_open else "waiting")

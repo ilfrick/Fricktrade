@@ -29,6 +29,7 @@ ORCHESTRATOR_STRATEGY_ACTIVE = Gauge(
 OPEN_ORDERS = Gauge("open_orders", "Open orders", ["symbol", "side"])
 OPEN_ORDERS_BY_BROKER = Gauge("open_orders_by_broker", "Open orders", ["broker", "symbol", "side"])
 BROKER_ACTIVE = Gauge("broker_active", "Active broker", ["broker"])
+BROKER_MARKET_OPEN = Gauge("broker_market_open", "Market open status for broker", ["broker"])
 POSITION_QTY = Gauge("position_qty", "Position quantity", ["symbol"])
 POSITION_VALUE = Gauge("position_value", "Position market value", ["symbol"])
 POSITION_QTY_BY_BROKER = Gauge("position_qty_by_broker", "Position quantity", ["broker", "symbol"])
