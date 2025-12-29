@@ -21,6 +21,7 @@ from app.monitoring.metrics import (
     SYMBOL_ACTIVE,
     STRATEGY_ACTIVE,
     ORCHESTRATOR_STRATEGY_ACTIVE,
+    ORCHESTRATOR_STRATEGY_SELECTED,
     OPEN_ORDERS,
     BROKER_ACTIVE,
     BROKER_MARKET_OPEN,
@@ -267,6 +268,8 @@ class TradingAgent:
             names, weights = self._orchestrator.select(self._strategy_names, market_state)
         for name in self._strategy_names:
             ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
+        for name in set(names):
+            ORCHESTRATOR_STRATEGY_SELECTED.labels(strategy=name).inc()
         self._record_orchestrator(symbol, signals, market_state)
         filtered_signals = [signal for signal in signals if signal.get("name") in names]
         action, reduce_pct = self._combine_signals(filtered_signals, weights, order=names)

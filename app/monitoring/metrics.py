@@ -24,6 +24,11 @@ ORCHESTRATOR_STRATEGY_ACTIVE = Gauge(
     "Strategies selected by orchestrator",
     ["symbol", "strategy"],
 )
+ORCHESTRATOR_STRATEGY_SELECTED = Counter(
+    "orchestrator_strategy_selected_total",
+    "Total orchestrator selections by strategy",
+    ["strategy"],
+)
 OPEN_ORDERS = Gauge("open_orders", "Open orders", ["symbol", "side"])
 BROKER_ACTIVE = Gauge("broker_active", "Active broker", ["broker"])
 BROKER_MARKET_OPEN = Gauge("broker_market_open", "Market open status for broker", ["broker"])

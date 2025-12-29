@@ -229,6 +229,35 @@
     },
     {
       "type": "table",
+      "title": "Strategy Selections",
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum by (strategy) (orchestrator_strategy_selected_total)",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
       "title": "Symbols Traded",
       "gridPos": {
         "x": 12,
@@ -247,7 +276,7 @@
       "type": "table",
       "title": "Trades by Symbol/Side",
       "gridPos": {
-        "x": 0,
+        "x": 6,
         "y": 14,
         "w": 12,
         "h": 6
@@ -263,10 +292,10 @@
       "type": "timeseries",
       "title": "Trades Rate (5m)",
       "gridPos": {
-        "x": 12,
+        "x": 18,
         "y": 14,
-        "w": 12,
-        "h": 8
+        "w": 6,
+        "h": 6
       },
       "targets": [
         {
