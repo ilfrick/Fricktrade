@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day for intraday intervals.
 - Added multi-broker live market data provider routing for Alpaca/IBKR.
 - Switched live market data provider to Alpaca (batch bars) to avoid yfinance serial downloads.

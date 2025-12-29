@@ -25,6 +25,7 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.dynamic_symbols.max_symbols` is capped to the tradeable universe size, but can grow to include positions/open orders.
 - `news.*`
   - `news.provider: brokers` aggregates catalysts across enabled brokers (Alpaca-backed today)
+  - `news.llm.*` enables optional Ollama catalyst gating per headline
 - Held positions and open-order symbols are always included in dynamic symbol results, even if scanner filters would exclude them.
 
 ## Ingest Example

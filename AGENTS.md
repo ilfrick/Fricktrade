@@ -202,6 +202,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day instead of raw days count.
 - Added multi-broker live market data provider support (alpaca/ibkr) with routing.
 - Switched live market data provider to Alpaca (batch bars) with optional yfinance fallback.

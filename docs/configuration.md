@@ -42,6 +42,7 @@ Centralize runtime settings for all subsystems.
 - Universe price filter: `data.dynamic_symbols.universe_price_filter` (limits broker universe by price_min and cash cap).
 - Cash-aware cap: `data.dynamic_symbols.cash_aware` + `data.dynamic_symbols.cash_cap_mode`
   (`cash` limits by available cash; `risk` also caps to max position size).
+- News LLM catalyst gate: `news.llm.enabled` (Ollama by default).
 - Multi-broker news: `news.provider: brokers`.
 - Online learning: `learning.online.enabled`.
 - Checkpointing: `checkpointing.enabled`.

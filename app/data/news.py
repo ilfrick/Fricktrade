@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
+import logging
 from typing import Iterable
 
 import requests
-import logging
 
 
 def fetch_catalyst_symbols(
@@ -15,6 +16,7 @@ def fetch_catalyst_symbols(
     api_secret: str,
     lookback_hours: int,
     keywords: list[str] | None = None,
+    llm_cfg: dict | None = None,
     timeout_seconds: int = 10,
     retries: int = 2,
 ) -> dict[str, bool]:
@@ -37,6 +39,7 @@ def fetch_catalyst_symbols(
                 api_secret=api_secret,
                 lookback_hours=lookback_hours,
                 keywords=keywords or [],
+                llm_cfg=llm_cfg,
                 timeout_seconds=timeout_seconds,
                 retries=retries,
             )
@@ -67,6 +70,7 @@ def fetch_catalyst_symbols_for_config(
             api_secret=api_secret,
             lookback_hours=int(news_cfg.get("lookback_hours", 12)),
             keywords=list(news_cfg.get("keywords", [])),
+            llm_cfg=dict(news_cfg.get("llm", {}) or {}),
             timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
             retries=int(news_cfg.get("retries", 2)),
         )
@@ -80,6 +84,7 @@ def fetch_catalyst_symbols_for_config(
             api_secret=api_secret,
             lookback_hours=int(news_cfg.get("lookback_hours", 12)),
             keywords=list(news_cfg.get("keywords", [])),
+            llm_cfg=dict(news_cfg.get("llm", {}) or {}),
             timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
             retries=int(news_cfg.get("retries", 2)),
         )
@@ -95,6 +100,7 @@ def _fetch_alpaca_news(
     api_secret: str,
     lookback_hours: int,
     keywords: list[str],
+    llm_cfg: dict | None,
     timeout_seconds: int,
     retries: int,
 ) -> dict[str, bool]:
@@ -121,19 +127,71 @@ def _fetch_alpaca_news(
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     keywords_lower = [k.lower() for k in keywords]
+    llm_cfg = llm_cfg or {}
+    llm_enabled = bool(llm_cfg.get("enabled", False))
+    llm_max_items = int(llm_cfg.get("max_items", 25))
+    llm_checked = 0
 
     catalysts: dict[str, bool] = {s: False for s in symbols}
     for item in items:
         created_at = _parse_time(item.get("created_at") or item.get("updated_at"))
         if created_at and created_at < cutoff:
             continue
-        headline = (item.get("headline") or item.get("summary") or "").lower()
-        if keywords_lower and not any(k in headline for k in keywords_lower):
-            continue
+        headline_text = (item.get("headline") or item.get("summary") or "")
+        if llm_enabled:
+            if llm_checked >= llm_max_items:
+                continue
+            llm_checked += 1
+            if not _llm_catalyst_decision(headline_text, llm_cfg):
+                continue
+        else:
+            headline = headline_text.lower()
+            if keywords_lower and not any(k in headline for k in keywords_lower):
+                continue
         for sym in item.get("symbols", []) or []:
             if sym in catalysts:
                 catalysts[sym] = True
     return catalysts
+
+
+def _llm_catalyst_decision(text: str, llm_cfg: dict) -> bool:
+    if not text:
+        return False
+    provider = str(llm_cfg.get("provider", "ollama")).lower()
+    if provider != "ollama":
+        return False
+    base_url = str(llm_cfg.get("base_url", "http://localhost:11434"))
+    model = str(llm_cfg.get("model", "llama3.1:8b"))
+    timeout_seconds = int(llm_cfg.get("timeout_seconds", 10))
+    max_chars = int(llm_cfg.get("max_text_chars", 800))
+    prompt = (
+        "Classify if this headline indicates a tradeable catalyst within 24h. "
+        "Respond only with JSON: {\"catalyst\": true|false}.\n"
+        f"Headline: {text[:max_chars]}"
+    )
+    payload = {"model": model, "prompt": prompt, "stream": False}
+    try:
+        resp = requests.post(
+            f"{base_url.rstrip('/')}/api/generate",
+            json=payload,
+            timeout=timeout_seconds,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        reply = str(data.get("response", ""))
+    except requests.RequestException as exc:
+        logging.warning("LLM catalyst request failed: %s", exc)
+        return False
+    start = reply.find("{")
+    end = reply.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return False
+    snippet = reply[start : end + 1]
+    try:
+        parsed = json.loads(snippet)
+    except Exception:
+        return False
+    return bool(parsed.get("catalyst", False))
 
 
 def _parse_time(value: str | None) -> datetime | None:
