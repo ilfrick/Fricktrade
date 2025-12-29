@@ -423,7 +423,7 @@ news:
   timeout_seconds: 10
   retries: 2
   llm:
-    enabled: false
+    enabled: true
     provider: ollama
     base_url: http://localhost:11434
     model: llama3.1:8b
