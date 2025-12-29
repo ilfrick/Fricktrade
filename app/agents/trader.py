@@ -882,6 +882,11 @@ class TradingAgent:
             if not market_open:
                 time.sleep(interval_seconds)
                 continue
+            if hasattr(market_data_provider, "prepare"):
+                try:
+                    market_data_provider.prepare(symbols)
+                except Exception as exc:
+                    logging.warning("Market data prefetch failed: %s", exc)
             for sym in symbols:
                 if not self._is_symbol_market_open(sym):
                     continue

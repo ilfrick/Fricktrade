@@ -295,7 +295,7 @@ backtest:
     sample_per_tier: 50
     seed: 42
 data:
-  provider: yfinance
+  provider: alpaca
   symbols: []
   interval: 1m
   lookback_days: 7

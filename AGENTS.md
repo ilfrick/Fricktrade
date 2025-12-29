@@ -202,6 +202,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Switched live market data provider to Alpaca (batch bars) with optional yfinance fallback.
 - Added Grafana table for strategy selection counts.
 - PnL% now uses broker-reported last_equity when available, otherwise start equity.
 - PnL% and drawdown metrics now track equity vs start/peak instead of staying at zero.

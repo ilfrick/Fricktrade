@@ -1,9 +1,14 @@
 import argparse
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pandas as pd
 import yfinance as yf
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from app.agents.trader import TradingAgent
 from app.brokers.alpaca import AlpacaBroker
@@ -21,25 +26,29 @@ from app.utils.config import load_config
 from app.utils.logging import setup_logging
 
 
+def _empty_market_state() -> dict:
+    return {
+        "prices": [],
+        "volumes": [],
+        "qty": 1,
+        "exposure_pct": 1.0,
+        "short_exposure_pct": 0.0,
+        "leverage": 1.0,
+        "last_price": None,
+        "opens": [],
+        "highs": [],
+        "lows": [],
+        "session_volume": 0.0,
+        "relative_volume": 0.0,
+        "session_gain_pct": 0.0,
+        "spread_pct": None,
+    }
+
+
 def _market_state_from_yf(symbol: str, lookback: int, interval: str, session_gain_mode: str):
     data = yf.download(tickers=symbol, period=f"{lookback}d", interval=interval, auto_adjust=True, progress=False)
     if data is None or data.empty:
-        return {
-            "prices": [],
-            "volumes": [],
-            "qty": 1,
-            "exposure_pct": 1.0,
-            "short_exposure_pct": 0.0,
-            "leverage": 1.0,
-            "last_price": None,
-            "opens": [],
-            "highs": [],
-            "lows": [],
-            "session_volume": 0.0,
-            "relative_volume": 0.0,
-            "session_gain_pct": 0.0,
-            "spread_pct": None,
-        }
+        return _empty_market_state()
     if getattr(data.columns, "nlevels", 1) > 1:
         data = data.copy()
         if "Close" in data.columns.get_level_values(0):
@@ -47,15 +56,7 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str, session_gai
         else:
             data.columns = data.columns.get_level_values(-1)
     if "Close" not in data.columns:
-        return {
-            "prices": [],
-            "volumes": [],
-            "qty": 1,
-            "exposure_pct": 1.0,
-            "short_exposure_pct": 0.0,
-            "leverage": 1.0,
-            "last_price": None,
-        }
+        return _empty_market_state()
     close = data["Close"]
     volume = data["Volume"] if "Volume" in data else None
     open_ = data["Open"] if "Open" in data else None
@@ -91,6 +92,162 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str, session_gai
         "session_gain_pct": session_gain_pct,
         "spread_pct": None,
     }
+
+
+def _alpaca_timeframe(interval: str) -> TimeFrame:
+    if interval.endswith("m"):
+        return TimeFrame(int(interval[:-1]), TimeFrameUnit.Minute)
+    if interval.endswith("h"):
+        return TimeFrame(int(interval[:-1]), TimeFrameUnit.Hour)
+    if interval.endswith("d"):
+        return TimeFrame(int(interval[:-1]), TimeFrameUnit.Day)
+    return TimeFrame(1, TimeFrameUnit.Day)
+
+
+def _interval_seconds(interval: str) -> int:
+    if interval.endswith("m"):
+        return int(interval[:-1]) * 60
+    if interval.endswith("h"):
+        return int(interval[:-1]) * 3600
+    if interval.endswith("d"):
+        return int(interval[:-1]) * 86400
+    return 60
+
+
+def _market_state_from_df(data: pd.DataFrame, lookback: int, session_gain_mode: str) -> dict:
+    if data is None or data.empty:
+        return _empty_market_state()
+    if isinstance(data.index, pd.MultiIndex):
+        data = data.copy()
+        data.index = data.index.get_level_values(-1)
+    if "close" in data.columns:
+        data = data.rename(
+            columns={
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "volume": "Volume",
+            }
+        )
+    if "Close" not in data.columns:
+        return _empty_market_state()
+    close = data["Close"]
+    volume = data["Volume"] if "Volume" in data else None
+    open_ = data["Open"] if "Open" in data else None
+    high = data["High"] if "High" in data else None
+    low = data["Low"] if "Low" in data else None
+    prices = close.iloc[-lookback:].tolist()
+    volumes = volume.iloc[-lookback:].tolist() if volume is not None else []
+    opens = open_.iloc[-lookback:].tolist() if open_ is not None else []
+    highs = high.iloc[-lookback:].tolist() if high is not None else []
+    lows = low.iloc[-lookback:].tolist() if low is not None else []
+    last_price = prices[-1] if prices else None
+    avg_volume = float(sum(volumes) / len(volumes)) if volumes else 0.0
+    session_volume = float(sum(volumes)) if volumes else 0.0
+    rel_volume = float(volumes[-1] / avg_volume) if avg_volume else 0.0
+    session_gain_pct = _session_gain_pct(data, prices, session_gain_mode)
+    return {
+        "prices": prices,
+        "volumes": volumes,
+        "qty": 1,
+        "exposure_pct": 1.0,
+        "short_exposure_pct": 0.0,
+        "leverage": 1.0,
+        "last_price": last_price,
+        "opens": opens,
+        "highs": highs,
+        "lows": lows,
+        "session_volume": session_volume,
+        "relative_volume": rel_volume,
+        "session_gain_pct": session_gain_pct,
+        "spread_pct": None,
+    }
+
+
+def _fetch_bars(client: StockHistoricalDataClient, req: StockBarsRequest, timeout: int, retries: int):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+    for attempt in range(retries + 1):
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(client.get_stock_bars, req)
+            try:
+                return future.result(timeout=timeout).df
+            except TimeoutError:
+                if attempt >= retries:
+                    return None
+            except Exception as exc:
+                if attempt >= retries:
+                    logging.warning("Alpaca bars fetch failed: %s", exc)
+                    return None
+    return None
+
+
+def _chunked(items: list[str], size: int) -> list[list[str]]:
+    return [items[idx : idx + size] for idx in range(0, len(items), size)]
+
+
+class AlpacaMarketDataProvider:
+    def __init__(
+        self,
+        api_key: str,
+        api_secret: str,
+        lookback_days: int,
+        interval: str,
+        session_gain_mode: str,
+        feed: str = "iex",
+        chunk_size: int = 200,
+        timeout_seconds: int = 10,
+        retries: int = 2,
+    ):
+        self._client = StockHistoricalDataClient(api_key, api_secret)
+        self._lookback = lookback_days
+        self._interval = interval
+        self._session_gain_mode = session_gain_mode
+        self._feed = feed
+        self._chunk_size = chunk_size
+        self._timeout_seconds = timeout_seconds
+        self._retries = retries
+        self._cache: dict[str, dict] = {}
+        self._cache_at: datetime | None = None
+
+    def prepare(self, symbols: list[str]) -> None:
+        if not symbols:
+            return
+        now = datetime.now(timezone.utc)
+        refresh_seconds = _interval_seconds(self._interval)
+        if self._cache_at and (now - self._cache_at).total_seconds() < refresh_seconds:
+            return
+        start = now - timedelta(days=self._lookback)
+        timeframe = _alpaca_timeframe(self._interval)
+        cache: dict[str, dict] = {}
+        for chunk in _chunked(symbols, self._chunk_size):
+            req = StockBarsRequest(
+                symbol_or_symbols=chunk,
+                timeframe=timeframe,
+                start=start,
+                end=now,
+                feed=self._feed,
+                adjustment="raw",
+            )
+            data = _fetch_bars(self._client, req, self._timeout_seconds, self._retries)
+            if data is None or data.empty:
+                continue
+            if isinstance(data.index, pd.MultiIndex):
+                for symbol in chunk:
+                    try:
+                        df = data.xs(symbol, level=0)
+                    except KeyError:
+                        continue
+                    cache[symbol] = _market_state_from_df(df, self._lookback, self._session_gain_mode)
+            else:
+                symbol = chunk[0]
+                cache[symbol] = _market_state_from_df(data, self._lookback, self._session_gain_mode)
+        self._cache = cache
+        self._cache_at = now
+
+    def __call__(self, symbol: str) -> dict:
+        return self._cache.get(symbol, _empty_market_state())
 
 
 def _session_gain_pct(data, prices: list[float], mode: str) -> float:
@@ -249,16 +406,40 @@ def main():
         broker = _build_broker(cfg)
         agent = TradingAgent(broker, cfg)
         symbols = cfg["data"]["symbols"]
-        agent.loop(
-            symbols,
-            lambda s: _market_state_from_yf(
+        provider = str(cfg.get("data", {}).get("provider", "yfinance")).lower()
+        if provider == "alpaca":
+            alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
+            api_key = alpaca_cfg.get("api_key", "")
+            api_secret = alpaca_cfg.get("api_secret", "")
+            dyn_cfg = cfg.get("data", {}).get("dynamic_symbols", {})
+            feed = dyn_cfg.get("feed", "iex")
+            if api_key and api_secret:
+                market_data_provider = AlpacaMarketDataProvider(
+                    api_key,
+                    api_secret,
+                    cfg["data"]["lookback_days"],
+                    cfg["data"]["interval"],
+                    cfg["data"].get("session_gain_mode", "gap"),
+                    feed=feed,
+                    timeout_seconds=int(dyn_cfg.get("timeout_seconds", 10)),
+                    retries=int(dyn_cfg.get("retries", 2)),
+                )
+            else:
+                logging.warning("Alpaca provider selected but credentials missing; falling back to yfinance.")
+                market_data_provider = lambda s: _market_state_from_yf(
+                    s,
+                    cfg["data"]["lookback_days"],
+                    cfg["data"]["interval"],
+                    cfg["data"].get("session_gain_mode", "gap"),
+                )
+        else:
+            market_data_provider = lambda s: _market_state_from_yf(
                 s,
                 cfg["data"]["lookback_days"],
                 cfg["data"]["interval"],
                 cfg["data"].get("session_gain_mode", "gap"),
-            ),
-            60,
-        )
+            )
+        agent.loop(symbols, market_data_provider, 60)
         return
 
     parser.print_help()

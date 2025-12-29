@@ -36,6 +36,7 @@ Centralize runtime settings for all subsystems.
 ## Common Toggles
 - Strategy selection: `strategy.name` or `strategy.names`.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
+- Live market data provider: `data.provider` (yfinance or alpaca).
 - AI filter: `data.dynamic_symbols.ai_filter.enabled`.
 - Multi-broker universe: `data.dynamic_symbols.universe: brokers_active`.
 - Universe price filter: `data.dynamic_symbols.universe_price_filter` (limits broker universe by price_min and cash cap).
