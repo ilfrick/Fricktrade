@@ -37,6 +37,7 @@ Centralize runtime settings for all subsystems.
 - Strategy params: `strategy.params.*` (including trend following, factor model, stat arb pairs, market maker).
 - Vol targeting: `risk.vol_targeting.enabled`.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
+- Live market data provider: `data.provider` (yfinance or alpaca).
 - AI filter: `data.dynamic_symbols.ai_filter.enabled`.
 - Universe price filter: `data.dynamic_symbols.universe_price_filter` (limits broker universe by price_min and cash cap).
 - Cash-aware cap: `data.dynamic_symbols.cash_aware` + `data.dynamic_symbols.cash_cap_mode`

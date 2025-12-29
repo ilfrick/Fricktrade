@@ -12,6 +12,7 @@ execution, and metrics updates.
 - Refreshes symbols (scanner or AI filter), news cache, and open orders.
 - Cash-aware symbol filtering enforces price <= buying power; held/open-order symbols are retained.
 - The dynamic symbol cap is limited to the tradeable universe size (plus any held/open-order symbols).
+- Live market data uses `data.provider` (yfinance or alpaca).
 - Skips trading when markets are closed.
 - Runs per-symbol signals, combines them, applies guardrails, sizes orders,
   and submits via `ExecutionEngine`.

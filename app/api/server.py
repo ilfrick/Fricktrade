@@ -150,7 +150,7 @@ _DESCRIPTIONS = {
     "backtest.slippage_bps": "Backtest slippage in bps.",
     "backtest.use_gpu": "Enable GPU acceleration (if available).",
     "backtest.mode": "Backtest mode: agent (live logic) or sma (legacy).",
-    "data.provider": "Data provider (yfinance).",
+    "data.provider": "Data provider (yfinance or alpaca).",
     "data.symbols": "Symbols to trade.",
     "data.interval": "Data interval (e.g., 1m).",
     "data.lookback_days": "Lookback days for live data.",
