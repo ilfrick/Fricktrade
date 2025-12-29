@@ -215,6 +215,9 @@ class AlpacaMarketDataProvider:
     def prepare(self, symbols: list[str]) -> None:
         if not symbols:
             return
+        if not self._ib.isConnected():
+            logging.warning("IBKR market data provider not connected; skipping refresh.")
+            return
         now = datetime.now(timezone.utc)
         refresh_seconds = _interval_seconds(self._interval)
         if self._cache_at and (now - self._cache_at).total_seconds() < refresh_seconds:
@@ -556,8 +559,25 @@ def main():
                 )
             if cfg.get("brokers", {}).get("ibkr", {}).get("enabled", False):
                 ibkr_cfg = cfg.get("brokers", {}).get("ibkr", {})
-                ib = IB()
-                ib.connect(ibkr_cfg.get("host", "127.0.0.1"), ibkr_cfg.get("port", 7497), clientId=int(ibkr_cfg.get("client_id", 1)))
+                ib = None
+                if hasattr(broker, "ib"):
+                    ib = broker.ib
+                elif hasattr(broker, "brokers"):
+                    try:
+                        broker_map = broker.brokers if isinstance(broker.brokers, dict) else broker.brokers()
+                    except Exception:
+                        broker_map = {}
+                    ibkr_broker = broker_map.get("ibkr") if isinstance(broker_map, dict) else None
+                    if ibkr_broker is not None and hasattr(ibkr_broker, "ib"):
+                        ib = ibkr_broker.ib
+                if ib is None:
+                    ib = IB()
+                    client_id = int(ibkr_cfg.get("client_id", 1)) + 1
+                    ib.connect(
+                        ibkr_cfg.get("host", "127.0.0.1"),
+                        ibkr_cfg.get("port", 7497),
+                        clientId=client_id,
+                    )
                 providers["ibkr"] = IBKRMarketDataProvider(
                     ib,
                     cfg["data"]["lookback_days"],
