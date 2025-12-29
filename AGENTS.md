@@ -202,6 +202,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added Grafana table for strategy selection counts.
 - PnL% now uses broker-reported last_equity when available, otherwise start equity.
 - PnL% and drawdown metrics now track equity vs start/peak instead of staying at zero.
 - Switched Open Orders panel to instant view to avoid stale series.
