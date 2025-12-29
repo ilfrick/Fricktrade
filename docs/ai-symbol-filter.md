@@ -54,7 +54,7 @@ Universe selection:
 - `data.dynamic_symbols.universe` (use `brokers_active` to start from enabled broker universes plus positions/orders)
 - `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap before scoring)
 - `data.dynamic_symbols.cash_aware` / `data.dynamic_symbols.cash_cap_mode` enforce price <= cash;
-  when cash <= 0 only held/open-order symbols are kept.
+  when cash <= 0 or cap < price_min only held/open-order symbols are kept.
 
 ## Usage
 - Enable dynamic symbols: `data.dynamic_symbols.enabled: true`.

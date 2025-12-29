@@ -1149,7 +1149,10 @@ class TradingAgent:
             if filtered:
                 universe = filtered
             else:
-                logging.warning("Universe price filter returned no symbols; keeping base universe.")
+                if price_max < price_min or price_max <= 0:
+                    universe = []
+                else:
+                    logging.warning("Universe price filter returned no symbols; keeping base universe.")
         exec_cfg = self.cfg.get("execution", {}).get("brokers", {})
         multi_enabled = bool(exec_cfg.get("enabled", False)) and len(self._broker_map) > 1
         if not multi_enabled and str(universe_cfg) != "brokers_active":

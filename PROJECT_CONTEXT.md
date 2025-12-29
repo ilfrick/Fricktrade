@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Ensured universe price filtering respects cash caps; no fallback to full universe when cash is below price_min.
 - Enforced cash-aware symbol filtering to cap candidates by available cash and always include open-order symbols.
 - Added flow diagrams for the trading agent (dev).
 - Switched orchestrator to direct mode (single strategy selection) using all strategy signals.
