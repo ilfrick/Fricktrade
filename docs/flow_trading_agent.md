@@ -17,7 +17,7 @@ flowchart TD
     H --> I[Orchestrator Direct Strategy Selection]
     I --> J[Guardrail Optional]
     J --> K[Risk + Limits + Sizing]
-    K --> L[Execution (Algo + Queue)]
+    K --> L[Execution Algo + Queue]
     L --> M[Broker Submit]
     M --> N[Order Feedback + Metrics]
     N --> A
@@ -54,7 +54,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Universe (Alpaca Active)] --> B[AI Filter Score]
+    A[Universe Alpaca Active] --> B[AI Filter Score]
     B --> C[Cap to max_symbols]
     C --> D[Merge Positions + Open Orders]
     D --> E[Active Symbol List]
