@@ -374,8 +374,10 @@
       },
       "targets": [
         {
-          "expr": "sum by (symbol, side) (max_over_time(open_orders[5m]))",
-          "refId": "A"
+          "expr": "sum by (symbol, side) (open_orders)",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
         }
       ],
       "fieldConfig": {
@@ -386,7 +388,15 @@
           }
         },
         "overrides": []
-      }
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        }
+      ]
     },
     {
       "type": "table",
