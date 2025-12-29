@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added multi-broker live market data provider routing for Alpaca/IBKR.
 - Switched live market data provider to Alpaca (batch bars) to avoid yfinance serial downloads.
 - Added orchestrator strategy selection counter and Grafana table.
 - Updated PnL to use broker last_equity when available.

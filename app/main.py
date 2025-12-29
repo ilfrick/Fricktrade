@@ -9,6 +9,7 @@ import yfinance as yf
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from ib_insync import IB, Stock, util
 
 from app.agents.trader import TradingAgent
 from app.brokers.alpaca import AlpacaBroker
@@ -250,6 +251,108 @@ class AlpacaMarketDataProvider:
         return self._cache.get(symbol, _empty_market_state())
 
 
+def _ibkr_bar_size(interval: str) -> str:
+    if interval.endswith("m"):
+        minutes = int(interval[:-1])
+        return f"{minutes} min"
+    if interval.endswith("h"):
+        hours = int(interval[:-1])
+        return f"{hours} hour"
+    if interval.endswith("d"):
+        return "1 day"
+    return "1 min"
+
+
+class IBKRMarketDataProvider:
+    def __init__(
+        self,
+        ib: IB,
+        lookback_days: int,
+        interval: str,
+        session_gain_mode: str,
+        exchange: str = "SMART",
+        currency: str = "USD",
+    ):
+        self._ib = ib
+        self._lookback = lookback_days
+        self._interval = interval
+        self._session_gain_mode = session_gain_mode
+        self._exchange = exchange
+        self._currency = currency
+        self._cache: dict[str, dict] = {}
+        self._cache_at: datetime | None = None
+
+    def prepare(self, symbols: list[str]) -> None:
+        if not symbols:
+            return
+        now = datetime.now(timezone.utc)
+        refresh_seconds = _interval_seconds(self._interval)
+        if self._cache_at and (now - self._cache_at).total_seconds() < refresh_seconds:
+            return
+        cache: dict[str, dict] = {}
+        duration = f"{self._lookback} D"
+        bar_size = _ibkr_bar_size(self._interval)
+        for symbol in symbols:
+            contract = Stock(symbol, self._exchange, self._currency)
+            try:
+                bars = self._ib.reqHistoricalData(
+                    contract,
+                    endDateTime="",
+                    durationStr=duration,
+                    barSizeSetting=bar_size,
+                    whatToShow="TRADES",
+                    useRTH=True,
+                    formatDate=1,
+                )
+            except Exception as exc:
+                logging.warning("IBKR bars fetch failed for %s: %s", symbol, exc)
+                continue
+            if not bars:
+                continue
+            df = util.df(bars)
+            cache[symbol] = _market_state_from_df(df, self._lookback, self._session_gain_mode)
+        self._cache = cache
+        self._cache_at = now
+
+    def __call__(self, symbol: str) -> dict:
+        return self._cache.get(symbol, _empty_market_state())
+
+
+class MultiBrokerMarketDataProvider:
+    def __init__(self, providers: dict[str, object], routing: dict | None = None):
+        self._providers = providers
+        self._routing = routing or {}
+
+    def _resolve_broker(self, symbol: str) -> str | None:
+        symbols_map = self._routing.get("symbols", {}) if isinstance(self._routing, dict) else {}
+        if symbol in symbols_map:
+            return str(symbols_map[symbol])
+        default = None
+        if isinstance(self._routing, dict):
+            default = self._routing.get("default")
+        if default:
+            return str(default)
+        return next(iter(self._providers.keys()), None)
+
+    def prepare(self, symbols: list[str]) -> None:
+        buckets: dict[str, list[str]] = {}
+        for symbol in symbols:
+            broker_name = self._resolve_broker(symbol)
+            if broker_name and broker_name in self._providers:
+                buckets.setdefault(broker_name, []).append(symbol)
+        for name, bucket in buckets.items():
+            provider = self._providers.get(name)
+            if provider and hasattr(provider, "prepare"):
+                provider.prepare(bucket)
+
+    def __call__(self, symbol: str) -> dict:
+        broker_name = self._resolve_broker(symbol)
+        provider = self._providers.get(broker_name) if broker_name else None
+        if provider:
+            return provider(symbol)
+        return _empty_market_state()
+
+
 def _session_gain_pct(data, prices: list[float], mode: str) -> float:
     if data is None or data.empty or not prices:
         return 0.0
@@ -426,6 +529,45 @@ def main():
                 )
             else:
                 logging.warning("Alpaca provider selected but credentials missing; falling back to yfinance.")
+                market_data_provider = lambda s: _market_state_from_yf(
+                    s,
+                    cfg["data"]["lookback_days"],
+                    cfg["data"]["interval"],
+                    cfg["data"].get("session_gain_mode", "gap"),
+                )
+        elif provider == "brokers":
+            providers: dict[str, object] = {}
+            routing_cfg = cfg.get("execution", {}).get("brokers", {}).get("routing", {})
+            alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
+            api_key = alpaca_cfg.get("api_key", "")
+            api_secret = alpaca_cfg.get("api_secret", "")
+            dyn_cfg = cfg.get("data", {}).get("dynamic_symbols", {})
+            feed = dyn_cfg.get("feed", "iex")
+            if api_key and api_secret:
+                providers["alpaca"] = AlpacaMarketDataProvider(
+                    api_key,
+                    api_secret,
+                    cfg["data"]["lookback_days"],
+                    cfg["data"]["interval"],
+                    cfg["data"].get("session_gain_mode", "gap"),
+                    feed=feed,
+                    timeout_seconds=int(dyn_cfg.get("timeout_seconds", 10)),
+                    retries=int(dyn_cfg.get("retries", 2)),
+                )
+            if cfg.get("brokers", {}).get("ibkr", {}).get("enabled", False):
+                ibkr_cfg = cfg.get("brokers", {}).get("ibkr", {})
+                ib = IB()
+                ib.connect(ibkr_cfg.get("host", "127.0.0.1"), ibkr_cfg.get("port", 7497), clientId=int(ibkr_cfg.get("client_id", 1)))
+                providers["ibkr"] = IBKRMarketDataProvider(
+                    ib,
+                    cfg["data"]["lookback_days"],
+                    cfg["data"]["interval"],
+                    cfg["data"].get("session_gain_mode", "gap"),
+                )
+            if providers:
+                market_data_provider = MultiBrokerMarketDataProvider(providers, routing_cfg)
+            else:
+                logging.warning("Broker providers unavailable; falling back to yfinance.")
                 market_data_provider = lambda s: _market_state_from_yf(
                     s,
                     cfg["data"]["lookback_days"],
