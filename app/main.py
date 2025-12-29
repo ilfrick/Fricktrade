@@ -573,17 +573,22 @@ def main():
                 if ib is None:
                     ib = IB()
                     client_id = int(ibkr_cfg.get("client_id", 1)) + 1
-                    ib.connect(
-                        ibkr_cfg.get("host", "127.0.0.1"),
-                        ibkr_cfg.get("port", 7497),
-                        clientId=client_id,
+                    try:
+                        ib.connect(
+                            ibkr_cfg.get("host", "127.0.0.1"),
+                            ibkr_cfg.get("port", 7497),
+                            clientId=client_id,
+                        )
+                    except Exception as exc:
+                        logging.warning("IBKR market data connection failed: %s", exc)
+                        ib = None
+                if ib is not None:
+                    providers["ibkr"] = IBKRMarketDataProvider(
+                        ib,
+                        cfg["data"]["lookback_days"],
+                        cfg["data"]["interval"],
+                        cfg["data"].get("session_gain_mode", "gap"),
                     )
-                providers["ibkr"] = IBKRMarketDataProvider(
-                    ib,
-                    cfg["data"]["lookback_days"],
-                    cfg["data"]["interval"],
-                    cfg["data"].get("session_gain_mode", "gap"),
-                )
             if providers:
                 market_data_provider = MultiBrokerMarketDataProvider(providers, routing_cfg)
             else:
