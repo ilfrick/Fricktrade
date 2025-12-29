@@ -21,6 +21,7 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap)
 - `data.dynamic_symbols.cash_aware` and `data.dynamic_symbols.cash_cap_mode`
   (caps candidates to <= available cash; when cash <= 0 or cap < price_min, only positions/open orders remain)
+- `data.dynamic_symbols.max_symbols` is capped to the tradeable universe size, but can grow to include positions/open orders.
 - `news.*`
 - Held positions and open-order symbols are always included in dynamic symbol results, even if scanner filters would exclude them.
 

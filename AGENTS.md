@@ -200,6 +200,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Capped dynamic symbol list size to the tradeable universe count (plus positions/open orders).
 - Raised dynamic_symbols.max_symbols to 50000 to allow the full active universe.
 - Enforced cash-aware symbol filtering to cap candidates by available cash and always include open-order symbols.
 - Added flow diagrams for the trading agent (v2.0).
