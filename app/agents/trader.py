@@ -1039,6 +1039,7 @@ class TradingAgent:
         universe = self._resolve_universe(universe_cfg, api_key, api_secret, max_universe, portfolio, dyn_cfg)
         if not universe:
             return
+        max_symbols = self._resolve_max_symbols(dyn_cfg, universe, portfolio)
 
         self._symbols_by_strategy = {}
         ai_cfg = dyn_cfg.get("ai_filter", {})
@@ -1074,7 +1075,6 @@ class TradingAgent:
             self._ai_filter_last_count = len(ordered)
             if not ordered:
                 ordered = list(universe)
-            max_symbols = int(dyn_cfg.get("max_symbols", 50))
             ordered = self._merge_with_positions(ordered, portfolio, max_symbols)
             self._symbols_by_strategy["__global__"] = ordered
             for name in self._strategy_names:
@@ -1093,6 +1093,7 @@ class TradingAgent:
             api_key,
             api_secret,
             universe,
+            max_symbols=max_symbols,
         )
         if global_candidates:
             self._symbols_by_strategy["__global__"] = global_candidates
@@ -1108,6 +1109,7 @@ class TradingAgent:
                 api_key,
                 api_secret,
                 universe,
+                max_symbols=max_symbols,
             )
             if candidates:
                 self._symbols_by_strategy[name] = candidates
@@ -1116,6 +1118,25 @@ class TradingAgent:
             self._dynamic_symbols = list(self._symbols)
         self._dynamic_symbols_at = now
         return
+
+    def _resolve_max_symbols(self, dyn_cfg: dict, universe: list[str], portfolio: dict) -> int:
+        try:
+            max_symbols = int(dyn_cfg.get("max_symbols", 50))
+        except (TypeError, ValueError):
+            max_symbols = 50
+        if universe:
+            max_symbols = min(max_symbols, len(universe)) if max_symbols > 0 else len(universe)
+        extras = set()
+        for symbol in portfolio.get("positions", {}).keys():
+            if symbol:
+                extras.add(symbol)
+        for order in self._open_orders_cache:
+            symbol = order.get("symbol")
+            if symbol:
+                extras.add(symbol)
+        if extras:
+            max_symbols = max(max_symbols, len(extras))
+        return max_symbols
 
     def _resolve_universe(
         self,
@@ -1223,6 +1244,7 @@ class TradingAgent:
         api_key: str,
         api_secret: str,
         universe: list[str],
+        max_symbols: int | None = None,
     ) -> list[str]:
         price_min = float(filters_cfg.get("price_min", 1.0))
         price_max = self._apply_cash_cap(price_min, float("inf"), portfolio, dyn_cfg)
@@ -1236,7 +1258,7 @@ class TradingAgent:
             require_catalyst=bool(filters_cfg.get("require_catalyst", False)),
             strict_spread=bool(filters_cfg.get("strict_spread", False)),
         )
-        max_symbols = int(dyn_cfg.get("max_symbols", 50))
+        max_symbols = int(max_symbols) if max_symbols is not None else int(dyn_cfg.get("max_symbols", 50))
         feed = dyn_cfg.get("feed", "iex")
         timeout_seconds = int(dyn_cfg.get("timeout_seconds", 10))
         retries = int(dyn_cfg.get("retries", 2))
