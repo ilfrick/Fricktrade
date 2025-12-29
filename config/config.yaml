@@ -299,7 +299,7 @@ data:
     provider: alpaca
     feed: iex
     refresh_minutes: 1
-    max_symbols: 150
+    max_symbols: 50000
     max_universe: 50000
     universe: alpaca_active
     universe_price_filter: true

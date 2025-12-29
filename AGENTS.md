@@ -200,6 +200,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Raised dynamic_symbols.max_symbols to 50000 to allow the full active universe.
 - Enforced cash-aware symbol filtering to cap candidates by available cash and always include open-order symbols.
 - Added flow diagrams for the trading agent (v2.0).
 - Switched orchestrator to direct mode (single strategy selection) using all strategy signals.
