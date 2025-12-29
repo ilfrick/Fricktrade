@@ -649,8 +649,19 @@ class TradingAgent:
             self._equity_start = total_val
         if self._equity_peak is None or total_val > self._equity_peak:
             self._equity_peak = total_val
-        if self._equity_start:
-            pnl_pct = (total_val - self._equity_start) / self._equity_start * 100.0
+        last_equity = None
+        if isinstance(account, dict):
+            last_equity = account.get("last_equity")
+        base_equity = self._equity_start
+        if last_equity is not None:
+            try:
+                last_equity_val = float(last_equity)
+            except (TypeError, ValueError):
+                last_equity_val = None
+            if last_equity_val:
+                base_equity = last_equity_val
+        if base_equity:
+            pnl_pct = (total_val - base_equity) / base_equity * 100.0
             PNL.set(pnl_pct)
         if self._equity_peak:
             drawdown_pct = (self._equity_peak - total_val) / self._equity_peak * 100.0

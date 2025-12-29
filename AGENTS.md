@@ -200,6 +200,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- PnL% now uses broker-reported last_equity when available, otherwise start equity.
 - PnL% and drawdown metrics now track equity vs start/peak instead of staying at zero.
 - Switched Open Orders panel to instant view to avoid stale series.
 - Aligned Open Orders Grafana panel to show last 5 minutes to match pending orders view.
