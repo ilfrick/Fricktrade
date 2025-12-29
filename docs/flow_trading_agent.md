@@ -17,7 +17,7 @@ flowchart TD
     H --> I[Orchestrator Direct Strategy Selection]
     I --> J[Guardrail Optional]
     J --> K[Risk + Limits + Sizing]
-    K --> L[Execution (Algo + Queue)]
+    K --> L[Execution Algo + Queue]
     L --> M[Broker Router Submit]
     M --> N[Order Feedback + Metrics]
     N --> A
