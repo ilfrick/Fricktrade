@@ -158,7 +158,7 @@ docker compose run --rm api
 - Data ingestion sources are configured under `data.sources` (supports `yfinance`, `alpaca`, `stooq`, `alphavantage`).
 - Dynamic scanner filters are configured under `data.dynamic_symbols.filters`, while `pattern_trading.selection` only
   affects the pattern strategy. Each strategy gets its own symbol list when dynamic scanning runs. Price caps are
-  enforced by available cash (`cash_aware`/`cash_cap_mode`), and held/open-order symbols are always retained.
+  enforced by buying power (`cash_aware`/`cash_cap_mode`), and held/open-order symbols are always retained.
 - News catalysts (for Pattern Trading) are configured under `news` (default Alpaca news API).
 - Open-order tracking is configured under `execution.open_orders`.
 - Alpaca keys come from `ALPACA_API_KEY` / `ALPACA_API_SECRET` in `.env`.
@@ -200,6 +200,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Switched dynamic symbol price caps to use buying power and exposed buying power metrics.
 - Capped dynamic symbol list size to the tradeable universe count (plus positions/open orders).
 - Raised dynamic_symbols.max_symbols to 50000 to allow the full active universe.
 - Enforced cash-aware symbol filtering to cap candidates by available cash and always include open-order symbols.

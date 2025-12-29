@@ -13,7 +13,7 @@ Expose Prometheus metrics and Grafana dashboards.
 - `orders_skipped_total`
 - `pnl_percent`
 - `drawdown_percent`
-- `account_total`, `account_cash`, `account_invested`
+- `account_total`, `account_cash`, `account_buying_power`, `account_invested`
 - `position_qty`, `position_value`
 - `open_orders`
 

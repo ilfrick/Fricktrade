@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Switched dynamic symbol price caps to use buying power and added buying power metrics.
 - Capped dynamic symbol list size to the tradeable universe count (plus positions/open orders).
 - Raised dynamic_symbols.max_symbols to 50000 to allow the full active universe.
 - Ensured universe price filtering respects cash caps; no fallback to full universe when cash is below price_min.

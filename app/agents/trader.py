@@ -14,6 +14,7 @@ from app.monitoring.metrics import (
     DRAWDOWN,
     ACCOUNT_TOTAL,
     ACCOUNT_CASH,
+    ACCOUNT_BUYING_POWER,
     ACCOUNT_INVESTED,
     POSITION_QTY,
     POSITION_VALUE,
@@ -624,23 +625,28 @@ class TradingAgent:
         except Exception as exc:
             logging.warning("Account metrics update failed: %s", exc)
             return
-        total = cash = None
+        total = cash = buying_power = None
         if isinstance(account, dict):
             if "equity" in account:
                 total = account.get("equity")
                 cash = account.get("cash")
+                buying_power = account.get("buying_power")
             elif "NetLiquidation" in account:
                 total = account.get("NetLiquidation")
                 cash = account.get("TotalCashValue")
+                buying_power = account.get("BuyingPower") or account.get("AvailableFunds")
         try:
             total_val = float(total) if total is not None else None
             cash_val = float(cash) if cash is not None else None
+            buying_power_val = float(buying_power) if buying_power is not None else None
         except (TypeError, ValueError):
             return
         if total_val is None or cash_val is None:
             return
         ACCOUNT_TOTAL.set(total_val)
         ACCOUNT_CASH.set(cash_val)
+        if buying_power_val is not None:
+            ACCOUNT_BUYING_POWER.set(buying_power_val)
         ACCOUNT_INVESTED.set(total_val - cash_val)
 
     def _update_position_metrics(self, portfolio: dict) -> None:
@@ -1004,14 +1010,16 @@ class TradingAgent:
             return price_max
         try:
             cash = float(portfolio.get("cash", 0.0) or 0.0)
+            buying_power = float(portfolio.get("buying_power", 0.0) or 0.0)
             equity = float(portfolio.get("equity", 0.0) or 0.0)
         except (TypeError, ValueError):
             return price_max
-        if cash <= 0:
+        funds = buying_power if buying_power > 0 else cash
+        if funds <= 0:
             return 0.0
         cash_mode = str(dyn_cfg.get("cash_cap_mode", "cash")).lower()
         cash_max_pct = float(dyn_cfg.get("cash_max_pct", 100.0))
-        cash_cap = cash * max(cash_max_pct, 0.0) / 100.0
+        cash_cap = funds * max(cash_max_pct, 0.0) / 100.0
         if cash_mode == "risk" and equity > 0:
             max_pos_pct = float(self.cfg.get("risk", {}).get("max_position_size_pct", 0.0))
             target_value = equity * (max_pos_pct / 100.0)
@@ -1022,7 +1030,7 @@ class TradingAgent:
             return 0.0
         capped = min(price_max, cap)
         if capped < price_min:
-            logging.info("Dynamic symbols cash cap %.2f below price_min %.2f; enforcing cash cap.", cap, price_min)
+            logging.info("Dynamic symbols funds cap %.2f below price_min %.2f; enforcing cap.", cap, price_min)
             return capped
         return capped
 
@@ -1203,20 +1211,24 @@ class TradingAgent:
     def _get_portfolio_snapshot(self) -> dict:
         account = self.broker.get_account()
         self._account_snapshot = account if isinstance(account, dict) else {}
-        equity = cash = None
+        equity = cash = buying_power = None
         if isinstance(account, dict):
             if "equity" in account:
                 equity = account.get("equity")
                 cash = account.get("cash")
+                buying_power = account.get("buying_power")
             elif "NetLiquidation" in account:
                 equity = account.get("NetLiquidation")
                 cash = account.get("TotalCashValue")
+                buying_power = account.get("BuyingPower") or account.get("AvailableFunds")
         try:
             equity_val = float(equity) if equity is not None else 0.0
             cash_val = float(cash) if cash is not None else 0.0
+            buying_power_val = float(buying_power) if buying_power is not None else 0.0
         except (TypeError, ValueError):
             equity_val = 0.0
             cash_val = 0.0
+            buying_power_val = 0.0
 
         positions = {}
         gross_exposure = 0.0
@@ -1246,6 +1258,7 @@ class TradingAgent:
         return {
             "equity": equity_val,
             "cash": cash_val,
+            "buying_power": buying_power_val,
             "positions": positions,
             "gross_exposure": gross_exposure,
             "short_exposure": short_exposure,
