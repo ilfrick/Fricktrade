@@ -1032,7 +1032,10 @@ class TradingAgent:
             if filtered:
                 universe = filtered
             else:
-                logging.warning("Universe price filter returned no symbols; keeping base universe.")
+                if price_max < price_min or price_max <= 0:
+                    universe = []
+                else:
+                    logging.warning("Universe price filter returned no symbols; keeping base universe.")
         extras = set()
         for symbol in portfolio.get("positions", {}).keys():
             extras.add(symbol)
