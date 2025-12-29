@@ -374,7 +374,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (symbol, side) (open_orders)",
+          "expr": "sum by (symbol, side) (max_over_time(open_orders[5m]))",
           "refId": "A"
         }
       ],

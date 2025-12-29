@@ -202,6 +202,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Aligned Open Orders Grafana panel to show last 5 minutes to match pending orders view.
 - Switched dynamic symbol price caps to use buying power and exposed buying power metrics.
 - Capped dynamic symbol list size to the tradeable universe count (plus positions/open orders).
 - Raised dynamic_symbols.max_symbols to 50000 to allow the full active universe.
