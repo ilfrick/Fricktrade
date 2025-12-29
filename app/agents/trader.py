@@ -1185,23 +1185,23 @@ class TradingAgent:
             equity = float(portfolio.get("equity", 0.0) or 0.0)
         except (TypeError, ValueError):
             return price_max
-        if cash <= 0 or equity <= 0:
-            return price_max
+        if cash <= 0:
+            return 0.0
         cash_mode = str(dyn_cfg.get("cash_cap_mode", "cash")).lower()
         cash_max_pct = float(dyn_cfg.get("cash_max_pct", 100.0))
         cash_cap = cash * max(cash_max_pct, 0.0) / 100.0
-        if cash_mode == "risk":
+        if cash_mode == "risk" and equity > 0:
             max_pos_pct = float(self.cfg.get("risk", {}).get("max_position_size_pct", 0.0))
             target_value = equity * (max_pos_pct / 100.0)
             cash_cap = min(cash_cap, target_value)
         buffer_pct = float(dyn_cfg.get("cash_buffer_pct", 95.0))
         cap = cash_cap * max(buffer_pct, 0.0) / 100.0
         if cap <= 0:
-            return price_max
+            return 0.0
         capped = min(price_max, cap)
         if capped < price_min:
-            logging.info("Dynamic symbols cash cap %.2f below price_min %.2f; keeping price_max %.2f", cap, price_min, price_max)
-            return price_max
+            logging.info("Dynamic symbols cash cap %.2f below price_min %.2f; enforcing cash cap.", cap, price_min)
+            return capped
         return capped
 
     def _resolve_active_symbols(self) -> list[str]:
@@ -1289,11 +1289,14 @@ class TradingAgent:
 
     def _merge_with_positions(self, candidates: list[str], portfolio: dict, max_symbols: int) -> list[str]:
         held = [s for s in portfolio.get("positions", {}).keys() if s]
-        if not held and not candidates:
+        open_order_symbols = [
+            order.get("symbol") for order in self._open_orders_cache if order.get("symbol")
+        ]
+        if not held and not open_order_symbols and not candidates:
             return []
         ordered: list[str] = []
         seen = set()
-        for symbol in held + candidates:
+        for symbol in held + open_order_symbols + candidates:
             if symbol in seen:
                 continue
             ordered.append(symbol)
