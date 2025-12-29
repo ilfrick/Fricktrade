@@ -12,6 +12,7 @@ Subsystem reference:
 - `trading-loop.md`
 - `strategies.md`
 - `strategy_models.md`
+- `flow_trading_agent.md`
 - `execution.md`
 - `risk.md`
 - `brokers.md`
