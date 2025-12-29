@@ -21,6 +21,7 @@ class BrokerRouter(Broker):
     def get_account(self) -> dict:
         total_equity = 0.0
         total_cash = 0.0
+        total_buying_power = 0.0
         per_broker: dict[str, dict[str, Any]] = {}
         for name, broker in self._brokers.items():
             try:
@@ -28,11 +29,22 @@ class BrokerRouter(Broker):
             except Exception as exc:
                 logging.warning("Account fetch failed for %s: %s", name, exc)
                 account = {}
-            equity, cash = _extract_equity_cash(account)
+            equity, cash, buying_power = _extract_equity_cash(account)
             total_equity += equity
             total_cash += cash
-            per_broker[name] = {"equity": equity, "cash": cash, "raw": account}
-        return {"equity": total_equity, "cash": total_cash, "brokers": per_broker}
+            total_buying_power += buying_power
+            per_broker[name] = {
+                "equity": equity,
+                "cash": cash,
+                "buying_power": buying_power,
+                "raw": account,
+            }
+        return {
+            "equity": total_equity,
+            "cash": total_cash,
+            "buying_power": total_buying_power,
+            "brokers": per_broker,
+        }
 
     def get_positions(self) -> list[dict]:
         positions: list[dict] = []
@@ -112,12 +124,14 @@ class BrokerRouter(Broker):
         return next(iter(self._brokers.keys()))
 
 
-def _extract_equity_cash(account: dict) -> tuple[float, float]:
-    equity = cash = 0.0
+def _extract_equity_cash(account: dict) -> tuple[float, float, float]:
+    equity = cash = buying_power = 0.0
     if "equity" in account:
         equity = float(account.get("equity") or 0.0)
         cash = float(account.get("cash") or 0.0)
+        buying_power = float(account.get("buying_power") or 0.0)
     elif "NetLiquidation" in account:
         equity = float(account.get("NetLiquidation") or 0.0)
         cash = float(account.get("TotalCashValue") or 0.0)
-    return equity, cash
+        buying_power = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
+    return equity, cash, buying_power

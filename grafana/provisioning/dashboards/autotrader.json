@@ -48,7 +48,7 @@
       "gridPos": {
         "x": 0,
         "y": 4,
-        "w": 6,
+        "w": 4,
         "h": 5
       },
       "targets": [
@@ -69,9 +69,9 @@
       "type": "stat",
       "title": "Total Equity",
       "gridPos": {
-        "x": 6,
+        "x": 4,
         "y": 4,
-        "w": 6,
+        "w": 4,
         "h": 5
       },
       "targets": [
@@ -95,11 +95,39 @@
     },
     {
       "type": "stat",
+      "title": "Buying Power",
+      "gridPos": {
+        "x": 8,
+        "y": 4,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "expr": "account_buying_power",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
+    },
+    {
+      "type": "stat",
       "title": "Available Cash",
       "gridPos": {
         "x": 12,
         "y": 4,
-        "w": 6,
+        "w": 4,
         "h": 5
       },
       "targets": [
@@ -125,9 +153,9 @@
       "type": "stat",
       "title": "Invested",
       "gridPos": {
-        "x": 18,
+        "x": 16,
         "y": 4,
-        "w": 6,
+        "w": 4,
         "h": 5
       },
       "targets": [

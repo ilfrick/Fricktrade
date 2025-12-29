@@ -14,9 +14,11 @@ from app.monitoring.metrics import (
     DRAWDOWN,
     ACCOUNT_TOTAL,
     ACCOUNT_CASH,
+    ACCOUNT_BUYING_POWER,
     ACCOUNT_INVESTED,
     ACCOUNT_TOTAL_BY_BROKER,
     ACCOUNT_CASH_BY_BROKER,
+    ACCOUNT_BUYING_POWER_BY_BROKER,
     ACCOUNT_INVESTED_BY_BROKER,
     POSITION_QTY,
     POSITION_VALUE,
@@ -730,27 +732,34 @@ class TradingAgent:
         except Exception as exc:
             logging.warning("Account metrics update failed: %s", exc)
             return
-        total_val = cash_val = None
+        total_val = cash_val = buying_power_val = None
         if isinstance(account, dict):
             if "brokers" in account and isinstance(account["brokers"], dict):
                 total_val = float(account.get("equity") or 0.0)
                 cash_val = float(account.get("cash") or 0.0)
+                buying_power_val = float(account.get("buying_power") or 0.0)
                 for name, details in account["brokers"].items():
                     equity = float(details.get("equity") or 0.0)
                     cash = float(details.get("cash") or 0.0)
+                    buying_power = float(details.get("buying_power") or 0.0)
                     ACCOUNT_TOTAL_BY_BROKER.labels(broker=name).set(equity)
                     ACCOUNT_CASH_BY_BROKER.labels(broker=name).set(cash)
+                    ACCOUNT_BUYING_POWER_BY_BROKER.labels(broker=name).set(buying_power)
                     ACCOUNT_INVESTED_BY_BROKER.labels(broker=name).set(equity - cash)
             elif "equity" in account:
                 total_val = float(account.get("equity") or 0.0)
                 cash_val = float(account.get("cash") or 0.0)
+                buying_power_val = float(account.get("buying_power") or 0.0)
             elif "NetLiquidation" in account:
                 total_val = float(account.get("NetLiquidation") or 0.0)
                 cash_val = float(account.get("TotalCashValue") or 0.0)
+                buying_power_val = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
         if total_val is None or cash_val is None:
             return
         ACCOUNT_TOTAL.set(total_val)
         ACCOUNT_CASH.set(cash_val)
+        if buying_power_val is not None:
+            ACCOUNT_BUYING_POWER.set(buying_power_val)
         ACCOUNT_INVESTED.set(total_val - cash_val)
 
     def _update_position_metrics(self, portfolio: dict) -> None:
@@ -1206,14 +1215,16 @@ class TradingAgent:
             return price_max
         try:
             cash = float(portfolio.get("cash", 0.0) or 0.0)
+            buying_power = float(portfolio.get("buying_power", 0.0) or 0.0)
             equity = float(portfolio.get("equity", 0.0) or 0.0)
         except (TypeError, ValueError):
             return price_max
-        if cash <= 0:
+        funds = buying_power if buying_power > 0 else cash
+        if funds <= 0:
             return 0.0
         cash_mode = str(dyn_cfg.get("cash_cap_mode", "cash")).lower()
         cash_max_pct = float(dyn_cfg.get("cash_max_pct", 100.0))
-        cash_cap = cash * max(cash_max_pct, 0.0) / 100.0
+        cash_cap = funds * max(cash_max_pct, 0.0) / 100.0
         if cash_mode == "risk" and equity > 0:
             max_pos_pct = float(self.cfg.get("risk", {}).get("max_position_size_pct", 0.0))
             target_value = equity * (max_pos_pct / 100.0)
@@ -1224,7 +1235,7 @@ class TradingAgent:
             return 0.0
         capped = min(price_max, cap)
         if capped < price_min:
-            logging.info("Dynamic symbols cash cap %.2f below price_min %.2f; enforcing cash cap.", cap, price_min)
+            logging.info("Dynamic symbols funds cap %.2f below price_min %.2f; enforcing cap.", cap, price_min)
             return capped
         return capped
 
@@ -1369,6 +1380,7 @@ class TradingAgent:
         self._account_snapshot = account if isinstance(account, dict) else {}
         equity_val = 0.0
         cash_val = 0.0
+        buying_power_val = 0.0
         brokers: dict[str, dict] = {}
         if isinstance(account, dict):
             if "brokers" in account and isinstance(account["brokers"], dict):
@@ -1376,18 +1388,24 @@ class TradingAgent:
                     brokers[name] = {
                         "equity": float(data.get("equity") or 0.0),
                         "cash": float(data.get("cash") or 0.0),
+                        "buying_power": float(data.get("buying_power") or 0.0),
                         "positions": {},
                         "gross_exposure": 0.0,
                         "short_exposure": 0.0,
                     }
                 equity_val = float(account.get("equity") or sum(v["equity"] for v in brokers.values()))
                 cash_val = float(account.get("cash") or sum(v["cash"] for v in brokers.values()))
+                buying_power_val = float(
+                    account.get("buying_power") or sum(v["buying_power"] for v in brokers.values())
+                )
             elif "equity" in account:
                 equity_val = float(account.get("equity") or 0.0)
                 cash_val = float(account.get("cash") or 0.0)
+                buying_power_val = float(account.get("buying_power") or 0.0)
             elif "NetLiquidation" in account:
                 equity_val = float(account.get("NetLiquidation") or 0.0)
                 cash_val = float(account.get("TotalCashValue") or 0.0)
+                buying_power_val = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
 
         positions: dict[str, dict] = {}
         gross_exposure = 0.0
@@ -1427,6 +1445,7 @@ class TradingAgent:
         return {
             "equity": equity_val,
             "cash": cash_val,
+            "buying_power": buying_power_val,
             "positions": positions,
             "gross_exposure": gross_exposure,
             "short_exposure": short_exposure,
