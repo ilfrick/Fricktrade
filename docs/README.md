@@ -1,5 +1,13 @@
 # Autotrader Documentation
 
+Graphic index:
+
+```mermaid
+flowchart LR
+    A[Start] --> B[Trading Agent Flow]
+    click B "flow_trading_agent.md" "Open trading agent flow diagrams"
+```
+
 Start here if you are new:
 - `getting-started.md`
 - `configuration.md`
