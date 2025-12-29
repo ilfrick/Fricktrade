@@ -54,7 +54,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Universe (Broker Active)] --> B[AI Filter Score]
+    A[Universe Broker Active] --> B[AI Filter Score]
     B --> C[Cap to max_symbols]
     C --> D[Merge Positions + Open Orders]
     D --> E[Active Symbol List]
