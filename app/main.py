@@ -66,11 +66,12 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str, session_gai
         close = close.iloc[:, 0]
     if volume is not None and isinstance(volume, type(data)):
         volume = volume.iloc[:, 0]
-    prices = close.iloc[-lookback:].tolist()
-    volumes = volume.iloc[-lookback:].tolist() if volume is not None else []
-    opens = open_.iloc[-lookback:].tolist() if open_ is not None else []
-    highs = high.iloc[-lookback:].tolist() if high is not None else []
-    lows = low.iloc[-lookback:].tolist() if low is not None else []
+    lookback_bars = _bars_for_lookback(lookback, interval)
+    prices = close.iloc[-lookback_bars:].tolist()
+    volumes = volume.iloc[-lookback_bars:].tolist() if volume is not None else []
+    opens = open_.iloc[-lookback_bars:].tolist() if open_ is not None else []
+    highs = high.iloc[-lookback_bars:].tolist() if high is not None else []
+    lows = low.iloc[-lookback_bars:].tolist() if low is not None else []
     last_price = prices[-1] if prices else None
     avg_volume = float(sum(volumes) / len(volumes)) if volumes else 0.0
     session_volume = float(sum(volumes)) if volumes else 0.0
@@ -114,7 +115,21 @@ def _interval_seconds(interval: str) -> int:
     return 60
 
 
-def _market_state_from_df(data: pd.DataFrame, lookback: int, session_gain_mode: str) -> dict:
+def _bars_for_lookback(lookback_days: int, interval: str) -> int:
+    if interval.endswith("m"):
+        minutes = max(int(interval[:-1]), 1)
+        per_day = max(int(390 / minutes), 1)
+    elif interval.endswith("h"):
+        hours = max(int(interval[:-1]), 1)
+        per_day = max(int(6.5 / hours), 1)
+    elif interval.endswith("d"):
+        per_day = 1
+    else:
+        per_day = 1
+    return max(per_day * max(lookback_days, 1), 1)
+
+
+def _market_state_from_df(data: pd.DataFrame, lookback_days: int, interval: str, session_gain_mode: str) -> dict:
     if data is None or data.empty:
         return _empty_market_state()
     if isinstance(data.index, pd.MultiIndex):
@@ -137,11 +152,12 @@ def _market_state_from_df(data: pd.DataFrame, lookback: int, session_gain_mode: 
     open_ = data["Open"] if "Open" in data else None
     high = data["High"] if "High" in data else None
     low = data["Low"] if "Low" in data else None
-    prices = close.iloc[-lookback:].tolist()
-    volumes = volume.iloc[-lookback:].tolist() if volume is not None else []
-    opens = open_.iloc[-lookback:].tolist() if open_ is not None else []
-    highs = high.iloc[-lookback:].tolist() if high is not None else []
-    lows = low.iloc[-lookback:].tolist() if low is not None else []
+    lookback_bars = _bars_for_lookback(lookback_days, interval)
+    prices = close.iloc[-lookback_bars:].tolist()
+    volumes = volume.iloc[-lookback_bars:].tolist() if volume is not None else []
+    opens = open_.iloc[-lookback_bars:].tolist() if open_ is not None else []
+    highs = high.iloc[-lookback_bars:].tolist() if high is not None else []
+    lows = low.iloc[-lookback_bars:].tolist() if low is not None else []
     last_price = prices[-1] if prices else None
     avg_volume = float(sum(volumes) / len(volumes)) if volumes else 0.0
     session_volume = float(sum(volumes)) if volumes else 0.0
@@ -242,10 +258,20 @@ class AlpacaMarketDataProvider:
                         df = data.xs(symbol, level=0)
                     except KeyError:
                         continue
-                    cache[symbol] = _market_state_from_df(df, self._lookback, self._session_gain_mode)
+                    cache[symbol] = _market_state_from_df(
+                        df,
+                        self._lookback,
+                        self._interval,
+                        self._session_gain_mode,
+                    )
             else:
                 symbol = chunk[0]
-                cache[symbol] = _market_state_from_df(data, self._lookback, self._session_gain_mode)
+                cache[symbol] = _market_state_from_df(
+                    data,
+                    self._lookback,
+                    self._interval,
+                    self._session_gain_mode,
+                )
         self._cache = cache
         self._cache_at = now
 
@@ -312,7 +338,12 @@ class IBKRMarketDataProvider:
             if not bars:
                 continue
             df = util.df(bars)
-            cache[symbol] = _market_state_from_df(df, self._lookback, self._session_gain_mode)
+            cache[symbol] = _market_state_from_df(
+                df,
+                self._lookback,
+                self._interval,
+                self._session_gain_mode,
+            )
         self._cache = cache
         self._cache_at = now
 

@@ -200,6 +200,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Fixed live lookback slicing to use bars-per-day instead of raw days count.
 - Added multi-broker live market data provider support (alpaca/ibkr) with routing.
 - Switched live market data provider to Alpaca (batch bars) with optional yfinance fallback.
 - Added Grafana table for strategy selection counts.
