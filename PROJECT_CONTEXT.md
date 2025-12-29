@@ -40,6 +40,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Fixed PnL/drawdown metrics to track equity vs start/peak.
 - Switched Open Orders panel to instant view to avoid stale series.
 - Aligned Open Orders Grafana panel to show last 5 minutes to match pending orders view.
 - Switched dynamic symbol price caps to use buying power and added buying power metrics.

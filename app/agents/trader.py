@@ -99,6 +99,8 @@ class TradingAgent:
         self._ai_filter_executor = ThreadPoolExecutor(max_workers=1)
         self._ai_filter_future = None
         self._ai_filter_inflight_at: datetime | None = None
+        self._equity_start: float | None = None
+        self._equity_peak: float | None = None
         self._checkpoint_at: datetime | None = None
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
@@ -756,6 +758,16 @@ class TradingAgent:
                 buying_power_val = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
         if total_val is None or cash_val is None:
             return
+        if self._equity_start is None:
+            self._equity_start = total_val
+        if self._equity_peak is None or total_val > self._equity_peak:
+            self._equity_peak = total_val
+        if self._equity_start:
+            pnl_pct = (total_val - self._equity_start) / self._equity_start * 100.0
+            PNL.set(pnl_pct)
+        if self._equity_peak:
+            drawdown_pct = (self._equity_peak - total_val) / self._equity_peak * 100.0
+            DRAWDOWN.set(max(drawdown_pct, 0.0))
         ACCOUNT_TOTAL.set(total_val)
         ACCOUNT_CASH.set(cash_val)
         if buying_power_val is not None:
@@ -945,6 +957,8 @@ class TradingAgent:
             "news_cache": self._news_cache,
             "news_cache_at": _dt_to_str(self._news_cache_at),
             "last_trade_at": _dt_to_str(self._last_trade_at),
+            "equity_start": self._equity_start,
+            "equity_peak": self._equity_peak,
         }
         self._checkpoint_at = maybe_save_checkpoint("trader", payload, self.cfg, self._checkpoint_at)
 
@@ -964,6 +978,8 @@ class TradingAgent:
         self._news_cache = dict(payload.get("news_cache", {}) or {})
         self._news_cache_at = _dt_from_str(payload.get("news_cache_at"))
         self._last_trade_at = _dt_from_str(payload.get("last_trade_at"))
+        self._equity_start = payload.get("equity_start")
+        self._equity_peak = payload.get("equity_peak")
 
     def _update_orchestrator(self, symbol: str, market_state: dict) -> None:
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
