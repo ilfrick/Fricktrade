@@ -138,6 +138,16 @@ class StrategyOrchestrator:
             scores[name] = score + self._biases.get(name, 0.0)
 
         sorted_names = sorted(strategy_names, key=lambda n: scores.get(n, 0.0), reverse=True)
+        if self.cfg.mode == "direct":
+            selected = []
+            for name in sorted_names:
+                if scores.get(name, 0.0) < self.cfg.min_score:
+                    continue
+                selected = [name]
+                break
+            if not selected:
+                selected = [sorted_names[0]]
+            return selected, {selected[0]: 1.0}
         if self.cfg.mode == "weight":
             weights = {name: max(scores.get(name, 0.0), 0.0) for name in sorted_names}
             if not any(weight > 0 for weight in weights.values()):
@@ -384,6 +394,11 @@ class RLStrategyOrchestrator:
             selected = ranked
         top_k = max(1, min(len(selected), self._top_k))
         selected = selected[:top_k]
+        if self._mode == "direct":
+            selected = [name for name in ranked if scores.get(name, 0.0) >= self._min_score]
+            if not selected:
+                selected = [ranked[0]]
+            return [selected[0]], {selected[0]: 1.0}
         if self._mode == "weight":
             weights = {name: max(scores.get(name, 0.0), 0.0) for name in selected}
             if not any(weight > 0 for weight in weights.values()):

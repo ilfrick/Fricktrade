@@ -77,7 +77,7 @@ _DESCRIPTIONS = {
     "strategy.params.market_maker.inventory_target_pct": "Market maker inventory target percentage.",
     "strategy.params.market_maker.skew_pct": "Market maker inventory skew percentage.",
     "strategy.params.market_maker.min_qty": "Market maker minimum order quantity.",
-    "orchestrator.mode": "Orchestrator mode: select or weight.",
+    "orchestrator.mode": "Orchestrator mode: direct, select, or weight.",
     "orchestrator.top_k": "Max strategies selected per symbol.",
     "orchestrator.min_score": "Minimum score to include a strategy.",
     "orchestrator.rl.enabled": "Enable RL-based orchestrator.",
