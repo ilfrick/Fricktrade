@@ -161,7 +161,7 @@ All configuration lives in `config/config.yaml`.
 Key sections:
 - `market.*`: venue gating, hours, symbol venue mapping
 - `data.*`: symbols, dynamic scan, sources, AI filter
-- `news.*`: catalyst fetch config
+- `news.*`: catalyst fetch config (optional `news.llm.*` for Ollama gating)
 - `strategy.*`: strategy selection and params
 - `orchestrator.*`: RL orchestrator settings
 - `risk.*`: risk limits, stops, cool-downs
@@ -233,6 +233,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day instead of raw days count.
 - Added multi-broker live market data provider support (alpaca/ibkr) with routing.
 - Switched live market data provider to Alpaca (batch bars) with optional yfinance fallback.

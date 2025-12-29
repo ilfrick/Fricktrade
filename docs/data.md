@@ -23,6 +23,7 @@ Acquire bars, scan symbols, and support AI filtering.
   (caps candidates to <= buying power; when buying power <= 0 or cap < price_min, only positions/open orders remain)
 - `data.dynamic_symbols.max_symbols` is capped to the tradeable universe size, but can grow to include positions/open orders.
 - `news.*`
+- `news.llm.*` (optional Ollama catalyst classifier)
 - Held positions and open-order symbols are always included in dynamic symbol results, even if scanner filters would exclude them.
 
 ## Ingest Example
