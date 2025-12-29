@@ -202,6 +202,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added flow diagrams for the trading agent (dev).
 - Switched orchestrator to direct mode (single strategy selection) using all strategy signals.
 - Tweaked broker market status panel to show only current status (no history).
 - Added Grafana broker market status panel and broker_market_open metric.
