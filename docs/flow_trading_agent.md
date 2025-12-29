@@ -14,8 +14,8 @@ flowchart TD
     F --> A
     E -- Yes --> G[Per-Symbol Market Data]
     G --> H[Generate Strategy Signals]
-    H --> I[Orchestrator: Direct Strategy Selection]
-    I --> J[Guardrail (Optional)]
+    H --> I[Orchestrator Direct Strategy Selection]
+    I --> J[Guardrail Optional]
     J --> K[Risk + Limits + Sizing]
     K --> L[Execution (Algo + Queue)]
     L --> M[Broker Router Submit]
