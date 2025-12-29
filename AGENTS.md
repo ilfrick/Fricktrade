@@ -157,8 +157,8 @@ docker compose run --rm api
 - `learning.use_best_model` selects the best model copy (from `learning.best_model_path`) if available.
 - Data ingestion sources are configured under `data.sources` (supports `yfinance`, `alpaca`, `stooq`, `alphavantage`).
 - Dynamic scanner filters are configured under `data.dynamic_symbols.filters`, while `pattern_trading.selection` only
-  affects the pattern strategy. Each strategy gets its own symbol list when dynamic scanning runs. Maximum price is
-  derived from available cash (no config-based cap).
+  affects the pattern strategy. Each strategy gets its own symbol list when dynamic scanning runs. Price caps are
+  enforced by available cash (`cash_aware`/`cash_cap_mode`), and held/open-order symbols are always retained.
 - News catalysts (for Pattern Trading) are configured under `news` (default Alpaca news API).
 - Open-order tracking is configured under `execution.open_orders`.
 - Alpaca keys come from `ALPACA_API_KEY` / `ALPACA_API_SECRET` in `.env`.
@@ -200,6 +200,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Enforced cash-aware symbol filtering to cap candidates by available cash and always include open-order symbols.
 - Added flow diagrams for the trading agent (v2.0).
 - Switched orchestrator to direct mode (single strategy selection) using all strategy signals.
 - Tweaked broker market status panel to show only current status (no history).

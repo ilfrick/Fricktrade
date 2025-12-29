@@ -10,6 +10,7 @@ execution, and metrics updates.
 - Per-symbol venue gating uses `market.symbol_venues` and falls back to `market.default_symbol_venue`.
 - Symbol venue mappings can be refreshed from the broker via `market.symbol_venues_auto`.
 - Refreshes symbols (scanner or AI filter), news cache, and open orders.
+- Cash-aware symbol filtering enforces price <= available cash; held/open-order symbols are retained.
 - Skips trading when markets are closed.
 - Runs per-symbol signals, combines them, applies guardrails, sizes orders,
   and submits via `ExecutionEngine`.
