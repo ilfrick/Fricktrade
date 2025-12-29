@@ -68,13 +68,6 @@ market:
       open: 09:30
       close: '16:00'
     holidays:
-    - '2025-01-01'
-    - '2025-01-20'
-    - '2025-02-17'
-    - '2025-04-18'
-    - '2025-05-26'
-    - '2025-06-19'
-    - '2025-09-01'
     - '2026-01-01'
     - '2026-01-19'
     - '2026-02-16'
@@ -186,7 +179,7 @@ strategy:
       skew_pct: 0.15
       min_qty: 1
 orchestrator:
-  mode: select
+  mode: direct
   top_k: 2
   min_score: 0.0
   rl:

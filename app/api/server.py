@@ -55,7 +55,7 @@ _DESCRIPTIONS = {
     "strategy.params.exit_threshold_pct": "Exit threshold percentage.",
     "strategy.params.position_horizon_minutes": "Max holding horizon in minutes.",
     "strategy.params.allow_shorts": "Allow short positions.",
-    "orchestrator.mode": "Orchestrator mode: select or weight.",
+    "orchestrator.mode": "Orchestrator mode: direct, select, or weight.",
     "orchestrator.top_k": "Max strategies selected per symbol.",
     "orchestrator.min_score": "Minimum score to include a strategy.",
     "orchestrator.rl.enabled": "Enable RL-based orchestrator.",

@@ -16,7 +16,7 @@ Centralize runtime settings for all subsystems.
 - `data.*` (symbols, dynamic scan, sources)
 - `news.*`
 - `strategy.*`
-- `orchestrator.*` (including `orchestrator.rl.*`)
+- `orchestrator.*` (including `orchestrator.mode` and `orchestrator.rl.*`)
 - `risk.*`
 - `trading_limits.*`
 - `execution.*`

@@ -14,7 +14,8 @@ Generate buy/sell/hold/exit signals from market state.
 - Market maker: `app/strategies/market_maker.py`.
 
 ## Orchestration
-- RL orchestrator selects strategy outputs using market state, strategy signals, and AI-filter-style features.
+- RL orchestrator consumes all strategy signals and chooses which strategy to apply.
+- Modes: `direct` (single strategy), `select` (top-k), or `weight` (weighted blend).
 - Combine mode: `priority` or `vote` (see `strategy.combine`).
 
 ## Configuration

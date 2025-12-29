@@ -233,6 +233,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Switched orchestrator to direct mode (single strategy selection) using all strategy signals.
 - Tweaked broker market status panel to show only current status (no history).
 - Added Grafana broker market status panel and broker_market_open metric.
 - Adjusted Grafana active symbol panels to show only active (value=1) series.
