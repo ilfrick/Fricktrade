@@ -68,13 +68,6 @@ market:
       open: 09:30
       close: '16:00'
     holidays:
-    - '2025-01-01'
-    - '2025-01-20'
-    - '2025-02-17'
-    - '2025-04-18'
-    - '2025-05-26'
-    - '2025-06-19'
-    - '2025-09-01'
     - '2026-01-01'
     - '2026-01-19'
     - '2026-02-16'
@@ -390,7 +383,6 @@ data:
     enabled: false
     api_key: ${ALPHAVANTAGE_API_KEY}
     symbols: []
-
 checkpointing:
   enabled: true
   interval_seconds: 60
@@ -399,7 +391,6 @@ checkpointing:
   retention:
     max_age_hours: 72
     max_files: 200
-
 healthwatch:
   enabled: true
   interval_seconds: 30
@@ -425,7 +416,7 @@ news:
   llm:
     enabled: true
     provider: ollama
-    base_url: http://localhost:11434
+    base_url: http://host.docker.internal:11434
     model: llama3.1:8b
     timeout_seconds: 10
     max_items: 25
@@ -466,7 +457,11 @@ execution:
       slices: 4
     vwap:
       duration_seconds: 120
-      profile: [1, 1, 1, 1]
+      profile:
+      - 1
+      - 1
+      - 1
+      - 1
     pov:
       max_participation: 0.1
       estimated_volume: 100000
