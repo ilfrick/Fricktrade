@@ -21,7 +21,7 @@ services:
           devices:
             - capabilities: ["gpu"]
     ports:
-      - "0.0.0.0:8002:8001"
+      - "0.0.0.0:8001:8001"
     labels:
       - "autoheal=true"
     healthcheck:
@@ -41,7 +41,7 @@ services:
       - ./config:/app/config
     command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "api"]
     ports:
-      - "0.0.0.0:18083:8000"
+      - "0.0.0.0:18081:8000"
     labels:
       - "autoheal=true"
     healthcheck:
@@ -132,7 +132,7 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml
     ports:
-      - "0.0.0.0:9091:9090"
+      - "0.0.0.0:9090:9090"
     labels:
       - "autoheal=true"
     restart: unless-stopped
@@ -155,7 +155,7 @@ services:
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
     ports:
-      - "0.0.0.0:3003:3000"
+      - "0.0.0.0:3002:3000"
     labels:
       - "autoheal=true"
     restart: unless-stopped
