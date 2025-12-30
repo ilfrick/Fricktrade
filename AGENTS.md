@@ -202,6 +202,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Run Ollama as a docker service for news LLM gating.
 - Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day instead of raw days count.
 - Added multi-broker live market data provider support (alpaca/ibkr) with routing.

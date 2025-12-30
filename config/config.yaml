@@ -416,7 +416,7 @@ news:
   llm:
     enabled: true
     provider: ollama
-    base_url: http://host.docker.internal:11434
+    base_url: http://ollama:11434
     model: llama3.1:8b
     timeout_seconds: 10
     max_items: 25
