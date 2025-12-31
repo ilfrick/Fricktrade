@@ -174,6 +174,7 @@ docker compose run --rm api
 - Alertmanager handles email notifications via `alertmanager/alertmanager.yml`.
 - Healthwatch can optionally stop/start services around market hours via `healthwatch.market_shutdown.*`.
 - Manual kill switches live under `kill_switch.*` (force sleep or force liquidation with interlock).
+- Daily top movers report is configured under `reports.daily_top_movers.*` (email + training exports).
 - `market.open_mode` chooses whether any or all configured venues must be open to trade.
 - `market.venues[].holidays` is refreshed by `calendar-updater` (or can be edited manually).
 - `calendar-updater` refreshes holiday calendars weekly from online sources (NYSE, Nasdaq, Italy public holidays).
@@ -205,6 +206,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added daily top movers report with email + training data export.
 - Added manual kill switches for force sleep and force liquidation with interlock.
 - Added healthwatch scheduler heartbeat logging.
 - Enabled healthwatch market-based stack sleep/wake in config.

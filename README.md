@@ -170,6 +170,7 @@ Key sections:
 - `monitoring.*`: metrics and alerts
 - `checkpointing.*`: checkpoint cadence + retention
 - `kill_switch.*`: manual interlocked kill switches (sleep or liquidation)
+- `reports.daily_top_movers.*`: daily top movers report + training exports
 
 See `docs/configuration.md` for full details.
 
@@ -212,6 +213,7 @@ Services:
 - `calendar-updater`: weekly market holidays refresh
 - `tests-when-closed`: runs tests/backtests when markets are closed
 - `healthwatch`: health probes + Prometheus metrics
+- `daily-report`: daily top movers email + training data export
 
 ## Common Commands
 Download data:
@@ -242,6 +244,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added daily top movers report with email + training data export.
 - Added manual kill switches for force sleep and force liquidation with interlock.
 - Added healthwatch scheduler heartbeat logging.
 - Enabled healthwatch market-based stack sleep/wake in config.

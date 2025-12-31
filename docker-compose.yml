@@ -133,6 +133,19 @@ services:
       retries: 3
     restart: unless-stopped
 
+  daily-report:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ./config:/app/config
+      - ./alertmanager/alertmanager.yml:/app/alertmanager/alertmanager.yml
+      - ./data:/data
+    command: ["python", "-m", "app.reporting.daily_top_movers", "--config", "/app/config/config.yaml"]
+    labels:
+      - "autoheal=true"
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:v2.54.1
     volumes:

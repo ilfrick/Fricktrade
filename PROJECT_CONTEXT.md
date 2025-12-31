@@ -41,6 +41,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added daily top movers report with email + training data export.
 - Added manual kill switches for force sleep and force liquidation with interlock.
 - Added healthwatch scheduler heartbeat logging.
 - Enabled healthwatch market-based stack sleep/wake in config.

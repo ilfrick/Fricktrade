@@ -421,6 +421,8 @@ healthwatch:
     keep_services:
     - healthwatch
     - autoheal
+    - daily-report
+    - prometheus
     stop_services: []
 kill_switch:
   armed: false
@@ -429,6 +431,30 @@ kill_switch:
   confirm_phrase: "YES"
   force_sleep: false
   force_liquidate: false
+reports:
+  daily_top_movers:
+    enabled: true
+    top_n: 10
+    universe: alpaca_active
+    max_universe: 5000
+    output_dir: /data/reports/daily_top_movers
+    training_enabled: true
+    training_data_dir: /data
+    check_interval_seconds: 60
+    close_delay_minutes: 5
+    broker_venues: {}
+    use_symbol_venues_auto: false
+    prometheus_url: http://prometheus:9090
+    explain_ai:
+      enabled: true
+      provider: ollama
+      base_url: http://ollama:11434
+      model: llama3.1:8b
+      timeout_seconds: 10
+      max_text_chars: 800
+    email:
+      use_alertmanager_config: true
+      alertmanager_config_path: /app/alertmanager/alertmanager.yml
 news:
   enabled: true
   provider: alpaca

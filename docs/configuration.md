@@ -52,3 +52,4 @@ Centralize runtime settings for all subsystems.
 - Volatility targeting: `risk.vol_targeting.enabled`.
 - Market-based stack sleep/wake: `healthwatch.market_shutdown.*` (stops services when markets are closed).
 - Manual kill switches: `kill_switch.*` (force sleep or force liquidation with interlock).
+- Daily top movers report: `reports.daily_top_movers.*` (daily winners, email, and training data export).
