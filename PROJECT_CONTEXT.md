@@ -41,6 +41,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added explicit logs when news catalyst refresh starts/completes.
 - Made news catalyst refresh async so the trader keeps running while Ollama updates.
 - Added a separate Grafana dashboard for strategy performance metrics.
 - Added Grafana stat panel for 24h PDT blocks.

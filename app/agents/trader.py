@@ -1274,11 +1274,13 @@ class TradingAgent:
                     if isinstance(result, dict):
                         self._news_cache = result
                         self._news_cache_at = now
+                        logging.info("News catalyst refresh completed; symbols=%d", len(result))
                 self._news_future = None
                 self._news_inflight_at = None
             return
         symbols_snapshot = list(symbols)
         self._news_inflight_at = now
+        logging.info("News catalyst refresh started; symbols=%d", len(symbols_snapshot))
         self._news_future = self._news_executor.submit(
             fetch_catalyst_symbols_for_config,
             symbols_snapshot,

@@ -203,6 +203,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added explicit logs when news catalyst refresh starts/completes.
 - Made news catalyst refresh async so the trader keeps running while Ollama updates.
 - Added a separate Grafana dashboard for strategy performance metrics.
 - Added Grafana stat panel for 24h PDT blocks.
