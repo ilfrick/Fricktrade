@@ -204,6 +204,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Fixed market-based sleep/wake scheduling to use timezone-aware UTC timestamps.
 - Added optional healthwatch market-based stack sleep/wake control.
 - Added explicit logs when news catalyst refresh starts/completes.
 - Made news catalyst refresh async so the trader keeps running while Ollama updates.

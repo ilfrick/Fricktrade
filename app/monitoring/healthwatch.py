@@ -7,7 +7,7 @@ import logging
 import socketserver
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -145,7 +145,7 @@ def _run_market_scheduler(cfg: dict) -> None:
 
     last_state: str | None = None
     while True:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         market_open = is_market_open(cfg, now=now)
         next_open = next_market_open(cfg, now=now)
         should_run = market_open
