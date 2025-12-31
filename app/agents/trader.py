@@ -82,6 +82,9 @@ class TradingAgent:
         self._started_at = datetime.utcnow()
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
+        self._news_executor = ThreadPoolExecutor(max_workers=1)
+        self._news_future = None
+        self._news_inflight_at: datetime | None = None
         self._strategy_names = self._resolve_strategy_names()
         self._combine_mode = cfg["strategy"].get("combine", "priority")
         self._orchestrator = RLStrategyOrchestrator(cfg)
@@ -1255,17 +1258,33 @@ class TradingAgent:
         news_cfg = self.cfg.get("news", {})
         if not news_cfg.get("enabled", False):
             self._news_cache = {}
+            self._news_cache_at = None
             return
         now = now or datetime.utcnow()
         ttl_minutes = int(news_cfg.get("cache_minutes", 15))
         if self._news_cache_at and (now - self._news_cache_at).total_seconds() < ttl_minutes * 60:
             return
-        self._news_cache = fetch_catalyst_symbols_for_config(
-            symbols,
-            news_cfg,
-            self.cfg.get("brokers", {}),
+        if self._news_future is not None:
+            if self._news_future.done():
+                try:
+                    result = self._news_future.result()
+                except Exception as exc:
+                    logging.warning("News catalyst refresh failed: %s", exc)
+                else:
+                    if isinstance(result, dict):
+                        self._news_cache = result
+                        self._news_cache_at = now
+                self._news_future = None
+                self._news_inflight_at = None
+            return
+        symbols_snapshot = list(symbols)
+        self._news_inflight_at = now
+        self._news_future = self._news_executor.submit(
+            fetch_catalyst_symbols_for_config,
+            symbols_snapshot,
+            dict(news_cfg),
+            dict(self.cfg.get("brokers", {})),
         )
-        self._news_cache_at = now
 
     def _log_news_cache(self) -> None:
         news_cfg = self.cfg.get("news", {})
