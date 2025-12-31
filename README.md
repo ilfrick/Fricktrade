@@ -241,6 +241,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added Grafana stat panel for 24h PDT blocks.
 - Added Grafana panel for PDT blocks (day-trading protection).
 - Added rolling strategy performance reporting and kill switch thresholds.
 - Added PDT-protection block counter for broker-rejected orders.

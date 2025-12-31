@@ -203,6 +203,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added Grafana stat panel for 24h PDT blocks.
 - Added Grafana panel for PDT blocks (day-trading protection).
 - Added PDT-protection block counter for broker-rejected orders.
 - Added rolling strategy performance reporting and kill switch thresholds.
