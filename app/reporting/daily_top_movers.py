@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import smtplib
 import time
@@ -63,14 +64,17 @@ def _smtp_settings(cfg: dict) -> dict[str, str | list[str]]:
             for item in receiver.get("email_configs", []) or []:
                 if item.get("to"):
                     to_list.append(str(item.get("to")))
+    require_tls = email_cfg.get("smtp_require_tls")
+    if require_tls is None:
+        require_tls = bool(global_cfg.get("smtp_require_tls", True))
     return {
         "host": str(global_cfg.get("smtp_smarthost", "")),
         "from": str(global_cfg.get("smtp_from", "")),
         "user": str(global_cfg.get("smtp_auth_username", "")),
         "password": str(global_cfg.get("smtp_auth_password", "")),
         "to": to_list,
-        "require_tls": bool(global_cfg.get("smtp_require_tls", True)),
-        "hello": str(global_cfg.get("smtp_hello", "")),
+        "require_tls": bool(require_tls),
+        "hello": str(email_cfg.get("smtp_hello", "")) or str(global_cfg.get("smtp_hello", "")),
     }
 
 
@@ -92,14 +96,21 @@ def _send_email(subject: str, body: str, cfg: dict) -> None:
     else:
         host_name = host
         port = 587
-    with smtplib.SMTP(host_name, port, timeout=30) as server:
-        if settings.get("hello"):
-            server.helo(settings["hello"])
-        if settings.get("require_tls", True):
-            server.starttls()
-        if settings.get("user") and settings.get("password"):
-            server.login(settings["user"], settings["password"])
-        server.send_message(msg)
+    try:
+        with smtplib.SMTP(host_name, port, timeout=30) as server:
+            if settings.get("hello"):
+                server.helo(settings["hello"])
+            if settings.get("require_tls", True):
+                try:
+                    server.starttls()
+                except smtplib.SMTPNotSupportedError:
+                    logging.warning("Daily report SMTP server does not support STARTTLS.")
+                    return
+            if settings.get("user") and settings.get("password"):
+                server.login(settings["user"], settings["password"])
+            server.send_message(msg)
+    except Exception as exc:
+        logging.warning("Daily report email failed: %s", exc)
 
 
 def _chunked(items: list[str], size: int) -> list[list[str]]:
@@ -183,56 +194,107 @@ def _resolve_universe(cfg: dict) -> list[str]:
     return load_universe(api_key, api_secret, universe, max_universe=max_universe)
 
 
-def _fetch_daily_bars(client: StockHistoricalDataClient, symbols: list[str], day: datetime) -> dict[str, dict]:
+def _fetch_daily_bars(
+    client: StockHistoricalDataClient,
+    symbols: list[str],
+    day: datetime,
+    feed: str,
+) -> dict[str, dict]:
     results: dict[str, dict] = {}
     if not symbols:
         return results
     start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
     end = start + timedelta(days=1)
-    for chunk in _chunked(symbols, 200):
-        request = StockBarsRequest(symbol_or_symbols=chunk, timeframe=TimeFrame.Day, start=start, end=end)
-        bars = client.get_stock_bars(request)
-        for symbol, df in bars.data.items():
-            if df is None or df.empty:
+    try:
+        for chunk in _chunked(symbols, 200):
+            request = StockBarsRequest(
+                symbol_or_symbols=chunk,
+                timeframe=TimeFrame.Day,
+                start=start,
+                end=end,
+                feed=feed,
+            )
+            bars = client.get_stock_bars(request)
+            data = bars.data if hasattr(bars, "data") else {}
+            if not isinstance(data, dict):
                 continue
-            row = df.iloc[-1]
-            try:
-                open_px = float(row["open"])
-                close_px = float(row["close"])
-            except Exception:
-                continue
-            if open_px <= 0:
-                continue
-            gain_pct = (close_px - open_px) / open_px * 100.0
-            results[str(symbol)] = {
-                "open": open_px,
-                "close": close_px,
-                "gain_pct": gain_pct,
-            }
+            for symbol, series in data.items():
+                last = _last_bar(series)
+                if last is None:
+                    continue
+                open_px = _bar_field(last, "open", ["o"])
+                close_px = _bar_field(last, "close", ["c"])
+                if open_px is None or close_px is None:
+                    continue
+                open_px = float(open_px)
+                close_px = float(close_px)
+                if open_px <= 0:
+                    continue
+                gain_pct = (close_px - open_px) / open_px * 100.0
+                results[str(symbol)] = {
+                    "open": open_px,
+                    "close": close_px,
+                    "gain_pct": gain_pct,
+                }
+    except Exception as exc:
+        logging.warning("Daily top movers daily bars fetch failed: %s", exc)
     return results
 
 
-def _fetch_intraday_bars(client: StockHistoricalDataClient, symbol: str, day: datetime) -> list[dict]:
+def _fetch_intraday_bars(
+    client: StockHistoricalDataClient,
+    symbol: str,
+    day: datetime,
+    feed: str,
+) -> list[dict]:
     start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
     end = start + timedelta(days=1)
-    request = StockBarsRequest(symbol_or_symbols=[symbol], timeframe=TimeFrame.Minute, start=start, end=end)
-    bars = client.get_stock_bars(request)
-    df = bars.data.get(symbol)
-    if df is None or df.empty:
-        return []
-    rows = []
-    for _, row in df.iterrows():
-        rows.append(
-            {
-                "datetime": row.get("timestamp"),
-                "Open": row.get("open"),
-                "High": row.get("high"),
-                "Low": row.get("low"),
-                "Close": row.get("close"),
-                "Volume": row.get("volume"),
-            }
+    try:
+        request = StockBarsRequest(
+            symbol_or_symbols=[symbol],
+            timeframe=TimeFrame.Minute,
+            start=start,
+            end=end,
+            feed=feed,
         )
-    return rows
+        bars = client.get_stock_bars(request)
+        data = bars.data if hasattr(bars, "data") else {}
+        if not isinstance(data, dict):
+            return []
+        series = data.get(symbol)
+        if series is None:
+            return []
+        rows = []
+        if hasattr(series, "iterrows"):
+            for _, row in series.iterrows():
+                rows.append(
+                    {
+                        "datetime": row.get("timestamp"),
+                        "Open": row.get("open"),
+                        "High": row.get("high"),
+                        "Low": row.get("low"),
+                        "Close": row.get("close"),
+                        "Volume": row.get("volume"),
+                    }
+                )
+            return rows
+        if isinstance(series, list):
+            for bar in series:
+                rows.append(
+                    {
+                        "datetime": _bar_field(bar, "timestamp", ["t"]),
+                        "Open": _bar_field(bar, "open", ["o"]),
+                        "High": _bar_field(bar, "high", ["h"]),
+                        "Low": _bar_field(bar, "low", ["l"]),
+                        "Close": _bar_field(bar, "close", ["c"]),
+                        "Volume": _bar_field(bar, "volume", ["v"]),
+                    }
+                )
+            return rows
+        return []
+    except Exception as exc:
+        logging.warning("Daily top movers intraday bars fetch failed for %s: %s", symbol, exc)
+        return []
 
 
 def _save_bars(path: Path, rows: list[dict]) -> None:
@@ -245,6 +307,236 @@ def _save_bars(path: Path, rows: list[dict]) -> None:
             handle.write(
                 f"{row['datetime']},{row['Open']},{row['High']},{row['Low']},{row['Close']},{row['Volume']}\n"
             )
+
+
+def _status_path(output_dir: Path, venue: str, date_str: str) -> Path:
+    return output_dir / "_status" / f"{venue}_{date_str}.json"
+
+
+def _write_status(output_dir: Path, venue: str, date_str: str, state: str, note: str | None = None) -> None:
+    payload = {
+        "venue": venue,
+        "date": date_str,
+        "state": state,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if note:
+        payload["note"] = note
+    path = _status_path(output_dir, venue, date_str)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _bar_field(obj: Any, name: str, aliases: list[str]) -> Any:
+    if hasattr(obj, name):
+        return getattr(obj, name)
+    for alias in aliases:
+        if hasattr(obj, alias):
+            return getattr(obj, alias)
+    if isinstance(obj, dict):
+        if name in obj:
+            return obj.get(name)
+        for alias in aliases:
+            if alias in obj:
+                return obj.get(alias)
+    return None
+
+
+def _last_bar(series: Any) -> Any | None:
+    if series is None:
+        return None
+    if hasattr(series, "empty"):
+        if series.empty:
+            return None
+        return series.iloc[-1]
+    if isinstance(series, list):
+        return series[-1] if series else None
+    return None
+
+
+def _summarize_intraday(rows: list[dict]) -> dict[str, float]:
+    if not rows:
+        return {}
+    opens = [float(r["Open"]) for r in rows if r.get("Open") is not None]
+    closes = [float(r["Close"]) for r in rows if r.get("Close") is not None]
+    highs = [float(r["High"]) for r in rows if r.get("High") is not None]
+    lows = [float(r["Low"]) for r in rows if r.get("Low") is not None]
+    vols = [float(r["Volume"]) for r in rows if r.get("Volume") is not None]
+    if not opens or not closes:
+        return {}
+    open_px = opens[0]
+    close_px = closes[-1]
+    total_vol = sum(vols) if vols else 0.0
+    summary = {
+        "open": open_px,
+        "close": close_px,
+        "high": max(highs) if highs else close_px,
+        "low": min(lows) if lows else open_px,
+        "total_vol": total_vol,
+    }
+    first_30 = min(30, len(closes))
+    first_60 = min(60, len(closes))
+    if first_30 >= 5:
+        summary["first_30m_return_pct"] = (closes[first_30 - 1] - open_px) / open_px * 100.0
+        summary["first_30m_vol_pct"] = (sum(vols[:first_30]) / total_vol * 100.0) if total_vol else 0.0
+    if first_60 >= 5:
+        summary["first_60m_return_pct"] = (closes[first_60 - 1] - open_px) / open_px * 100.0
+    if highs and lows:
+        summary["max_runup_pct"] = (summary["high"] - open_px) / open_px * 100.0
+        summary["max_drawdown_pct"] = (summary["low"] - open_px) / open_px * 100.0
+    return summary
+
+
+def _signal_thresholds(cfg: dict) -> dict[str, float]:
+    report_cfg = cfg.get("reports", {}).get("daily_top_movers", {}) or {}
+    thresholds = report_cfg.get("signal_thresholds", {}) or {}
+    return {
+        "early_return_30m_pct": float(thresholds.get("early_return_30m_pct", 1.5)),
+        "sustained_return_60m_pct": float(thresholds.get("sustained_return_60m_pct", 2.5)),
+        "early_volume_pct": float(thresholds.get("early_volume_pct", 20.0)),
+        "runup_pct": float(thresholds.get("runup_pct", 4.0)),
+        "drawdown_pct": float(thresholds.get("drawdown_pct", -2.0)),
+    }
+
+
+def _signal_hints(summary: dict[str, float], thresholds: dict[str, float]) -> list[str]:
+    hints: list[str] = []
+    if not summary:
+        return hints
+    if summary.get("first_30m_return_pct", 0.0) >= thresholds["early_return_30m_pct"]:
+        hints.append(f"early momentum (30m +{thresholds['early_return_30m_pct']:.1f}% or more)")
+    if summary.get("first_60m_return_pct", 0.0) >= thresholds["sustained_return_60m_pct"]:
+        hints.append(f"sustained momentum (60m +{thresholds['sustained_return_60m_pct']:.1f}% or more)")
+    if summary.get("first_30m_vol_pct", 0.0) >= thresholds["early_volume_pct"]:
+        hints.append(f"early volume surge (>= {thresholds['early_volume_pct']:.0f}% in first 30m)")
+    if summary.get("max_drawdown_pct", 0.0) <= thresholds["drawdown_pct"]:
+        hints.append(f"volatile dip (intra-day drawdown <= {thresholds['drawdown_pct']:.1f}%)")
+    if summary.get("max_runup_pct", 0.0) >= thresholds["runup_pct"]:
+        hints.append(f"strong intraday run-up (>= {thresholds['runup_pct']:.1f}%)")
+    return hints
+
+
+def _first_move_time(rows: list[dict], threshold_pct: float) -> datetime | None:
+    if not rows:
+        return None
+    open_px = rows[0].get("Open")
+    if open_px is None:
+        return None
+    target = float(open_px) * (1.0 + threshold_pct / 100.0)
+    for row in rows:
+        close_px = row.get("Close")
+        if close_px is not None and float(close_px) >= target:
+            return row.get("datetime")
+    return None
+
+
+def _format_metrics(summary: dict[str, float]) -> str | None:
+    if not summary:
+        return None
+    parts = []
+    if "first_30m_return_pct" in summary:
+        parts.append(f"30m_return={summary['first_30m_return_pct']:.2f}%")
+    if "first_60m_return_pct" in summary:
+        parts.append(f"60m_return={summary['first_60m_return_pct']:.2f}%")
+    if "first_30m_vol_pct" in summary:
+        parts.append(f"early_vol={summary['first_30m_vol_pct']:.1f}%")
+    if "max_runup_pct" in summary:
+        parts.append(f"runup={summary['max_runup_pct']:.2f}%")
+    if "max_drawdown_pct" in summary:
+        parts.append(f"drawdown={summary['max_drawdown_pct']:.2f}%")
+    return ", ".join(parts) if parts else None
+
+
+def _news_settings(cfg: dict) -> dict[str, Any]:
+    report_cfg = cfg.get("reports", {}).get("daily_top_movers", {}) or {}
+    return report_cfg.get("news", {}) or {}
+
+
+def _alpaca_news_keys(cfg: dict) -> tuple[str, str, str]:
+    news_cfg = cfg.get("news", {}) or {}
+    alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {}) or {}
+    api_key = str(news_cfg.get("api_key", "")) or str(alpaca_cfg.get("api_key", ""))
+    api_secret = str(news_cfg.get("api_secret", "")) or str(alpaca_cfg.get("api_secret", ""))
+    base_url = str(news_cfg.get("base_url", "https://data.alpaca.markets"))
+    return api_key, api_secret, base_url
+
+
+def _fetch_news_items(symbols: list[str], cfg: dict, day: datetime) -> dict[str, list[dict]]:
+    report_news = _news_settings(cfg)
+    if not report_news.get("enabled", True):
+        return {}
+    provider = str(report_news.get("provider", "alpaca")).lower()
+    if provider != "alpaca":
+        return {}
+    api_key, api_secret, base_url = _alpaca_news_keys(cfg)
+    if not api_key or not api_secret:
+        return {}
+    start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+    end = start + timedelta(days=1)
+    max_headlines = int(report_news.get("max_headlines", 8))
+    include_summary = bool(report_news.get("include_summaries", False))
+    by_symbol: dict[str, list[dict]] = {s: [] for s in symbols}
+    if not symbols:
+        return by_symbol
+    try:
+        import requests
+
+        chunk_size = 50
+        for idx in range(0, len(symbols), chunk_size):
+            chunk = symbols[idx : idx + chunk_size]
+            page_token = None
+            while True:
+                params = {
+                    "symbols": ",".join(chunk),
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "limit": 50,
+                    "sort": "asc",
+                }
+                if page_token:
+                    params["page_token"] = page_token
+                resp = requests.get(
+                    f"{base_url.rstrip('/')}/v1beta1/news",
+                    params=params,
+                    headers={
+                        "APCA-API-KEY-ID": api_key,
+                        "APCA-API-SECRET-KEY": api_secret,
+                    },
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+                items = payload.get("news", payload if isinstance(payload, list) else [])
+                for item in items:
+                    created_at = _parse_time(item.get("created_at") or item.get("updated_at"))
+                    headline = str(item.get("headline") or "")
+                    summary = str(item.get("summary") or "")
+                    for sym in item.get("symbols", []) or []:
+                        if sym not in by_symbol:
+                            continue
+                        if len(by_symbol[sym]) >= max_headlines:
+                            continue
+                        entry = {"created_at": created_at, "headline": headline}
+                        if include_summary and summary:
+                            entry["summary"] = summary
+                        by_symbol[sym].append(entry)
+                page_token = payload.get("next_page_token")
+                if not page_token:
+                    break
+    except Exception as exc:
+        logging.warning("Daily top movers news fetch failed: %s", exc)
+    return by_symbol
+
+
+def _parse_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None
 
 
 def _query_prometheus(prom_url: str, query: str) -> dict:
@@ -322,6 +614,25 @@ def _render_report(
         )
         if reasons:
             lines.append(f"   reasons: {', '.join(reasons)}")
+        metrics = item.get("metrics")
+        if metrics:
+            lines.append(f"   metrics: {metrics}")
+        hints = item.get("hints") or []
+        if hints:
+            lines.append(f"   signals: {', '.join(hints)}")
+        news_items = item.get("news") or []
+        if news_items:
+            before_move = item.get("news_before_move")
+            flag = "yes" if before_move else "no"
+            lines.append(f"   news: {len(news_items)} headlines; before_move={flag}")
+            for entry in news_items:
+                headline = entry.get("headline", "")
+                created_at = entry.get("created_at")
+                created_str = created_at.isoformat() if isinstance(created_at, datetime) else ""
+                summary = entry.get("summary")
+                lines.append(f"     - {created_str} {headline}")
+                if summary:
+                    lines.append(f"       summary: {summary}")
         if item.get("ai_reason"):
             lines.append(f"   ai: {item['ai_reason']}")
     return "\n".join(lines)
@@ -341,7 +652,9 @@ def run_daily_reports(config_path: str) -> None:
     output_dir = Path(report_cfg.get("output_dir", "/data/reports/daily_top_movers"))
     training_dir = Path(report_cfg.get("training_data_dir", cfg.get("backtest", {}).get("data_dir", "/data")))
     max_symbols = int(report_cfg.get("top_n", 10))
+    feed = str(report_cfg.get("feed", cfg.get("data", {}).get("dynamic_symbols", {}).get("feed", "iex")))
     close_delay = int(report_cfg.get("close_delay_minutes", 5))
+    thresholds = _signal_thresholds(cfg)
     feed_symbols = _resolve_universe(cfg)
     if not feed_symbols:
         logging.warning("Daily top movers: no symbols in universe")
@@ -380,14 +693,19 @@ def run_daily_reports(config_path: str) -> None:
                 continue
             if is_venue_open(cfg, venue_name, now=now):
                 continue
-            daily_bars = _fetch_daily_bars(client, feed_symbols, close_dt)
+            _write_status(output_dir, venue_name, date_str, "running")
+            daily_bars = _fetch_daily_bars(client, feed_symbols, close_dt, feed)
             if not daily_bars:
+                logging.warning("Daily top movers: no daily bars for %s on %s", venue_name, date_str)
+                _write_status(output_dir, venue_name, date_str, "done", note="no_daily_bars")
+                last_run[venue_name] = date_str
                 continue
             by_gain = sorted(
                 daily_bars.items(),
                 key=lambda item: item[1].get("gain_pct", 0.0),
                 reverse=True,
             )
+            sections = []
             for broker in brokers:
                 if venue_name not in broker_venues.get(broker, []):
                     continue
@@ -407,6 +725,7 @@ def run_daily_reports(config_path: str) -> None:
                         break
                 if not movers:
                     continue
+                news_map = _fetch_news_items([m["symbol"] for m in movers], cfg, close_dt)
                 for item in movers:
                     symbol = item["symbol"]
                     trades = _query_prometheus(
@@ -423,15 +742,45 @@ def run_daily_reports(config_path: str) -> None:
                         ai_reason = _explain_with_ai(symbol, reasons, cfg)
                         if ai_reason:
                             item["ai_reason"] = ai_reason
-                    rows = _fetch_intraday_bars(client, symbol, close_dt)
+                    rows = _fetch_intraday_bars(client, symbol, close_dt, feed)
                     if rows:
+                        summary = _summarize_intraday(rows)
+                        metrics = _format_metrics(summary)
+                        if metrics:
+                            item["metrics"] = metrics
+                        hints = _signal_hints(summary, thresholds)
+                        if hints:
+                            item["hints"] = hints
+                        first_move = _first_move_time(rows, thresholds["early_return_30m_pct"])
+                        open_time = rows[0].get("datetime")
                         day_dir = output_dir / date_str / broker / venue_name
                         _save_bars(day_dir / f"{symbol}_1m.csv", rows)
                         if report_cfg.get("training_enabled", True):
                             _save_bars(training_dir / f"{symbol}_{date_str}_1m.csv", rows)
-                subject = f"Daily Top Movers - {broker} - {venue_name} - {date_str}"
-                body = _render_report(broker, venue_name, date_str, movers, cfg)
+                        news_items = news_map.get(symbol, [])
+                        if news_items:
+                            item["news"] = news_items
+                            corr_window = int(_news_settings(cfg).get("correlation_window_minutes", 90))
+                            if open_time and first_move:
+                                cutoff = min(first_move, open_time + timedelta(minutes=corr_window))
+                                item["news_before_move"] = any(
+                                    isinstance(entry.get("created_at"), datetime)
+                                    and entry["created_at"] <= cutoff
+                                    for entry in news_items
+                                )
+                            elif open_time:
+                                cutoff = open_time + timedelta(minutes=corr_window)
+                                item["news_before_move"] = any(
+                                    isinstance(entry.get("created_at"), datetime)
+                                    and entry["created_at"] <= cutoff
+                                    for entry in news_items
+                                )
+                sections.append(_render_report(broker, venue_name, date_str, movers, cfg))
+            if sections:
+                subject = f"Daily Top Movers - {venue_name} - {date_str}"
+                body = "\n\n".join(sections)
                 _send_email(subject, body, cfg)
+            _write_status(output_dir, venue_name, date_str, "done")
             last_run[venue_name] = date_str
         time.sleep(poll_seconds)
 

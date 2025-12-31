@@ -437,6 +437,7 @@ reports:
     top_n: 10
     universe: alpaca_active
     max_universe: 5000
+    feed: iex
     output_dir: /data/reports/daily_top_movers
     training_enabled: true
     training_data_dir: /data
@@ -445,6 +446,18 @@ reports:
     broker_venues: {}
     use_symbol_venues_auto: false
     prometheus_url: http://prometheus:9090
+    signal_thresholds:
+      early_return_30m_pct: 1.5
+      sustained_return_60m_pct: 2.5
+      early_volume_pct: 20.0
+      runup_pct: 4.0
+      drawdown_pct: -2.0
+    news:
+      enabled: true
+      provider: alpaca
+      max_headlines: 8
+      include_summaries: false
+      correlation_window_minutes: 90
     explain_ai:
       enabled: true
       provider: ollama
@@ -455,6 +468,7 @@ reports:
     email:
       use_alertmanager_config: true
       alertmanager_config_path: /app/alertmanager/alertmanager.yml
+      smtp_require_tls: false
 news:
   enabled: true
   provider: alpaca

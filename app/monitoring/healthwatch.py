@@ -7,7 +7,7 @@ import logging
 import socketserver
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -68,6 +68,69 @@ def _market_shutdown_cfg(cfg: dict) -> dict:
 
 def _kill_switch_cfg(cfg: dict) -> dict:
     return cfg.get("kill_switch", {}) or {}
+
+
+def _daily_report_cfg(cfg: dict) -> dict:
+    return cfg.get("reports", {}).get("daily_top_movers", {}) or {}
+
+
+def _venue_map(cfg: dict) -> dict[str, dict]:
+    market_cfg = cfg.get("market", {})
+    venues = market_cfg.get("venues", []) or []
+    out = {}
+    for venue in venues:
+        if not isinstance(venue, dict):
+            continue
+        name = str(venue.get("name") or "").strip()
+        if not name:
+            continue
+        out[name] = venue
+    return out
+
+
+def _venue_close_dt(venue_cfg: dict, now: datetime) -> datetime:
+    tz_name = str(venue_cfg.get("timezone", "UTC"))
+    tz = timezone.utc if tz_name.upper() == "UTC" else datetime.now().astimezone().tzinfo
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        pass
+    hours = venue_cfg.get("trading_hours", {}) or {}
+    close_str = hours.get("close", "17:30")
+    close_time = dt_time.fromisoformat(close_str)
+    local_day = now.astimezone(tz).date()
+    return datetime.combine(local_day, close_time, tzinfo=tz)
+
+
+def _daily_report_pending(cfg: dict, now: datetime) -> bool:
+    report_cfg = _daily_report_cfg(cfg)
+    if not report_cfg.get("enabled", False):
+        return False
+    venues = _venue_map(cfg)
+    if not venues:
+        return False
+    output_dir = Path(report_cfg.get("output_dir", "/data/reports/daily_top_movers"))
+    close_delay = int(report_cfg.get("close_delay_minutes", 5))
+    for venue_name, venue_cfg in venues.items():
+        close_dt = _venue_close_dt(venue_cfg, now)
+        if now < close_dt:
+            continue
+        run_after = close_dt + timedelta(minutes=close_delay)
+        date_str = run_after.date().isoformat()
+        if now < run_after:
+            return True
+        status_path = output_dir / "_status" / f"{venue_name}_{date_str}.json"
+        try:
+            if not status_path.exists():
+                return True
+            data = json.loads(status_path.read_text(encoding="utf-8") or "{}")
+            if data.get("state") != "done":
+                return True
+        except Exception:
+            return True
+    return False
 
 
 def _kill_switch_armed(cfg: dict) -> bool:
@@ -189,7 +252,12 @@ def _run_market_scheduler(cfg: dict) -> None:
                 _start_services(client, project, stop_services)
                 last_state = "running"
         else:
-            if last_state != "stopped":
+            pending_report = _daily_report_pending(cfg, now)
+            if pending_report:
+                if last_state != "waiting":
+                    logging.info("Healthwatch market sleep delayed: daily report still pending.")
+                    last_state = "waiting"
+            elif last_state != "stopped":
                 logging.info("Healthwatch market sleep: stopping services=%s", sorted(stop_services))
                 _stop_services(client, project, stop_services)
                 last_state = "stopped"

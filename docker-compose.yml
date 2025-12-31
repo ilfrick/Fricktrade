@@ -137,6 +137,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    env_file:
+      - .env
     volumes:
       - ./config:/app/config
       - ./alertmanager/alertmanager.yml:/app/alertmanager/alertmanager.yml

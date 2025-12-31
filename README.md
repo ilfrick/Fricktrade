@@ -174,6 +174,17 @@ Key sections:
 
 See `docs/configuration.md` for full details.
 
+## Daily Reporting
+Daily top movers reporting runs after each market close, emails a summary, and stores intraday 1-minute
+bars for the top performers. The report includes numeric indicators, signal hints, and optional news
+correlation for each top mover.
+
+Key config under `reports.daily_top_movers.*`:
+- `feed` (iex or sip)
+- `signal_thresholds.*` (early momentum / volume / runup / drawdown)
+- `news.*` (headlines + correlation hints)
+- `email.*` (SMTP overrides; `smtp_require_tls` can disable STARTTLS)
+
 ## Safeguards
 - Market-hours gating by venue
 - Per-symbol venue mapping (manual + broker refresh)

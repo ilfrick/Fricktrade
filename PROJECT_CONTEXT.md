@@ -41,6 +41,11 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added SMTP TLS override for daily report emails and guarded SMTP failures.
+- Hardened daily top movers bar parsing to support Alpaca Bar lists and avoid SIP errors.
+- Added daily top movers feed config (default IEX) and guarded Alpaca SIP errors.
+- Added env_file to daily-report service so Alpaca credentials load.
+- Added daily top movers signal thresholds, numeric metrics, and news correlation in the report.
 - Added daily top movers report with email + training data export.
 - Added manual kill switches for force sleep and force liquidation with interlock.
 - Added healthwatch scheduler heartbeat logging.
