@@ -66,6 +66,22 @@ def _market_shutdown_cfg(cfg: dict) -> dict:
     return _healthwatch_cfg(cfg).get("market_shutdown", {}) or {}
 
 
+def _kill_switch_cfg(cfg: dict) -> dict:
+    return cfg.get("kill_switch", {}) or {}
+
+
+def _kill_switch_armed(cfg: dict) -> bool:
+    ks_cfg = _kill_switch_cfg(cfg)
+    if not ks_cfg.get("armed", False):
+        return False
+    confirm = str(ks_cfg.get("confirm_code", "")).strip()
+    required = str(ks_cfg.get("required_code", "")).strip()
+    confirm_phrase = str(ks_cfg.get("confirm_phrase", "YES")).strip()
+    if required:
+        return confirm == required
+    return confirm == confirm_phrase
+
+
 def _check_url(url: str, timeout_seconds: int) -> int:
     try:
         with urlopen(url, timeout=timeout_seconds) as resp:
@@ -139,11 +155,13 @@ def _run_market_scheduler(cfg: dict) -> None:
     project = str(ms_cfg.get("project_name", "autotrader"))
     interval = int(ms_cfg.get("check_interval_seconds", 60))
     start_before = int(ms_cfg.get("start_before_minutes", 15))
+    heartbeat_minutes = int(ms_cfg.get("heartbeat_minutes", 15))
     keep = set(ms_cfg.get("keep_services", ["healthwatch", "autoheal"]))
     stop_list = ms_cfg.get("stop_services")
     client = docker.DockerClient(base_url="unix://var/run/docker.sock")
 
     last_state: str | None = None
+    last_heartbeat: datetime | None = None
     while True:
         now = datetime.now(timezone.utc)
         market_open = is_market_open(cfg, now=now)
@@ -152,6 +170,12 @@ def _run_market_scheduler(cfg: dict) -> None:
         if not should_run and next_open is not None:
             delta = (next_open - now).total_seconds()
             should_run = delta <= start_before * 60
+        force_sleep = bool(_kill_switch_cfg(cfg).get("force_sleep", False))
+        if force_sleep:
+            if _kill_switch_armed(cfg):
+                should_run = False
+            else:
+                logging.warning("Kill switch force_sleep requested but interlock not armed.")
         containers = _project_containers(client, project)
         services = {c.labels.get("com.docker.compose.service", "") for c in containers}
         services.discard("")
@@ -169,6 +193,16 @@ def _run_market_scheduler(cfg: dict) -> None:
                 logging.info("Healthwatch market sleep: stopping services=%s", sorted(stop_services))
                 _stop_services(client, project, stop_services)
                 last_state = "stopped"
+        if heartbeat_minutes > 0:
+            if last_heartbeat is None or (now - last_heartbeat).total_seconds() >= heartbeat_minutes * 60:
+                next_open_str = next_open.isoformat() if next_open else "unknown"
+                logging.info(
+                    "Healthwatch market scheduler heartbeat; state=%s next_open=%s force_sleep=%s",
+                    last_state or "unknown",
+                    next_open_str,
+                    force_sleep,
+                )
+                last_heartbeat = now
         time.sleep(interval)
 
 

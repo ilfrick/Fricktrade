@@ -112,6 +112,8 @@ class TradingAgent:
         self._equity_start: float | None = None
         self._equity_peak: float | None = None
         self._checkpoint_at: datetime | None = None
+        self._kill_switch_liquidated = False
+        self._kill_switch_warned = False
         self._performance_cfg = cfg.get("strategy", {}).get("performance", {})
         self._performance_enabled = bool(self._performance_cfg.get("enabled", False))
         self._performance_window_days = int(self._performance_cfg.get("window_days", 30))
@@ -279,6 +281,8 @@ class TradingAgent:
         return []
 
     def run_once(self, symbol: str, market_state: dict):
+        if self._kill_switch_liquidated:
+            return None
         exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
         broker_hint = self._resolve_broker_for_symbol(symbol, self._strategy_names, None)
         if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol, broker=broker_hint):
@@ -1071,6 +1075,7 @@ class TradingAgent:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             self._active_symbol_labels = current_symbols
             self._refresh_open_orders_cache(symbols)
+            self._maybe_force_liquidation(portfolio)
             if len(self._broker_map) > 1:
                 orders_by_broker: dict[str, list[dict]] = {}
                 for order in self._open_orders_cache:
@@ -1783,6 +1788,90 @@ class TradingAgent:
         self._open_orders_cache = orders
         self._open_orders_at = now
         self._update_open_orders_metrics(symbols)
+
+    def _kill_switch_armed(self) -> bool:
+        ks_cfg = self.cfg.get("kill_switch", {}) or {}
+        if not ks_cfg.get("armed", False):
+            return False
+        confirm = str(ks_cfg.get("confirm_code", "")).strip()
+        required = str(ks_cfg.get("required_code", "")).strip()
+        confirm_phrase = str(ks_cfg.get("confirm_phrase", "YES")).strip()
+        if required:
+            return confirm == required
+        return confirm == confirm_phrase
+
+    def _maybe_force_liquidation(self, portfolio: dict) -> None:
+        ks_cfg = self.cfg.get("kill_switch", {}) or {}
+        if not ks_cfg.get("force_liquidate", False):
+            return
+        if not self._kill_switch_armed():
+            if not self._kill_switch_warned:
+                logging.warning("Kill switch force_liquidate requested but interlock not armed.")
+                self._kill_switch_warned = True
+            return
+        if self._kill_switch_liquidated:
+            return
+        open_orders = list(self._open_orders_cache)
+        if not open_orders:
+            try:
+                open_orders = self.broker.get_open_orders()
+            except Exception as exc:
+                logging.warning("Kill switch open orders fetch failed: %s", exc)
+                open_orders = []
+        canceled = 0
+        for order in open_orders:
+            order_id = order.get("order_id")
+            if not order_id:
+                continue
+            broker_name = order.get("broker")
+            try:
+                if broker_name:
+                    self.broker.cancel_order(str(order_id), broker=broker_name)
+                else:
+                    self.broker.cancel_order(str(order_id))
+                canceled += 1
+            except TypeError:
+                try:
+                    self.broker.cancel_order(str(order_id))
+                    canceled += 1
+                except Exception as exc:
+                    logging.warning("Kill switch cancel failed for %s: %s", order_id, exc)
+            except Exception as exc:
+                logging.warning("Kill switch cancel failed for %s: %s", order_id, exc)
+
+        closed = 0
+        try:
+            positions = self.broker.get_positions()
+        except Exception as exc:
+            logging.warning("Kill switch positions fetch failed: %s", exc)
+            positions = []
+        for pos in positions:
+            symbol = pos.get("symbol")
+            if not symbol:
+                continue
+            broker_name = pos.get("broker")
+            try:
+                if broker_name:
+                    self.broker.close_position(symbol, broker=broker_name)
+                else:
+                    self.broker.close_position(symbol)
+                closed += 1
+            except TypeError:
+                try:
+                    self.broker.close_position(symbol)
+                    closed += 1
+                except Exception as exc:
+                    logging.warning("Kill switch close failed for %s: %s", symbol, exc)
+            except Exception as exc:
+                logging.warning("Kill switch close failed for %s: %s", symbol, exc)
+
+        self._disabled_strategies = set(self._strategy_names)
+        self._kill_switch_liquidated = True
+        logging.critical(
+            "Kill switch liquidation executed; positions=%d orders=%d",
+            closed,
+            canceled,
+        )
 
     def _update_open_orders_metrics(self, symbols: list[str]) -> None:
         previous_labels = set(self._open_orders_labels)

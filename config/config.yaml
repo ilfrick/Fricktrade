@@ -417,10 +417,18 @@ healthwatch:
     project_name: autotrader
     check_interval_seconds: 60
     start_before_minutes: 15
+    heartbeat_minutes: 15
     keep_services:
     - healthwatch
     - autoheal
     stop_services: []
+kill_switch:
+  armed: false
+  confirm_code: ""
+  required_code: ${KILL_SWITCH_CODE}
+  confirm_phrase: "YES"
+  force_sleep: false
+  force_liquidate: false
 news:
   enabled: true
   provider: alpaca

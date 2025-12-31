@@ -169,6 +169,7 @@ Key sections:
 - `backtest.*`: backtest range and engine settings
 - `monitoring.*`: metrics and alerts
 - `checkpointing.*`: checkpoint cadence + retention
+- `kill_switch.*`: manual interlocked kill switches (sleep or liquidation)
 
 See `docs/configuration.md` for full details.
 
@@ -241,6 +242,8 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added manual kill switches for force sleep and force liquidation with interlock.
+- Added healthwatch scheduler heartbeat logging.
 - Enabled healthwatch market-based stack sleep/wake in config.
 - Fixed market-based sleep/wake scheduling to use timezone-aware UTC timestamps.
 - Added optional healthwatch market-based stack sleep/wake control.
