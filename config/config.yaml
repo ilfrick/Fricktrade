@@ -412,6 +412,15 @@ healthwatch:
     prometheus: http://prometheus:9090/-/healthy
     grafana: http://grafana:3000/api/health
     alertmanager: http://alertmanager:9093/-/healthy
+  market_shutdown:
+    enabled: false
+    project_name: autotrader
+    check_interval_seconds: 60
+    start_before_minutes: 15
+    keep_services:
+    - healthwatch
+    - autoheal
+    stop_services: []
 news:
   enabled: true
   provider: alpaca

@@ -50,3 +50,4 @@ Centralize runtime settings for all subsystems.
 - Multi-broker routing: `execution.brokers.enabled`.
 - Execution algos: `execution.algos.enabled`.
 - Volatility targeting: `risk.vol_targeting.enabled`.
+- Market-based stack sleep/wake: `healthwatch.market_shutdown.*` (stops services when markets are closed).

@@ -34,6 +34,32 @@ def is_venue_open(cfg: dict, venue_name: str, now: datetime | None = None) -> bo
     return False
 
 
+def next_market_open(cfg: dict, now: datetime | None = None) -> datetime | None:
+    app_cfg = cfg.get("app", {})
+    market_cfg = cfg.get("market", {})
+    mode = market_cfg.get("open_mode", "any")
+    venues = _normalize_venues(market_cfg)
+    if not venues:
+        venues = [
+            {
+                "name": market_cfg.get("venue", "market"),
+                "timezone": app_cfg.get("timezone", "UTC"),
+                "trading_hours": market_cfg.get("trading_hours", {}),
+                "holidays": market_cfg.get("holidays", []),
+            }
+        ]
+    next_times = []
+    for venue in venues:
+        next_time = _next_venue_open(venue, now=now)
+        if next_time is not None:
+            next_times.append(next_time)
+    if not next_times:
+        return None
+    if mode == "all":
+        return max(next_times)
+    return min(next_times)
+
+
 def _normalize_venues(market_cfg: dict) -> list[dict]:
     venues = market_cfg.get("venues", [])
     if isinstance(venues, list):
@@ -66,3 +92,44 @@ def _is_venue_open(venue_cfg: dict, now: datetime | None = None) -> bool:
     if open_time <= close_time:
         return open_time <= now_time <= close_time
     return now_time >= open_time or now_time <= close_time
+
+
+def _next_venue_open(venue_cfg: dict, now: datetime | None = None) -> datetime | None:
+    tz = ZoneInfo(venue_cfg.get("timezone", "UTC"))
+    current = now or datetime.now(tz)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=tz)
+    else:
+        current = current.astimezone(tz)
+
+    if _is_venue_open(venue_cfg, now=current):
+        return current
+
+    holidays = set(venue_cfg.get("holidays", []))
+    hours = venue_cfg.get("trading_hours", {})
+    open_time = time.fromisoformat(hours.get("open", "09:00"))
+    close_time = time.fromisoformat(hours.get("close", "17:30"))
+
+    for offset in range(0, 10):
+        day = current.date().fromordinal(current.date().toordinal() + offset)
+        if day.weekday() >= 5:
+            continue
+        if day.isoformat() in holidays:
+            continue
+        open_dt = datetime.combine(day, open_time, tzinfo=tz)
+        if open_time <= close_time:
+            if offset == 0:
+                if current.time() < open_time:
+                    return open_dt
+                if current.time() <= close_time:
+                    return current
+                continue
+            return open_dt
+        if offset == 0:
+            if current.time() < close_time:
+                return current
+            if current.time() >= open_time:
+                return current
+            return open_dt
+        return open_dt
+    return None

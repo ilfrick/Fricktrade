@@ -16,6 +16,12 @@ try:
     import yaml
 except Exception:  # pragma: no cover
     yaml = None
+try:
+    import docker
+except Exception:  # pragma: no cover
+    docker = None
+
+from app.utils.market import is_market_open, next_market_open
 
 
 DEFAULT_TARGETS = {
@@ -56,6 +62,10 @@ def _healthwatch_cfg(cfg: dict) -> dict:
     return cfg.get("healthwatch", {}) or {}
 
 
+def _market_shutdown_cfg(cfg: dict) -> dict:
+    return _healthwatch_cfg(cfg).get("market_shutdown", {}) or {}
+
+
 def _check_url(url: str, timeout_seconds: int) -> int:
     try:
         with urlopen(url, timeout=timeout_seconds) as resp:
@@ -88,6 +98,78 @@ def _render_metrics(state: HealthState) -> bytes:
     lines.append("# TYPE healthwatch_up gauge")
     lines.append("healthwatch_up 1")
     return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _project_containers(client, project: str) -> list:
+    label = f"com.docker.compose.project={project}"
+    return client.containers.list(all=True, filters={"label": label})
+
+
+def _stop_services(client, project: str, services: set[str]) -> None:
+    if not services:
+        return
+    for container in _project_containers(client, project):
+        service = container.labels.get("com.docker.compose.service", "")
+        if service in services:
+            try:
+                container.stop(timeout=30)
+            except Exception as exc:
+                logging.warning("Healthwatch stop failed for %s: %s", service, exc)
+
+
+def _start_services(client, project: str, services: set[str]) -> None:
+    if not services:
+        return
+    for container in _project_containers(client, project):
+        service = container.labels.get("com.docker.compose.service", "")
+        if service in services:
+            try:
+                container.start()
+            except Exception as exc:
+                logging.warning("Healthwatch start failed for %s: %s", service, exc)
+
+
+def _run_market_scheduler(cfg: dict) -> None:
+    ms_cfg = _market_shutdown_cfg(cfg)
+    if not ms_cfg.get("enabled", False):
+        return
+    if docker is None:
+        logging.warning("Healthwatch market shutdown requires docker SDK; skipping.")
+        return
+    project = str(ms_cfg.get("project_name", "autotrader"))
+    interval = int(ms_cfg.get("check_interval_seconds", 60))
+    start_before = int(ms_cfg.get("start_before_minutes", 15))
+    keep = set(ms_cfg.get("keep_services", ["healthwatch", "autoheal"]))
+    stop_list = ms_cfg.get("stop_services")
+    client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+
+    last_state: str | None = None
+    while True:
+        now = datetime.utcnow()
+        market_open = is_market_open(cfg, now=now)
+        next_open = next_market_open(cfg, now=now)
+        should_run = market_open
+        if not should_run and next_open is not None:
+            delta = (next_open - now).total_seconds()
+            should_run = delta <= start_before * 60
+        containers = _project_containers(client, project)
+        services = {c.labels.get("com.docker.compose.service", "") for c in containers}
+        services.discard("")
+        if stop_list:
+            stop_services = set(stop_list)
+        else:
+            stop_services = services - keep
+        if should_run:
+            if last_state != "running":
+                logging.info("Healthwatch market wake: starting services=%s", sorted(stop_services))
+                _start_services(client, project, stop_services)
+                last_state = "running"
+        else:
+            if last_state != "stopped":
+                logging.info("Healthwatch market sleep: stopping services=%s", sorted(stop_services))
+                _stop_services(client, project, stop_services)
+                last_state = "stopped"
+        time.sleep(interval)
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -128,6 +210,8 @@ def main() -> None:
 
     thread = threading.Thread(target=_run_checks, args=(state, targets, interval, timeout), daemon=True)
     thread.start()
+    scheduler = threading.Thread(target=_run_market_scheduler, args=(cfg,), daemon=True)
+    scheduler.start()
 
     handler = _Handler
     handler.state = state

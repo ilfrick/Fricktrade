@@ -172,6 +172,7 @@ docker compose run --rm api
 - `news.provider: brokers` aggregates catalysts across enabled brokers (Alpaca-backed today).
 - Alerts are defined in `prometheus/alerts.yml` and a dedicated Grafana dashboard is provisioned for alerting/health.
 - Alertmanager handles email notifications via `alertmanager/alertmanager.yml`.
+- Healthwatch can optionally stop/start services around market hours via `healthwatch.market_shutdown.*`.
 - `market.open_mode` chooses whether any or all configured venues must be open to trade.
 - `market.venues[].holidays` is refreshed by `calendar-updater` (or can be edited manually).
 - `calendar-updater` refreshes holiday calendars weekly from online sources (NYSE, Nasdaq, Italy public holidays).
@@ -203,6 +204,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added optional healthwatch market-based stack sleep/wake control.
 - Added explicit logs when news catalyst refresh starts/completes.
 - Made news catalyst refresh async so the trader keeps running while Ollama updates.
 - Added a separate Grafana dashboard for strategy performance metrics.
