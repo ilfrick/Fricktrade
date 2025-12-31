@@ -11,6 +11,11 @@ ORDER_REJECTS = Counter(
     "Orders rejected by broker",
     ["broker", "symbol", "side", "code", "reason"],
 )
+PDT_BLOCKS = Counter(
+    "pdt_blocks_total",
+    "Orders blocked by PDT protection",
+    ["broker", "symbol", "side"],
+)
 PNL = Gauge("pnl_percent", "Current PnL percent")
 DRAWDOWN = Gauge("drawdown_percent", "Current drawdown percent")
 ACCOUNT_TOTAL = Gauge("account_total", "Account total equity")
@@ -31,6 +36,31 @@ ORCHESTRATOR_STRATEGY_ACTIVE = Gauge(
 ORCHESTRATOR_STRATEGY_SELECTED = Counter(
     "orchestrator_strategy_selected_total",
     "Total orchestrator selections by strategy",
+    ["strategy"],
+)
+STRATEGY_TRADES_REALIZED = Counter(
+    "strategy_trades_realized_total",
+    "Total realized trades by strategy",
+    ["strategy"],
+)
+STRATEGY_WIN_RATE = Gauge(
+    "strategy_win_rate",
+    "Rolling win rate for strategy",
+    ["strategy"],
+)
+STRATEGY_AVG_PNL_PCT = Gauge(
+    "strategy_avg_pnl_pct",
+    "Rolling average PnL percent for strategy",
+    ["strategy"],
+)
+STRATEGY_DRAWDOWN_PCT = Gauge(
+    "strategy_drawdown_pct",
+    "Rolling drawdown percent for strategy",
+    ["strategy"],
+)
+STRATEGY_DISABLED = Gauge(
+    "strategy_disabled",
+    "Strategy disabled by kill switch",
     ["strategy"],
 )
 OPEN_ORDERS = Gauge("open_orders", "Open orders", ["symbol", "side"])

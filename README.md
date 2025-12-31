@@ -178,6 +178,7 @@ See `docs/configuration.md` for full details.
 - Risk manager limits (loss caps, exposure, leverage)
 - Cool-down windows and stop logic
 - Fee-aware guardrails for RL strategy
+- Rolling strategy performance report and kill switch thresholds (`strategy.performance.*`)
 - Open-order guard and order-queue serialization
 
 ## Quick Start (Docker)
@@ -240,6 +241,9 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added Grafana panel for PDT blocks (day-trading protection).
+- Added rolling strategy performance reporting and kill switch thresholds.
+- Added PDT-protection block counter for broker-rejected orders.
 - Run Ollama as a docker service for news LLM gating.
 - Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day instead of raw days count.

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.brokers.base import Broker
-from app.monitoring.metrics import ORDER_REJECTS
+from app.monitoring.metrics import ORDER_REJECTS, PDT_BLOCKS
 
 
 @dataclass
@@ -140,6 +140,12 @@ class OrderQueue:
                 code=code,
                 reason=reason,
             ).inc()
+            if reason == "pdt_protection":
+                PDT_BLOCKS.labels(
+                    broker=self._broker_name,
+                    symbol=request.symbol,
+                    side=request.side,
+                ).inc()
             logging.warning(
                 "Queued order failed (%s %s qty=%s code=%s reason=%s): %s",
                 request.side,

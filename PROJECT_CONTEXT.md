@@ -4,11 +4,12 @@ This file captures the key state and workflows for this repo so a new Codex sess
 can reload context quickly. Keep it updated when the setup changes.
 
 ## Worktrees and Branches
-- Live worktree: `/path/to/Autotrader` on branch `v2.0`
+- Live worktree: `/path/to/Autotrader` on branch `v3.0`
 - Dev worktree: `/path/to/Autotrader/dev` on branch `master` (created via `git worktree`)
 
 ## Dev vs Live Intent
-- Live (v2.0) is running and trading.
+- Live (v3.0) is running and trading.
+- v2.0 is offline.
 - Dev is for development and backtesting only; no live broker credentials.
 - `dev/.env` exists and is based on `.env.example` with empty broker keys.
 
@@ -40,6 +41,9 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added Grafana panel for PDT blocks (day-trading protection).
+- Added PDT-protection block counter for broker-rejected orders.
+- Added rolling strategy performance reporting and kill switch thresholds.
 - Run Ollama as a docker service for news LLM gating.
 - Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day for intraday intervals.

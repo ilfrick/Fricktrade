@@ -149,6 +149,7 @@ docker compose run --rm api
 - Volatility targeting is configured under `risk.vol_targeting`.
 - AI strategy orchestration uses `orchestrator.*` to score strategies per symbol and select the top candidates each cycle. ML mode (`orchestrator.ml.enabled`) trains per bar with replay buffer + best-model checkpoints; default model is LSTM with `orchestrator.ml.seq_len`.
 - Fee-aware RL is available as `rl_policy_fees`, using broker-specific fee config under `brokers.<name>.fees` plus guardrails in `strategy.fee_aware`.
+- Strategy performance reporting + kill switch are configured under `strategy.performance.*` (rolling win rate/drawdown checks).
 - Orchestrator pretraining runs out-of-band by default (`orchestrator.ml.pretrain.in_trader: false`); use `python -m app.main pretrain-orchestrator` in Docker to warm-start the model.
 - Orchestrator learning persists per-strategy bias updates under `orchestrator.learning.state_path`, and checkpoints the best biases to `orchestrator.learning.best_state_path` for default loading.
 - Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
@@ -202,6 +203,9 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added Grafana panel for PDT blocks (day-trading protection).
+- Added PDT-protection block counter for broker-rejected orders.
+- Added rolling strategy performance reporting and kill switch thresholds.
 - Run Ollama as a docker service for news LLM gating.
 - Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day instead of raw days count.

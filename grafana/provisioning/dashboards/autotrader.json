@@ -595,6 +595,34 @@
         },
         "overrides": []
       }
+    },
+    {
+      "type": "timeseries",
+      "title": "PDT Blocks (5m)",
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum by (broker, side) (increase(pdt_blocks_total[5m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "axisPlacement": "auto",
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 30
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

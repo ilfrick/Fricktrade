@@ -149,6 +149,16 @@ strategy:
     min_edge_pct: 0.005
     edge_multiplier: 0.5
     min_notional: 50.0
+  performance:
+    enabled: true
+    window_days: 30
+    min_trades: 20
+    min_win_rate: 0.4
+    max_drawdown_pct: 12.0
+    report_interval_minutes: 10
+    report_path: /data/reports/strategy_performance.json
+    kill_switch:
+      enabled: true
   params:
     lookback_minutes: 10
     entry_threshold_pct: 0.5

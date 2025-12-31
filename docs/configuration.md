@@ -44,6 +44,7 @@ Centralize runtime settings for all subsystems.
   (`cash` limits by available cash; `risk` also caps to max position size).
 - News LLM catalyst gate: `news.llm.enabled` (Ollama service on `http://ollama:11434` by default).
 - Multi-broker news: `news.provider: brokers`.
+- Strategy performance reporting + kill switch: `strategy.performance.*`.
 - Online learning: `learning.online.enabled`.
 - Checkpointing: `checkpointing.enabled`.
 - Multi-broker routing: `execution.brokers.enabled`.
