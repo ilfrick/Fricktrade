@@ -18,6 +18,7 @@ Start here if you are new:
 
 Subsystem reference:
 - `trading-loop.md`
+- `agent_state_transitions.md`
 - `strategies.md`
 - `strategy_models.md`
 - `flow_trading_agent.md`

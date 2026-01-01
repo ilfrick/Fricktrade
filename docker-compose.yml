@@ -120,6 +120,7 @@ services:
       dockerfile: docker/Dockerfile
     volumes:
       - ./config:/app/config
+      - ./data:/data
       - /var/run/docker.sock:/var/run/docker.sock
     command: ["python", "-m", "app.monitoring.healthwatch", "--config", "/app/config/config.yaml"]
     expose:
