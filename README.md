@@ -144,11 +144,13 @@ flowchart LR
 - Offline RL training and online updates
 - GPU acceleration if available
 - Best-model selection via `learning.use_best_model`
+- Model registry snapshots and drift monitoring with auto rollback
 
 ### Monitoring & API
 - Prometheus metrics (`app/monitoring/metrics.py`)
-- Grafana dashboards for orders, positions, PnL, and account status
+- Grafana dashboards for orders, positions, PnL, account status, and latency
 - FastAPI `/health`, `/config`, `/config/update`, `/restart`, `/ui`
+- Audit and compliance logs (JSONL/CSV) for decision traces
 
 ### Resilience & Storage
 - Periodic checkpoints for trader/learner state (`checkpointing.*`)
@@ -196,6 +198,8 @@ Key config under `reports.daily_top_movers.*`:
 - Market-hours gating by venue
 - Per-symbol venue mapping (manual + broker refresh)
 - Risk manager limits (loss caps, exposure, leverage)
+- VaR/CVaR gating and exposure caps by venue/sector
+- Volatility-aware kill switch profiles
 - Cool-down windows and stop logic
 - Fee-aware guardrails for RL strategy
 - Rolling strategy performance report and kill switch thresholds (`strategy.performance.*`)
@@ -262,6 +266,12 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added audit/compliance decision logs and latency metrics + Grafana dashboard.
+- Added model registry metadata, drift detection, and auto-rollback to best RL model.
+- Added VaR/CVaR gating, exposure caps, and volatility-aware kill switch profiles.
+- Added market impact estimates, adaptive execution selection, and retry policy for queued orders.
+- Added OHLCV validation, split/dividend adjustments, and data quality reports for ingestion.
+- Added bootstrap CI, Monte Carlo stress, and buy/hold baseline to benchmarks.
 - Added benchmarking plots, regime tagging, scorecard metrics, and PDF summaries.
 - Added benchmark runner and documentation for walk-forward and stress tests.
 - Added Grafana panels for intraday signal metrics (percent + absolute).

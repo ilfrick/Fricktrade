@@ -8,6 +8,7 @@ Expose Prometheus metrics and Grafana dashboards.
 - Prometheus config: `prometheus/prometheus.yml`.
 - Grafana dashboards: `grafana/provisioning/dashboards/*.json`.
 - Latency dashboard: `grafana/provisioning/dashboards/autotrader_latency.json`.
+- Audit/compliance exports: `app/monitoring/audit.py`.
 
 ## Key Metrics
 - `trades_total`
@@ -21,6 +22,11 @@ Expose Prometheus metrics and Grafana dashboards.
 - `order_enqueue_latency_seconds`
 - `signal_return_30m_pct`, `signal_return_60m_pct`, `signal_early_volume_pct`
 - `signal_runup_pct`, `signal_drawdown_pct`, `signal_abs_move`, `signal_runup_abs`, `signal_drawdown_abs`
+
+## Audit & Compliance Logs
+- Audit logs capture full decision traces in JSONL for later replay.
+- Compliance exports can write JSONL and CSV summaries per day.
+- Enable via `monitoring.audit.enabled` and `monitoring.compliance.enabled`.
 
 ## Configuration
 `config/config.yaml`:

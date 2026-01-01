@@ -52,3 +52,8 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## Online Updates
 The learner service runs online updates when enabled:
 - `learning.online.enabled: true`
+
+## Governance
+- Training writes metadata + feature baselines into `learning.registry.path`.
+- Drift detection compares live features and rolling PnL against the baseline.
+- Auto rollback toggles `learning.use_best_model` when drift is detected.
