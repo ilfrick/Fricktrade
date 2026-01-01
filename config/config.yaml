@@ -500,6 +500,7 @@ healthwatch:
     - autoheal
     - daily-report
     - prometheus
+    - tests-when-closed
     stop_services: []
 kill_switch:
   armed: false

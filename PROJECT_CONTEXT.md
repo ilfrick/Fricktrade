@@ -41,6 +41,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Kept tests-when-closed running during market shutdown via healthwatch keep_services.
 - Phase 6: added decision audit logs, compliance exports, and latency dashboard metrics.
 - Phase 5: added model registry metadata, feature drift detection, and auto-rollback for RL policies.
 - Phase 4: added VaR/CVaR gating, exposure caps, and volatility-aware kill switch profiles.

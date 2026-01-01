@@ -72,6 +72,7 @@ Centralize runtime settings for all subsystems.
 - RL signal features: `learning.features.include_signal_features` and `learning.features.signal_interval`.
 - Benchmarks: `benchmarking.*` (walk-forward + stress scenarios, bootstrap CI, MC stress, output/plot/PDF paths).
 - Market-based stack sleep/wake: `healthwatch.market_shutdown.*` (stops services when markets are closed).
+- `healthwatch.market_shutdown.keep_services` should include `tests-when-closed` so closed-market tests can run.
 - Manual kill switches: `kill_switch.*` (force sleep or force liquidation with interlock).
 - Daily top movers report: `reports.daily_top_movers.*` (daily winners, email, training data export; includes `feed`).
 - Daily top movers signals/news: `reports.daily_top_movers.signal_thresholds.*` and `reports.daily_top_movers.news.*`.

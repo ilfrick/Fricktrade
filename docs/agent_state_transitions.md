@@ -35,11 +35,18 @@ stateDiagram-v2
 
     Running --> Sleeping: market closed + report done
     Running --> WaitingReport: market closed + report pending
-    WaitingReport --> Sleeping: report done
+    WaitingReport --> Sleeping: report done (stop non-keep services)
     Sleeping --> Running: next_open within start_before_minutes
     Running --> ForceSleep: kill_switch.force_sleep armed
     ForceSleep --> Sleeping: force_sleep cleared
 ```
+
+Keep services (default):
+- `healthwatch`
+- `autoheal`
+- `daily-report`
+- `prometheus`
+- `tests-when-closed`
 
 ## Tests-When-Closed Service
 

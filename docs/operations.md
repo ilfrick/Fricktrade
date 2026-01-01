@@ -14,6 +14,8 @@
 - Healthwatch probes core services and exposes Prometheus metrics.
 - Alerts fire if services are down or flapping.
 - Autoheal restarts containers that fail health checks.
+- `healthwatch.market_shutdown.keep_services` controls which services stay up when markets are closed.
+- `tests-when-closed` is kept running during market shutdown to execute its closed-market suite.
 
 ## Models and Artifacts
 - RL models: `/app/models` and `/data` (Docker volume).
