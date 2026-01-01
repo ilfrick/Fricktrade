@@ -206,6 +206,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Started top-tier Phase 0 planning for benchmark enhancements (bootstrap CI, MC stress, buy/hold baseline).
 - Added benchmarking plots, regime tagging, scorecard metrics, and PDF summaries.
 - Added benchmark runner and documentation for walk-forward and stress tests.
 - Added Grafana panels for intraday signal metrics (percent + absolute).

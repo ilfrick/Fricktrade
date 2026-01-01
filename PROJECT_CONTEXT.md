@@ -41,6 +41,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Started top-tier Phase 0 planning for benchmark enhancements (bootstrap CI, MC stress, buy/hold baseline).
 - Added benchmark scorecard metrics, regime tagging plots, and PDF summary output.
 - Updated benchmarking docs/config for new plots and PDF reports.
 - Rendered daily report emails as HTML and saved HTML bodies to disk.
