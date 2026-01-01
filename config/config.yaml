@@ -328,6 +328,14 @@ data:
   interval: 1m
   lookback_days: 7
   session_gain_mode: gap
+  quality:
+    enabled: true
+    report_path: /data/reports/data_quality.json
+    gap_multiplier: 3
+    outlier_zscore: 6
+  adjustments:
+    enabled: false
+    dir: /data/adjustments
   dynamic_symbols:
     enabled: true
     provider: alpaca

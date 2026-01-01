@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 
 from app.data.downloader import download_yfinance, download_alpaca_bars
+from app.data.quality import apply_adjustments, validate_ohlcv, write_quality_report
 from app.data.scanner import load_universe
 from app.brokers.config_utils import get_alpaca_account_cfg
 
@@ -78,6 +79,12 @@ def ingest_from_config(cfg: dict) -> list[Path]:
     sources = data_cfg.get("sources", [])
     output_dir = data_cfg.get("output_dir", cfg["backtest"]["data_dir"])
     files: list[Path] = []
+    quality_cfg = data_cfg.get("quality", {}) or {}
+    adjustments_cfg = data_cfg.get("adjustments", {}) or {}
+    quality_report: dict[str, object] = {
+        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "symbols": {},
+    }
 
     for source in sources:
         if not source.get("enabled", True):
@@ -146,4 +153,55 @@ def ingest_from_config(cfg: dict) -> list[Path]:
 
         logging.warning("Unknown data provider: %s", provider)
 
+    if files:
+        for file_path in files:
+            symbol, interval = _parse_symbol_interval(file_path)
+            if not symbol or not interval:
+                continue
+            df = _load_ohlcv(file_path)
+            adj_applied = False
+            adj_events = 0
+            if adjustments_cfg.get("enabled", False):
+                adj_dir = Path(adjustments_cfg.get("dir", "/data/adjustments"))
+                adj_path = adj_dir / f"{symbol}.csv"
+                if adj_path.exists():
+                    try:
+                        adj_df = pd.read_csv(adj_path)
+                        adj_events = len(adj_df.index)
+                        df = apply_adjustments(df, adj_df)
+                        adj_applied = True
+                        df.to_csv(file_path, index_label="Datetime")
+                    except Exception as exc:
+                        logging.warning("Adjustments failed for %s: %s", symbol, exc)
+            if quality_cfg.get("enabled", False):
+                result = validate_ohlcv(df, interval, quality_cfg)
+                quality_report["symbols"][symbol] = {
+                    "interval": interval,
+                    "file": str(file_path),
+                    "adjustments_applied": adj_applied,
+                    "adjustment_events": adj_events,
+                    **result,
+                }
+        if quality_cfg.get("enabled", False):
+            report_path = quality_cfg.get("report_path", "/data/reports/data_quality.json")
+            write_quality_report(quality_report, report_path)
+
     return files
+
+
+def _load_ohlcv(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path, parse_dates=[0])
+    df.rename(columns={df.columns[0]: "Datetime"}, inplace=True)
+    df["Datetime"] = pd.to_datetime(df["Datetime"], utc=True, errors="coerce")
+    df = df.dropna(subset=["Datetime"])
+    df["Datetime"] = df["Datetime"].dt.tz_convert(None)
+    return df.set_index("Datetime").sort_index()
+
+
+def _parse_symbol_interval(path: Path) -> tuple[str | None, str | None]:
+    name = path.stem
+    if "_" not in name:
+        return None, None
+    symbol, interval = name.rsplit("_", 1)
+    symbol = symbol.replace("_", ".")
+    return symbol, interval

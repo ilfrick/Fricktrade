@@ -14,6 +14,8 @@ Centralize runtime settings for all subsystems.
   - `market.symbol_venues` (manual symbol -> venue mapping)
   - `market.symbol_venues_auto` (auto-refresh mapping from broker)
 - `data.*` (symbols, dynamic scan, sources)
+- `data.quality.*` (OHLCV validation + data quality reports)
+- `data.adjustments.*` (optional split/dividend adjustment files)
 - `news.*`
 - `strategy.*`
 - `orchestrator.*` (including `orchestrator.mode` and `orchestrator.rl.*`)
@@ -39,6 +41,8 @@ Centralize runtime settings for all subsystems.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
 - Live market data provider: `data.provider` (yfinance, alpaca, or brokers).
 - AI filter: `data.dynamic_symbols.ai_filter.enabled`.
+- Data quality validation: `data.quality.enabled`.
+- Data adjustments: `data.adjustments.enabled`.
 - Multi-broker universe: `data.dynamic_symbols.universe: brokers_active`.
 - Universe price filter: `data.dynamic_symbols.universe_price_filter` (limits broker universe by price_min and cash cap).
 - Cash-aware cap: `data.dynamic_symbols.cash_aware` + `data.dynamic_symbols.cash_cap_mode`

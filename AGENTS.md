@@ -206,6 +206,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Phase 2: added OHLCV validation, split/dividend adjustments, and data quality reports for ingestion.
 - Phase 1: added bootstrap CI, Monte Carlo stress, buy/hold baseline to benchmarks; added backtest spread/slippage.
 - Started top-tier Phase 0 planning for benchmark enhancements (bootstrap CI, MC stress, buy/hold baseline).
 - Added benchmarking plots, regime tagging, scorecard metrics, and PDF summaries.

@@ -17,6 +17,8 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.symbols`
 - `data.output_dir`
 - `data.sources.*`
+- `data.quality.*` (OHLCV validation + per-symbol quality report)
+- `data.adjustments.*` (optional split/dividend adjustment files)
 - `data.dynamic_symbols.*`
 - `data.dynamic_symbols.universe` (`brokers_active` merges enabled broker universes with positions/orders)
 - `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap)
@@ -27,6 +29,8 @@ Acquire bars, scan symbols, and support AI filtering.
   - `news.provider: brokers` aggregates catalysts across enabled brokers (Alpaca-backed today)
   - `news.llm.*` enables optional Ollama catalyst gating per headline
 - Held positions and open-order symbols are always included in dynamic symbol results, even if scanner filters would exclude them.
+- When `data.adjustments.enabled` is true, ingestion looks for per-symbol adjustment files in
+  `data.adjustments.dir` named `<SYMBOL>.csv` with columns `Datetime`, `split_ratio`, and `dividend`.
 
 ## Ingest Example
 ```bash
