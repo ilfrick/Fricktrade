@@ -6,6 +6,7 @@ Enforce exposure, leverage, and safety limits before execution.
 ## Implementation
 - `app/risk/manager.py` enforces max exposure, leverage, and daily loss.
 - `app/agents/trader.py` enforces `trading_limits` and account flags.
+- `app/agents/trader.py` enforces VaR/CVaR limits, exposure caps, and kill switch profiles.
 
 ## Configuration
 `config/config.yaml`:
@@ -19,6 +20,21 @@ Enforce exposure, leverage, and safety limits before execution.
 - `risk.vol_targeting.target_vol_pct`
 - `risk.vol_targeting.min_scale`
 - `risk.vol_targeting.max_scale`
+- `risk.var.enabled`
+- `risk.var.window`
+- `risk.var.confidence`
+- `risk.var.max_var_pct`
+- `risk.var.max_cvar_pct`
+- `risk.exposure_caps.enabled`
+- `risk.exposure_caps.venues`
+- `risk.exposure_caps.sectors`
+- `risk.kill_switch_profiles.enabled`
+- `risk.kill_switch_profiles.mode`
+- `risk.kill_switch_profiles.current`
+- `risk.kill_switch_profiles.adaptive.low_vol_max_pct`
+- `risk.kill_switch_profiles.adaptive.high_vol_min_pct`
+- `risk.kill_switch_profiles.profiles.*`
+- `market.symbol_sectors`
 - `trading_limits.enabled`
 - `trading_limits.allow_shorts`
 - `trading_limits.blocked_symbols`
@@ -32,3 +48,6 @@ Enforce exposure, leverage, and safety limits before execution.
 - Lower `max_position_size_pct` for more diversified risk.
 - Tighten `hard_stop_pct` and `trailing_stop_pct` for faster exits.
 - Use `trading_limits.allow_shorts: false` to block shorts.
+- Use `risk.var.*` to block new entries when tail risk grows.
+- Configure `risk.exposure_caps.*` to limit per-venue or per-sector concentration.
+- Use `risk.kill_switch_profiles` with `mode: adaptive` to tighten risk in high-volatility regimes.

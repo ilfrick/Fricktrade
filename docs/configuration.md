@@ -13,6 +13,7 @@ Centralize runtime settings for all subsystems.
   - `market.default_symbol_venue` (fallback venue for unmapped symbols)
   - `market.symbol_venues` (manual symbol -> venue mapping)
   - `market.symbol_venues_auto` (auto-refresh mapping from broker)
+  - `market.symbol_sectors` (symbol -> sector mapping for exposure caps)
 - `data.*` (symbols, dynamic scan, sources)
 - `data.quality.*` (OHLCV validation + data quality reports)
 - `data.adjustments.*` (optional split/dividend adjustment files)
@@ -60,6 +61,9 @@ Centralize runtime settings for all subsystems.
 - Impact model: `execution.impact.*`.
 - Retry policy: `execution.retry.*`.
 - Volatility targeting: `risk.vol_targeting.enabled`.
+- VaR/CVaR gating: `risk.var.enabled`.
+- Exposure caps: `risk.exposure_caps.enabled`.
+- Kill switch profiles: `risk.kill_switch_profiles.enabled`.
 - Signal bias guard: `strategy.signal_bias_guard.*` (blocks counter-trend actions).
 - RL signal features: `learning.features.include_signal_features` and `learning.features.signal_interval`.
 - Benchmarks: `benchmarking.*` (walk-forward + stress scenarios, bootstrap CI, MC stress, output/plot/PDF paths).

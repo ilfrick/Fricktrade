@@ -130,6 +130,11 @@ class TradingAgent:
         self._day_start_date = None
         self._day_start_equity: float | None = None
         self._current_drawdown_pct = 0.0
+        self._equity_history: list[float] = []
+        self._equity_history_by_broker: dict[str, list[float]] = {}
+        self._var_cvar: dict[str, float] = {}
+        self._var_cvar_by_broker: dict[str, dict[str, float]] = {}
+        self._active_kill_switch_profile: str | None = None
         self._checkpoint_at: datetime | None = None
         self._kill_switch_liquidated = False
         self._kill_switch_warned = False
@@ -426,6 +431,7 @@ class TradingAgent:
         trace = self._init_decision_trace(symbol, market_state)
         if self._kill_switch_liquidated:
             return None
+        self._apply_kill_switch_profile(market_state)
         if self.risk.should_circuit_break(self._current_drawdown_pct):
             SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="circuit_breaker").inc()
             logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
@@ -558,6 +564,12 @@ class TradingAgent:
             logging.info("Skipping %s for %s: account blocked", action, symbol)
             self._emit_decision_trace(trace, "skip", "account_blocked", "account")
             return None
+        var_reason = self._var_limit_reason(broker_name)
+        if var_reason:
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=var_reason).inc()
+            logging.info("Skipping %s for %s: %s", action, symbol, var_reason)
+            self._emit_decision_trace(trace, "skip", var_reason, "risk")
+            return None
         can_short = True
         if action == "sell":
             positions = portfolio.get("positions", {})
@@ -582,6 +594,11 @@ class TradingAgent:
                 SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=skip_reason).inc()
                 logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
                 self._emit_decision_trace(trace, "skip", str(skip_reason), "sizing")
+            return None
+        if self._violates_exposure_caps(symbol, action, qty, last_price, portfolio):
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="exposure_cap").inc()
+            logging.info("Skipping %s for %s: exposure caps exceeded", action, symbol)
+            self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
             return None
         if self._violates_order_limits(symbol, action, qty, last_price):
             SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_limit").inc()
@@ -1078,6 +1095,124 @@ class TradingAgent:
         if self._day_start_equity:
             day_pnl_pct = (total_val - self._day_start_equity) / self._day_start_equity * 100.0
             self.risk.update_daily_loss(day_pnl_pct)
+        self._update_var_cvar(total_val, account)
+
+    def _update_var_cvar(self, total_val: float, account: dict) -> None:
+        var_cfg = self.cfg.get("risk", {}).get("var", {}) or {}
+        if not var_cfg.get("enabled", False):
+            return
+        window = int(var_cfg.get("window", 60))
+        confidence = float(var_cfg.get("confidence", 0.95))
+        self._equity_history.append(total_val)
+        if len(self._equity_history) > window:
+            self._equity_history = self._equity_history[-window:]
+        self._var_cvar = _var_cvar_from_history(self._equity_history, confidence)
+        brokers = account.get("brokers") if isinstance(account, dict) else None
+        if isinstance(brokers, dict):
+            for name, details in brokers.items():
+                equity = float(details.get("equity") or 0.0)
+                history = self._equity_history_by_broker.get(name, [])
+                history.append(equity)
+                if len(history) > window:
+                    history = history[-window:]
+                self._equity_history_by_broker[name] = history
+                self._var_cvar_by_broker[name] = _var_cvar_from_history(history, confidence)
+
+    def _var_limit_reason(self, broker_name: str) -> str | None:
+        var_cfg = self.cfg.get("risk", {}).get("var", {}) or {}
+        if not var_cfg.get("enabled", False):
+            return None
+        max_var = float(var_cfg.get("max_var_pct", 0.0) or 0.0)
+        max_cvar = float(var_cfg.get("max_cvar_pct", 0.0) or 0.0)
+        if max_var and self._var_cvar.get("var_pct", 0.0) > max_var:
+            return "var_limit"
+        if max_cvar and self._var_cvar.get("cvar_pct", 0.0) > max_cvar:
+            return "cvar_limit"
+        broker_stats = self._var_cvar_by_broker.get(broker_name, {})
+        if max_var and broker_stats.get("var_pct", 0.0) > max_var:
+            return "var_limit_broker"
+        if max_cvar and broker_stats.get("cvar_pct", 0.0) > max_cvar:
+            return "cvar_limit_broker"
+        return None
+
+    def _violates_exposure_caps(self, symbol: str, action: str, qty: int, last_price: float, portfolio: dict) -> bool:
+        caps_cfg = self.cfg.get("risk", {}).get("exposure_caps", {}) or {}
+        if not caps_cfg.get("enabled", False):
+            return False
+        if action not in ("buy", "sell"):
+            return False
+        delta = qty * last_price
+        positions = portfolio.get("positions", {})
+        current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
+        if action == "sell" and current_qty > 0:
+            delta = -min(delta, current_qty * last_price)
+        venue_caps = caps_cfg.get("venues", {}) or {}
+        sector_caps = caps_cfg.get("sectors", {}) or {}
+        equity = float(portfolio.get("equity", 0.0) or 0.0)
+        if equity <= 0:
+            return False
+        if venue_caps:
+            exposure = _group_exposure(portfolio, self._symbol_venue)
+            venue = self._symbol_venue(symbol)
+            if venue:
+                exposure[venue] = exposure.get(venue, 0.0) + abs(delta)
+            for venue_name, cap in venue_caps.items():
+                if exposure.get(venue_name, 0.0) / equity * 100.0 > float(cap):
+                    return True
+        if sector_caps:
+            exposure = _group_exposure(portfolio, self._symbol_sector)
+            sector = self._symbol_sector(symbol)
+            if sector:
+                exposure[sector] = exposure.get(sector, 0.0) + abs(delta)
+            for sector_name, cap in sector_caps.items():
+                if exposure.get(sector_name, 0.0) / equity * 100.0 > float(cap):
+                    return True
+        return False
+
+    def _symbol_venue(self, symbol: str) -> str | None:
+        venue = self._symbol_venues.get(symbol)
+        if venue:
+            return venue
+        market_cfg = self.cfg.get("market", {})
+        return market_cfg.get("default_symbol_venue") or market_cfg.get("venue")
+
+    def _symbol_sector(self, symbol: str) -> str | None:
+        market_cfg = self.cfg.get("market", {})
+        sector_map = market_cfg.get("symbol_sectors", {}) or {}
+        return sector_map.get(symbol)
+
+    def _apply_kill_switch_profile(self, market_state: dict) -> None:
+        profile_cfg = self.cfg.get("risk", {}).get("kill_switch_profiles", {}) or {}
+        if not profile_cfg.get("enabled", False):
+            return
+        mode = str(profile_cfg.get("mode", "static"))
+        profiles = profile_cfg.get("profiles", {}) or {}
+        if not profiles:
+            return
+        name = profile_cfg.get("current")
+        if mode == "adaptive":
+            name = self._select_profile_name(profile_cfg, market_state)
+        if not name or name not in profiles:
+            return
+        if self._active_kill_switch_profile == name:
+            return
+        updates = profiles.get(name, {}) or {}
+        risk_cfg = self.cfg.get("risk", {})
+        for key, value in updates.items():
+            risk_cfg[key] = value
+        self._active_kill_switch_profile = name
+        logging.info("Kill switch profile set to %s", name)
+
+    def _select_profile_name(self, profile_cfg: dict, market_state: dict) -> str | None:
+        adaptive = profile_cfg.get("adaptive", {}) or {}
+        low_max = float(adaptive.get("low_vol_max_pct", 1.0))
+        high_min = float(adaptive.get("high_vol_min_pct", 3.0))
+        vol = _realized_volatility_pct(market_state)
+        if vol <= low_max:
+            return "low"
+        if vol >= high_min:
+            return "high"
+        return "medium"
 
     def _update_position_metrics(self, portfolio: dict) -> None:
         positions = portfolio.get("positions", {})
@@ -2222,3 +2357,53 @@ def _dt_from_str(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value)
     except Exception:
         return None
+
+
+def _var_cvar_from_history(history: list[float], confidence: float) -> dict[str, float]:
+    if len(history) < 2:
+        return {"var_pct": 0.0, "cvar_pct": 0.0}
+    returns = []
+    for idx in range(1, len(history)):
+        prev = history[idx - 1]
+        curr = history[idx]
+        if not prev:
+            continue
+        returns.append((curr - prev) / prev * 100.0)
+    if not returns:
+        return {"var_pct": 0.0, "cvar_pct": 0.0}
+    returns = sorted(returns)
+    cutoff = max(int((1.0 - confidence) * len(returns)) - 1, 0)
+    var_val = returns[cutoff]
+    tail = [r for r in returns if r <= var_val]
+    cvar_val = sum(tail) / len(tail) if tail else var_val
+    return {"var_pct": abs(var_val), "cvar_pct": abs(cvar_val)}
+
+
+def _group_exposure(portfolio: dict, mapper) -> dict[str, float]:
+    positions = portfolio.get("positions", {})
+    exposure: dict[str, float] = {}
+    for symbol, pos in positions.items():
+        group = mapper(symbol)
+        if not group:
+            continue
+        value = abs(float(pos.get("value", 0.0) or 0.0))
+        exposure[group] = exposure.get(group, 0.0) + value
+    return exposure
+
+
+def _realized_volatility_pct(market_state: dict) -> float:
+    prices = market_state.get("prices", []) or []
+    if len(prices) < 3:
+        return 0.0
+    returns = []
+    for idx in range(1, len(prices)):
+        prev = prices[idx - 1]
+        curr = prices[idx]
+        if not prev:
+            continue
+        returns.append((curr - prev) / prev)
+    if not returns:
+        return 0.0
+    mean = sum(returns) / len(returns)
+    var = sum((r - mean) ** 2 for r in returns) / max(len(returns) - 1, 1)
+    return (var**0.5) * 100.0

@@ -206,6 +206,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Phase 4: added VaR/CVaR gating, exposure caps, and volatility-aware kill switch profiles.
 - Phase 3: added market impact estimates, adaptive execution selection, and retry policy for queued orders.
 - Phase 2: added OHLCV validation, split/dividend adjustments, and data quality reports for ingestion.
 - Phase 1: added bootstrap CI, Monte Carlo stress, buy/hold baseline to benchmarks; added backtest spread/slippage.

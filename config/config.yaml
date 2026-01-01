@@ -12,6 +12,7 @@ market:
   default_currency: EUR
   default_symbol_venue: NYSE
   symbol_venues: {}
+  symbol_sectors: {}
   symbol_venues_auto:
     enabled: true
     refresh_minutes: 1440
@@ -129,6 +130,33 @@ risk:
     target_vol_pct: 2.0
     min_scale: 0.5
     max_scale: 1.5
+  var:
+    enabled: true
+    window: 60
+    confidence: 0.95
+    max_var_pct: 3.0
+    max_cvar_pct: 5.0
+  exposure_caps:
+    enabled: false
+    venues: {}
+    sectors: {}
+  kill_switch_profiles:
+    enabled: false
+    mode: static
+    current: medium
+    adaptive:
+      low_vol_max_pct: 1.0
+      high_vol_min_pct: 3.0
+    profiles:
+      low:
+        max_daily_loss_pct: 1.0
+        circuit_breaker_drawdown_pct: 4.0
+      medium:
+        max_daily_loss_pct: 2.0
+        circuit_breaker_drawdown_pct: 6.0
+      high:
+        max_daily_loss_pct: 3.0
+        circuit_breaker_drawdown_pct: 8.0
 trading_limits:
   enabled: true
   allow_shorts: false
