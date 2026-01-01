@@ -41,6 +41,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Phase 3: added market impact estimates, adaptive execution selection, and retry policy for queued orders.
 - Phase 2: added OHLCV validation, split/dividend adjustments, and data quality reports for ingestion.
 - Phase 1: added bootstrap CI, Monte Carlo stress, buy/hold baseline to benchmarks; added backtest spread/slippage.
 - Started top-tier Phase 0 planning for benchmark enhancements (bootstrap CI, MC stress, buy/hold baseline).

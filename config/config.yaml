@@ -555,6 +555,11 @@ execution:
     enabled: true
     default: twap
     min_notional: 500.0
+    adaptive:
+      enabled: true
+      impact_bps_thresholds:
+        vwap: 4
+        pov: 8
     twap:
       duration_seconds: 120
       slices: 4
@@ -568,6 +573,16 @@ execution:
     pov:
       max_participation: 0.1
       estimated_volume: 100000
+  impact:
+    base_bps: 1.0
+    volume_scale_bps: 50.0
+    min_vol_pct: 0.5
+  retry:
+    enabled: true
+    max_attempts: 2
+    backoff_seconds: 10
+    max_notional: 5000
+    reasons: [unknown, insufficient_funds]
   brokers:
     enabled: false
     routing:

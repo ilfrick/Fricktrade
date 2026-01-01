@@ -35,3 +35,34 @@ def test_order_queue_fifo() -> None:
     responses = queue.pop_responses()
     if not submitted:
         assert any(r.status == "submitted" for r in responses)
+
+
+def test_order_queue_retry() -> None:
+    class _FlakyBroker:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.orders = []
+
+        def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise Exception("temporary failure")
+            order_id = f"order-{len(self.orders) + 1}"
+            self.orders.append({"order_id": order_id, "symbol": symbol, "side": side, "qty": qty})
+            return order_id
+
+    broker = _FlakyBroker()
+    retry_cfg = {
+        "enabled": True,
+        "max_attempts": 1,
+        "backoff_seconds": 0,
+        "max_notional": 0,
+        "reasons": ["unknown"],
+    }
+    queue = OrderQueue(broker, "alpaca", retry_cfg)
+    queue.enqueue("AAA", "buy", 1, notional=100)
+    responses = queue.pop_responses()
+    assert any(r.status == "retrying" for r in responses)
+    queue.update([])
+    responses = queue.pop_responses()
+    assert any(r.status == "submitted" for r in responses)

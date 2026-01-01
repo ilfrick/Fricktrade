@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from app.execution.executor import ExecutionEngine
 from app.execution.order_queue import OrderQueue
 from app.execution.algos import pov_slices, twap_slices, vwap_slices
+from app.execution.impact import estimate_market_impact
 from app.monitoring.metrics import (
     TRADES,
     SKIPPED_ORDERS,
@@ -85,7 +86,8 @@ class TradingAgent:
         self._broker_map = self._resolve_broker_map()
         self._broker_names = list(self._broker_map.keys())
         self._broker_name = self._resolve_default_broker_name()
-        self._order_queues = {name: OrderQueue(item, name) for name, item in self._broker_map.items()}
+        retry_cfg = cfg.get("execution", {}).get("retry", {})
+        self._order_queues = {name: OrderQueue(item, name, retry_cfg) for name, item in self._broker_map.items()}
         self._order_queue = self._order_queues.get(self._broker_name)
         self._last_market_open = None
         self._started_at = datetime.utcnow()
@@ -281,6 +283,19 @@ class TradingAgent:
         if notional < min_notional:
             return []
         name = algo_name or str(algo_cfg.get("default", "twap"))
+        adaptive_cfg = algo_cfg.get("adaptive", {}) or {}
+        if algo_name is None and adaptive_cfg.get("enabled", False):
+            impact_cfg = self.cfg.get("execution", {}).get("impact", {}) or {}
+            impact = estimate_market_impact(notional, last_price, market_state, impact_cfg)
+            thresholds = adaptive_cfg.get("impact_bps_thresholds", {}) or {}
+            vwap_threshold = float(thresholds.get("vwap", 4.0))
+            pov_threshold = float(thresholds.get("pov", 8.0))
+            if impact.impact_bps >= pov_threshold:
+                name = "pov"
+            elif impact.impact_bps >= vwap_threshold:
+                name = "vwap"
+            else:
+                name = "twap"
         if name == "twap":
             duration = int(algo_cfg.get("twap", {}).get("duration_seconds", 120))
             slices = int(algo_cfg.get("twap", {}).get("slices", 4))
@@ -606,6 +621,7 @@ class TradingAgent:
         if order_type == "market" and algo_label not in {"none", "off"}:
             slices = self._plan_execution(action, qty, last_price, market_state, algo_name)
 
+        order_notional = qty * last_price
         order_queue = self._order_queues.get(broker_name, self._order_queue)
         if slices:
             order_id = None
@@ -617,6 +633,7 @@ class TradingAgent:
                     order_type=order_type,
                     limit_price=limit_price,
                     earliest_at=order_slice.earliest_at,
+                    notional=order_slice.qty * last_price,
                 )
         else:
             order_id = order_queue.enqueue(
@@ -625,6 +642,7 @@ class TradingAgent:
                 qty=qty,
                 order_type=order_type,
                 limit_price=limit_price,
+                notional=order_notional,
             )
         if action == "buy":
             strategy_label = action_strategy or (names[0] if names else None)

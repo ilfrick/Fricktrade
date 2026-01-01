@@ -1,7 +1,7 @@
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.brokers.base import Broker
 from app.monitoring.metrics import ORDER_REJECTS, PDT_BLOCKS
@@ -17,6 +17,8 @@ class OrderRequest:
     earliest_at: datetime = field(default_factory=datetime.utcnow)
     created_at: datetime = field(default_factory=datetime.utcnow)
     order_id: str | None = None
+    attempts: int = 0
+    notional: float | None = None
 
 
 @dataclass
@@ -33,14 +35,16 @@ class OrderResponse:
 
 
 class OrderQueue:
-    def __init__(self, broker: Broker, broker_name: str):
+    def __init__(self, broker: Broker, broker_name: str, retry_cfg: dict | None = None):
         self._broker = broker
         self._broker_name = broker_name
+        self._retry_cfg = retry_cfg or {}
         self._queue: list[OrderRequest] = []
         self._active: OrderRequest | None = None
         self._active_snapshot: dict | None = None
         self._cancel_requested: set[str] = set()
         self._responses: list[OrderResponse] = []
+        self._retry_notional_used = 0.0
 
     def enqueue(
         self,
@@ -50,6 +54,7 @@ class OrderQueue:
         order_type: str = "market",
         limit_price: float | None = None,
         earliest_at: datetime | None = None,
+        notional: float | None = None,
     ) -> str | None:
         request = OrderRequest(
             symbol=symbol,
@@ -58,6 +63,7 @@ class OrderQueue:
             order_type=order_type,
             limit_price=limit_price,
             earliest_at=earliest_at or datetime.utcnow(),
+            notional=notional,
         )
         self._queue.append(request)
         self._queue.sort(key=lambda r: r.earliest_at)
@@ -133,6 +139,19 @@ class OrderQueue:
             except Exception:
                 pass
             reason = _reject_reason(code, exc)
+            if self._should_retry(request, reason):
+                self._enqueue_retry(request)
+                self._responses.append(
+                    OrderResponse(
+                        symbol=request.symbol,
+                        broker=self._broker_name,
+                        status="retrying",
+                        order_id=None,
+                        side=request.side,
+                        qty=request.qty,
+                    )
+                )
+                return
             ORDER_REJECTS.labels(
                 broker=self._broker_name,
                 symbol=request.symbol,
@@ -197,6 +216,34 @@ class OrderQueue:
             "filled_qty": snapshot.get("filled_qty"),
             "filled_avg_price": snapshot.get("filled_avg_price"),
         }
+
+    def _should_retry(self, request: OrderRequest, reason: str) -> bool:
+        if not self._retry_cfg.get("enabled", False):
+            return False
+        max_attempts = int(self._retry_cfg.get("max_attempts", 0))
+        if max_attempts <= 0:
+            return False
+        if request.attempts >= max_attempts:
+            return False
+        allowed = self._retry_cfg.get("reasons", [])
+        if isinstance(allowed, list) and allowed:
+            if reason not in {str(item) for item in allowed}:
+                return False
+        max_notional = float(self._retry_cfg.get("max_notional", 0.0) or 0.0)
+        notional = float(request.notional or 0.0)
+        if max_notional > 0 and (self._retry_notional_used + notional) > max_notional:
+            return False
+        return True
+
+    def _enqueue_retry(self, request: OrderRequest) -> None:
+        request.attempts += 1
+        backoff = int(self._retry_cfg.get("backoff_seconds", 5))
+        request.earliest_at = datetime.utcnow() + timedelta(seconds=backoff * request.attempts)
+        notional = float(request.notional or 0.0)
+        if notional > 0:
+            self._retry_notional_used += notional
+        self._queue.append(request)
+        self._queue.sort(key=lambda r: r.earliest_at)
 
 
 def _reject_reason(code: str, exc: Exception) -> str:

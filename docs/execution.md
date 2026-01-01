@@ -17,9 +17,12 @@ Place, cancel, and close orders through the active broker.
 - `execution.algos.enabled`
 - `execution.algos.default`
 - `execution.algos.min_notional`
+- `execution.algos.adaptive.*`
 - `execution.algos.twap.*`
 - `execution.algos.vwap.*`
 - `execution.algos.pov.*`
+- `execution.impact.*`
+- `execution.retry.*`
 
 ## Order Flow
 1) Strategy signal -> orchestrator selection.
