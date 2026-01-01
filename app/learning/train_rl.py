@@ -9,8 +9,10 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from app.learning.data import load_csv_data
+from app.learning.drift import compute_feature_stats
 from app.learning.env import TradingEnv
 from app.learning.evaluate import evaluate_model
+from app.learning.registry import register_model
 
 
 def train_from_config(cfg: dict, resume: bool | None = None) -> str:
@@ -36,6 +38,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     datasets = load_csv_data(data_dir, interval=interval)
     envs = []
     eval_sets = []
+    train_sets = []
     for df in datasets:
         split_idx = int(len(df) * (1.0 - eval_split))
         train_df = df.iloc[:split_idx] if split_idx > 0 else df
@@ -52,6 +55,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
             )
         )
         eval_sets.append(eval_df)
+        train_sets.append(train_df)
     vec_env = DummyVecEnv(envs)
 
     if resume and Path(model_path).exists():
@@ -86,6 +90,36 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
         best_report_file.parent.mkdir(parents=True, exist_ok=True)
         best_report_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
         logging.info("Updated best model: %s", best_model_file)
+    registry_cfg = learning_cfg.get("registry", {}) or {}
+    if registry_cfg.get("enabled", True):
+        drift_cfg = learning_cfg.get("drift", {}) or {}
+        stats = {}
+        if drift_cfg.get("baseline_enabled", True):
+            stats = compute_feature_stats(
+                train_sets,
+                window_size=window_size,
+                feature_config=feature_config,
+                max_samples=int(drift_cfg.get("baseline_max_samples", 5000)),
+                stride=int(drift_cfg.get("baseline_stride", 5)),
+            )
+        metadata = {
+            "window_size": window_size,
+            "timesteps": timesteps,
+            "eval_split": eval_split,
+            "interval": interval,
+            "device": device,
+            "feature_config": feature_config,
+        }
+        register_model(
+            model_path=model_path,
+            best_model_path=best_model_path,
+            report=report,
+            registry_path=str(registry_cfg.get("path", "/app/models/model_registry.json")),
+            feature_stats=stats,
+            metadata=metadata,
+            artifact_dir=registry_cfg.get("artifact_dir"),
+            artifact_prefix=str(registry_cfg.get("artifact_prefix", "ppo_policy")),
+        )
     return str(output_path)
 
 

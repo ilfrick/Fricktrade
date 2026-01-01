@@ -57,6 +57,8 @@ from app.strategies.market_maker import MarketMakerStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols_for_config
 from app.data.scanner import ScanFilters, filter_universe_by_price, load_symbol_venues, load_universe, scan_symbols
+from app.learning.drift import DriftMonitor
+from app.learning.registry import load_latest_feature_stats
 from app.brokers.config_utils import get_alpaca_account_cfg
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 try:
@@ -125,6 +127,10 @@ class TradingAgent:
         trace_cfg = report_cfg.get("decision_trace", {}) or {}
         self._decision_trace_enabled = bool(trace_cfg.get("enabled", True))
         self._decision_trace_dir = str(trace_cfg.get("output_dir", "/data/reports/decision_trace"))
+        self._drift_monitor: DriftMonitor | None = None
+        self._drift_auto_rollback = False
+        self._drift_rollback_done = False
+        self._init_drift_monitor()
         self._equity_start: float | None = None
         self._equity_peak: float | None = None
         self._day_start_date = None
@@ -178,6 +184,7 @@ class TradingAgent:
                         window_size=window_size,
                         device=device,
                         feature_config=feature_config,
+                        drift_monitor=self._drift_monitor,
                     )
                 except FileNotFoundError as exc:
                     logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
@@ -197,6 +204,7 @@ class TradingAgent:
                         window_size=window_size,
                         device=device,
                         feature_config=feature_config,
+                        drift_monitor=self._drift_monitor,
                         broker_fees=broker_fees,
                         fee_guard=fee_guard,
                         risk_cfg=risk_cfg,
@@ -227,6 +235,25 @@ class TradingAgent:
             return model_path
         best_path = self.learning_cfg.get("best_model_path", "/app/models/ppo_policy_best.zip")
         return best_path if Path(best_path).exists() else model_path
+
+    def _init_drift_monitor(self) -> None:
+        drift_cfg = self.learning_cfg.get("drift", {}) or {}
+        if not drift_cfg.get("enabled", False):
+            return
+        registry_cfg = self.learning_cfg.get("registry", {}) or {}
+        registry_path = str(registry_cfg.get("path", "/app/models/model_registry.json"))
+        baseline = load_latest_feature_stats(registry_path)
+        if not baseline:
+            logging.warning("Drift monitor enabled but no feature baseline found at %s", registry_path)
+        self._drift_monitor = DriftMonitor(
+            baseline_stats=baseline,
+            window=int(drift_cfg.get("window", 120)),
+            feature_zscore_threshold=float(drift_cfg.get("feature_zscore_threshold", 3.0)),
+            max_drift_feature_pct=float(drift_cfg.get("max_drift_feature_pct", 0.3)),
+            pnl_window=int(drift_cfg.get("pnl_window", 30)),
+            max_pnl_drop_pct=float(drift_cfg.get("max_pnl_drop_pct", 2.0)),
+        )
+        self._drift_auto_rollback = bool(drift_cfg.get("auto_rollback", True))
 
     def _build_guardrail(self, params: dict):
         guard_cfg = self.learning_cfg.get("guardrail", {})
@@ -1095,7 +1122,32 @@ class TradingAgent:
         if self._day_start_equity:
             day_pnl_pct = (total_val - self._day_start_equity) / self._day_start_equity * 100.0
             self.risk.update_daily_loss(day_pnl_pct)
+            self._update_drift_monitor(day_pnl_pct)
         self._update_var_cvar(total_val, account)
+
+    def _update_drift_monitor(self, day_pnl_pct: float) -> None:
+        if not self._drift_monitor:
+            return
+        self._drift_monitor.update_pnl(day_pnl_pct)
+        reasons = self._drift_monitor.check_drift()
+        if reasons:
+            self._handle_drift(reasons)
+
+    def _handle_drift(self, reasons: list[str]) -> None:
+        if self._drift_rollback_done or not self._drift_auto_rollback:
+            return
+        self.learning_cfg["use_best_model"] = True
+        self._reload_rl_strategies()
+        self._drift_rollback_done = True
+        logging.warning("Drift detected (%s). Reloaded RL policies using best model.", ", ".join(reasons))
+
+    def _reload_rl_strategies(self) -> None:
+        for symbol, strategies in list(self._strategy_by_symbol.items()):
+            for name in list(strategies.keys()):
+                if name in {"rl_policy", "rl_policy_fees"}:
+                    del strategies[name]
+            if not strategies:
+                del self._strategy_by_symbol[symbol]
 
     def _update_var_cvar(self, total_val: float, account: dict) -> None:
         var_cfg = self.cfg.get("risk", {}).get("var", {}) or {}

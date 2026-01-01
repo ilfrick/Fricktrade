@@ -52,6 +52,8 @@ Centralize runtime settings for all subsystems.
 - Multi-broker news: `news.provider: brokers`.
 - Strategy performance reporting + kill switch: `strategy.performance.*`.
 - Online learning: `learning.online.enabled`.
+- Model registry: `learning.registry.enabled`.
+- Drift monitoring: `learning.drift.enabled`.
 - Checkpointing: `checkpointing.enabled`.
 - Multi-broker routing: `execution.brokers.enabled`.
 - Multi-account env auto-detect: `ALPACA_API_KEYS`/`ALPACA_API_SECRETS` or `ALPACA_API_KEY_1` +

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from typing import TYPE_CHECKING
 from pathlib import Path
 from stable_baselines3 import PPO
 
 from app.learning.features import build_observation
 from app.strategies.base import Strategy
+
+if TYPE_CHECKING:
+    from app.learning.drift import DriftMonitor
 
 
 class RLPolicyStrategy(Strategy):
@@ -16,11 +20,13 @@ class RLPolicyStrategy(Strategy):
         window_size: int = 50,
         device: str = "auto",
         feature_config: dict | None = None,
+        drift_monitor: "DriftMonitor | None" = None,
     ):
         self.window_size = window_size
         self.device = _resolve_device(device)
         self.model_path = model_path
         self.feature_config = feature_config or {}
+        self._drift_monitor = drift_monitor
         self.model = None
         self.position = 0.0
         self.prices = deque(maxlen=window_size * 4)
@@ -61,6 +67,8 @@ class RLPolicyStrategy(Strategy):
             cash_pct=1.0,
             feature_config=self.feature_config,
         )
+        if self._drift_monitor:
+            self._drift_monitor.update_features(obs)
         action, _ = self.model.predict(obs, deterministic=True)
         action = int(action)
 

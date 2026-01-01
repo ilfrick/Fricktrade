@@ -10,11 +10,18 @@ class FeeAwareRLPolicyStrategy(RLPolicyStrategy):
         window_size: int = 50,
         device: str = "auto",
         feature_config: dict | None = None,
+        drift_monitor=None,
         broker_fees: dict | None = None,
         fee_guard: dict | None = None,
         risk_cfg: dict | None = None,
     ):
-        super().__init__(model_path, window_size=window_size, device=device, feature_config=feature_config)
+        super().__init__(
+            model_path,
+            window_size=window_size,
+            device=device,
+            feature_config=feature_config,
+            drift_monitor=drift_monitor,
+        )
         self.broker_fees = broker_fees or {}
         self.fee_guard = fee_guard or {}
         self.risk_cfg = risk_cfg or {}

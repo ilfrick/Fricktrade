@@ -283,6 +283,22 @@ learning:
     - 10
     rsi_periods:
     - 14
+  registry:
+    enabled: true
+    path: /app/models/model_registry.json
+    artifact_dir: /app/models/registry
+    artifact_prefix: ppo_policy
+  drift:
+    enabled: false
+    window: 120
+    feature_zscore_threshold: 3.0
+    max_drift_feature_pct: 0.3
+    pnl_window: 30
+    max_pnl_drop_pct: 2.0
+    auto_rollback: true
+    baseline_enabled: true
+    baseline_max_samples: 5000
+    baseline_stride: 5
   guardrail:
     enabled: true
     mode: confirm

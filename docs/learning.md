@@ -8,6 +8,8 @@ Train and evaluate RL policies, and support online updates.
 - Online updates: `app/learning/online_update.py`.
 - Evaluation: `app/learning/evaluate.py`.
 - Features: `app/learning/features.py`.
+- Registry: `app/learning/registry.py`.
+- Drift monitoring: `app/learning/drift.py`.
 
 ## Configuration
 `config/config.yaml`:
@@ -18,6 +20,20 @@ Train and evaluate RL policies, and support online updates.
 - `learning.model_path`
 - `learning.best_model_path`
 - `learning.use_best_model`
+- `learning.registry.enabled`
+- `learning.registry.path`
+- `learning.registry.artifact_dir`
+- `learning.registry.artifact_prefix`
+- `learning.drift.enabled`
+- `learning.drift.window`
+- `learning.drift.feature_zscore_threshold`
+- `learning.drift.max_drift_feature_pct`
+- `learning.drift.pnl_window`
+- `learning.drift.max_pnl_drop_pct`
+- `learning.drift.auto_rollback`
+- `learning.drift.baseline_enabled`
+- `learning.drift.baseline_max_samples`
+- `learning.drift.baseline_stride`
 - `learning.training.*`
 - `learning.online.*`
 - `learning.features.include_signal_features` (adds intraday signal features to observations)
