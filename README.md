@@ -34,13 +34,16 @@ flowchart LR
     end
     subgraph Models["Model Store"]
         ModelStore[/data + /app/models/]
+        ModelRegistry[Model Registry<br/>metadata + artifacts]
     end
     subgraph Core["Trading Loop"]
         Trader[TradingAgent]
         Strat[Strategies<br/>rl_policy / rl_policy_fees / intraday_momentum / pattern_trading / trend_following / factor_model / stat_arb_pairs / market_maker]
         Orchestrator[RL Strategy Orchestrator]
-        Risk[Risk Manager<br/>vol targeting]
+        Drift[Drift Monitor<br/>feature + PnL]
+        Risk[Risk Manager<br/>vol targeting + VaR/CVaR + caps]
         Algo[Execution Algos<br/>TWAP / VWAP / POV]
+        Impact[Market Impact Model]
         Exec[Execution Engine]
         Queue[Order Queue<br/>FIFO + feedback]
         Orders[Open order tracking<br/>cancel/skip]
@@ -63,10 +66,12 @@ flowchart LR
     end
     subgraph Observability["Monitoring & Control"]
         Metrics[Prometheus Metrics]
-        Grafana[Grafana Dashboard]
+        Grafana[Grafana Dashboards<br/>overview + latency]
         Alerting[Alertmanager]
         API[FastAPI Config/UI]
         Logs[Rotating Logs]
+        Audit[Audit Logs]
+        Compliance[Compliance Exports]
     end
 
     YF --> Trader
@@ -84,9 +89,10 @@ flowchart LR
     News --> AIFilter
     Ingest --> AlpacaBars
     RLTrain --> ModelStore
+    RLTrain --> ModelRegistry
     OrchPretrain --> ModelStore
     AIFilterTrain --> ModelStore
-    Trader --> Strat --> Orchestrator --> Risk --> Algo --> Queue --> Orders --> Exec --> Router
+    Trader --> Strat --> Drift --> Orchestrator --> Risk --> Impact --> Algo --> Queue --> Orders --> Exec --> Router
     Router --> Alpaca
     Router --> IBKR
     Alpaca --> BrokerUniverse
@@ -101,6 +107,8 @@ flowchart LR
     Trader --> Metrics --> Grafana
     Metrics --> Alerting
     Trader --> Logs
+    Trader --> Audit
+    Trader --> Compliance
     API <--> Trader
 ```
 
