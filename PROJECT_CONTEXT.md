@@ -41,6 +41,8 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added decision trace logging in trader and surfaced it in daily report output.
+- Added absolute move values to daily report metrics alongside percentage signals.
 - Switched no-trade inference to use 24h symbol_active counts for stability during market sleep.
 - Treated missing symbol_active metrics as not_in_active_universe when Prometheus is healthy.
 - Added inferred no-trade reasons using Prometheus gauges when no skip metrics exist.

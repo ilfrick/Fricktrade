@@ -58,3 +58,5 @@ Centralize runtime settings for all subsystems.
 - Email body is saved under `/data/reports/daily_top_movers/<YYYY-MM-DD>/_email/`.
 - When no trades or skip metrics are recorded, the report infers a reason via Prometheus gauges
   (active symbol, open orders, positions).
+- Metrics now include representative absolute moves (open->close, runup, drawdown) along with %.
+- Decision traces are read from `reports.daily_top_movers.decision_trace.*` to explain skip causes.

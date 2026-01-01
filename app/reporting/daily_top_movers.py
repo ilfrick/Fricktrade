@@ -446,6 +446,7 @@ def _format_metrics(summary: dict[str, float]) -> str | None:
     if not summary:
         return None
     parts = []
+    open_px = summary.get("open")
     if "first_30m_return_pct" in summary:
         parts.append(f"30m_return={summary['first_30m_return_pct']:.2f}%")
     if "first_60m_return_pct" in summary:
@@ -456,12 +457,62 @@ def _format_metrics(summary: dict[str, float]) -> str | None:
         parts.append(f"runup={summary['max_runup_pct']:.2f}%")
     if "max_drawdown_pct" in summary:
         parts.append(f"drawdown={summary['max_drawdown_pct']:.2f}%")
+    if open_px is not None and "close" in summary:
+        parts.append(f"abs_move={summary['close'] - open_px:.2f}")
+    if open_px is not None and "high" in summary:
+        parts.append(f"runup_abs={summary['high'] - open_px:.2f}")
+    if open_px is not None and "low" in summary:
+        parts.append(f"drawdown_abs={summary['low'] - open_px:.2f}")
     return ", ".join(parts) if parts else None
 
 
 def _news_settings(cfg: dict) -> dict[str, Any]:
     report_cfg = cfg.get("reports", {}).get("daily_top_movers", {}) or {}
     return report_cfg.get("news", {}) or {}
+
+
+def _decision_trace_settings(cfg: dict) -> dict[str, Any]:
+    report_cfg = cfg.get("reports", {}).get("daily_top_movers", {}) or {}
+    return report_cfg.get("decision_trace", {}) or {}
+
+
+def _load_decision_traces(cfg: dict, date_str: str) -> dict[str, dict]:
+    trace_cfg = _decision_trace_settings(cfg)
+    if not trace_cfg.get("enabled", True):
+        return {}
+    output_dir = Path(trace_cfg.get("output_dir", "/data/reports/decision_trace"))
+    dates = [date_str]
+    try:
+        day = datetime.fromisoformat(date_str).date()
+        dates.append((day - timedelta(days=1)).isoformat())
+    except Exception:
+        pass
+    latest: dict[str, dict] = {}
+    for d in dates:
+        path = output_dir / f"{d}.jsonl"
+        if not path.exists():
+            continue
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                symbol = record.get("symbol")
+                if not symbol:
+                    continue
+                ts = record.get("ts")
+                existing = latest.get(symbol)
+                if not existing:
+                    latest[symbol] = record
+                    continue
+                try:
+                    if ts and existing.get("ts") and ts > existing.get("ts"):
+                        latest[symbol] = record
+                except Exception:
+                    continue
+        except Exception as exc:
+            logging.warning("Decision trace load failed for %s: %s", path, exc)
+    return latest
 
 
 def _alpaca_news_keys(cfg: dict) -> tuple[str, str, str]:
@@ -666,6 +717,39 @@ def _render_report(
         hints = item.get("hints") or []
         if hints:
             lines.append(f"   signals: {', '.join(hints)}")
+        trace = item.get("decision_trace") or {}
+        if trace:
+            decision = trace.get("decision")
+            stage = trace.get("stage")
+            reason = trace.get("reason")
+            action = trace.get("action")
+            action_strategy = trace.get("action_strategy")
+            broker = trace.get("broker")
+            parts = []
+            if decision:
+                parts.append(f"decision={decision}")
+            if stage:
+                parts.append(f"stage={stage}")
+            if reason:
+                parts.append(f"reason={reason}")
+            if action:
+                parts.append(f"action={action}")
+            if action_strategy:
+                parts.append(f"strategy={action_strategy}")
+            if broker:
+                parts.append(f"broker={broker}")
+            if parts:
+                lines.append(f"   decision: {', '.join(parts)}")
+            selected = trace.get("orchestrator_selected")
+            if selected:
+                lines.append(f"   orchestrator: {selected}")
+            trace_signals = trace.get("signals") or []
+            if trace_signals:
+                brief = ", ".join(
+                    f"{s.get('name')}={s.get('action')}" for s in trace_signals if s.get("name")
+                )
+                if brief:
+                    lines.append(f"   signals_trace: {brief}")
         news_items = item.get("news") or []
         if news_items:
             before_move = item.get("news_before_move")
@@ -739,6 +823,7 @@ def run_daily_reports(config_path: str) -> None:
                 continue
             if is_venue_open(cfg, venue_name, now=now):
                 continue
+            decision_traces = _load_decision_traces(cfg, date_str)
             _write_status(output_dir, venue_name, date_str, "running")
             daily_bars = _fetch_daily_bars(client, feed_symbols, close_dt, feed)
             if not daily_bars:
@@ -774,6 +859,9 @@ def run_daily_reports(config_path: str) -> None:
                 news_map = _fetch_news_items([m["symbol"] for m in movers], cfg, close_dt)
                 for item in movers:
                     symbol = item["symbol"]
+                    trace = decision_traces.get(symbol)
+                    if trace:
+                        item["decision_trace"] = trace
                     trades = _query_prometheus(
                         prom_url,
                         f'increase(trades_total{{symbol="{symbol}"}}[1d])',

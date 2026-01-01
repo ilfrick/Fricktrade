@@ -458,6 +458,9 @@ reports:
       max_headlines: 8
       include_summaries: false
       correlation_window_minutes: 90
+    decision_trace:
+      enabled: true
+      output_dir: /data/reports/decision_trace
     explain_ai:
       enabled: true
       provider: ollama

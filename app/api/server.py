@@ -154,6 +154,8 @@ _DESCRIPTIONS = {
     "reports.daily_top_movers.news.max_headlines": "Maximum headlines per symbol in the report.",
     "reports.daily_top_movers.news.include_summaries": "Include news summaries when available.",
     "reports.daily_top_movers.news.correlation_window_minutes": "Time window after open to correlate news with moves.",
+    "reports.daily_top_movers.decision_trace.enabled": "Include decision traces from the trading agent.",
+    "reports.daily_top_movers.decision_trace.output_dir": "Directory containing decision trace JSONL files.",
     "reports.daily_top_movers.email.smtp_require_tls": "Override SMTP TLS requirement when using Alertmanager settings.",
     "reports.daily_top_movers.explain_ai.enabled": "Enable AI explanations for why symbols were not traded.",
     "reports.daily_top_movers.explain_ai.provider": "AI provider for explanations (ollama).",
