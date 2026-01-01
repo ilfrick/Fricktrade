@@ -17,6 +17,9 @@ Plots are saved next to the report (or to `--plot-dir`) as
 `benchmark_returns.png`, `benchmark_risk_return.png`, and `benchmark_regimes.png`.
 Use `--pdf-path` to write a multi-page summary PDF.
 
+Bootstrap confidence intervals and Monte Carlo stress runs are controlled via
+`benchmarking.bootstrap_*` and `benchmarking.mc.*` in `config/config.yaml`.
+
 ## Scenarios (default)
 - `baseline`: current config.
 - `stress_costs_moderate`: higher slippage/commission.
@@ -31,6 +34,9 @@ The runner writes a JSON report containing:
 - summary statistics (mean/min/max/std for returns, mean/min/max for trades)
 - scorecard metrics (Sharpe, Sortino, Calmar, Ulcer index)
 - regime summary buckets (high/low volatility vs trend/range)
+- bootstrap confidence intervals for return metrics
+- buy-and-hold baseline returns and alpha vs buy-and-hold
+- Monte Carlo stress summary for randomized slippage/spread/commission
 
 ## Interpretation
 - Compare `return_mean_pct` across scenarios to understand sensitivity.

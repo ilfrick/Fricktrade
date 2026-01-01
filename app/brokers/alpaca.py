@@ -20,7 +20,10 @@ class AlpacaBroker(Broker):
 
     def get_account(self) -> dict:
         account = record_broker_call(self._name, "get_account", self.client.get_account)
-        return account.dict()
+        data = account.dict()
+        if "shorting_enabled" in data:
+            data["shorting_enabled"] = bool(data.get("shorting_enabled"))
+        return data
 
     def get_positions(self) -> list[dict]:
         def _fetch_positions():

@@ -21,7 +21,11 @@ class IBKRBroker(Broker):
             )
         else:
             summary = record_broker_call(self._name, "get_account", self.ib.accountSummary)
-        return {s.tag: s.value for s in summary}
+        data = {s.tag: s.value for s in summary}
+        shorting_enabled = _parse_bool(_find_account_flag(data, {"shortingenabled", "shorting_enabled"}))
+        if shorting_enabled is not None:
+            data["shorting_enabled"] = shorting_enabled
+        return data
 
     def get_positions(self) -> list[dict]:
         positions = []
@@ -112,3 +116,23 @@ class IBKRBroker(Broker):
             if order.orderId == oid or getattr(order, "permId", None) == oid:
                 record_broker_call(self._name, "cancel_order", self.ib.cancelOrder, order)
                 return
+
+
+def _find_account_flag(data: dict, names: set[str]) -> str | None:
+    for key, value in data.items():
+        if str(key).lower() in names:
+            return value
+    return None
+
+
+def _parse_bool(value) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return True
+    if text in {"false", "0", "no", "n"}:
+        return False
+    return None

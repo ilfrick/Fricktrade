@@ -125,6 +125,9 @@ class TradingAgent:
         self._decision_trace_dir = str(trace_cfg.get("output_dir", "/data/reports/decision_trace"))
         self._equity_start: float | None = None
         self._equity_peak: float | None = None
+        self._day_start_date = None
+        self._day_start_equity: float | None = None
+        self._current_drawdown_pct = 0.0
         self._checkpoint_at: datetime | None = None
         self._kill_switch_liquidated = False
         self._kill_switch_warned = False
@@ -408,6 +411,11 @@ class TradingAgent:
         trace = self._init_decision_trace(symbol, market_state)
         if self._kill_switch_liquidated:
             return None
+        if self.risk.should_circuit_break(self._current_drawdown_pct):
+            SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="circuit_breaker").inc()
+            logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
+            self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
+            return None
         exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
         broker_hint = self._resolve_broker_for_symbol(symbol, self._strategy_names, None)
         if trace:
@@ -535,23 +543,20 @@ class TradingAgent:
             logging.info("Skipping %s for %s: account blocked", action, symbol)
             self._emit_decision_trace(trace, "skip", "account_blocked", "account")
             return None
+        can_short = True
         if action == "sell":
             positions = portfolio.get("positions", {})
             current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
-            if current_qty <= 0:
-                SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="no_position").inc()
-                logging.info("Skipping %s for %s: no position", action, symbol)
-                self._emit_decision_trace(trace, "skip", "no_position", "positions")
+            can_short = self._can_short(symbol, portfolio)
+            if current_qty <= 0 and not can_short:
+                SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="shorting_disabled").inc()
+                logging.info("Skipping %s for %s: shorting disabled", action, symbol)
+                self._emit_decision_trace(trace, "skip", "shorting_disabled", "shorting")
                 return None
         if self._is_action_blocked(symbol, action):
             SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="limit_block").inc()
             logging.info("Skipping %s for %s: limits block action", action, symbol)
             self._emit_decision_trace(trace, "skip", "limit_block", "limits")
-            return None
-        if action == "sell" and not self._can_short(symbol, portfolio):
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="shorting_disabled").inc()
-            logging.info("Skipping %s for %s: shorting disabled", action, symbol)
-            self._emit_decision_trace(trace, "skip", "shorting_disabled", "shorting")
             return None
         if action == "sell":
             qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, market_state, reduce_pct=reduce_pct)
@@ -718,6 +723,7 @@ class TradingAgent:
         max_pos_pct = float(self.cfg["risk"]["max_position_size_pct"])
         max_pos_pct *= self._vol_target_scale(market_state)
         max_short_pct = float(self.cfg["risk"]["max_short_exposure_pct"])
+        max_short_pct *= self._vol_target_scale(market_state)
         allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
         limits = self.cfg.get("trading_limits", {})
         if limits.get("enabled") and not limits.get("allow_shorts", True):
@@ -740,7 +746,22 @@ class TradingAgent:
             if current_qty > 0:
                 qty = int(current_qty * max(min(reduce_pct, 1.0), 0.0))
                 return (qty, None) if qty > 0 else (0, "position_limit")
-            return 0, "no_position"
+            if not allow_shorts or not self._can_short(symbol, portfolio):
+                return 0, "shorting_disabled"
+            if equity <= 0:
+                return 0, "insufficient_equity"
+            target_value = equity * (max_short_pct / 100.0)
+            current_short = float(portfolio.get("short_exposure", 0.0) or 0.0)
+            remaining_value = max(0.0, target_value - current_short)
+            if remaining_value <= 0:
+                return 0, "short_limit"
+            buying_power = float(portfolio.get("buying_power", 0.0) or 0.0)
+            if buying_power <= 0:
+                buying_power = cash
+            allowed_value = min(remaining_value, buying_power)
+            if allowed_value < last_price:
+                return 0, "insufficient_buying_power"
+            return int(allowed_value // last_price), None
 
         return 0, "unsupported"
 
@@ -804,7 +825,7 @@ class TradingAgent:
             return True
         account = self._account_for_broker(portfolio.get("broker"))
         shorting_enabled = account.get("shorting_enabled")
-        if shorting_enabled is False:
+        if shorting_enabled is not True:
             return False
         if not self._limits_enabled():
             return True
@@ -943,6 +964,10 @@ class TradingAgent:
         sells = []
         top_signal = None
         top_weight = None
+        top_buy = None
+        top_buy_weight = None
+        top_sell = None
+        top_sell_weight = None
         for signal in signals:
             action = signal.get("action")
             name = signal.get("name")
@@ -952,15 +977,23 @@ class TradingAgent:
                 top_signal = signal
             if action == "buy":
                 buy_score += weight
+                if top_buy_weight is None or weight > top_buy_weight:
+                    top_buy_weight = weight
+                    top_buy = signal
             elif action == "sell":
                 sell_score += weight
                 sells.append(signal)
+                if top_sell_weight is None or weight > top_sell_weight:
+                    top_sell_weight = weight
+                    top_sell = signal
         if buy_score == sell_score:
             return "hold", 1.0, top_signal.get("name") if top_signal else None
         if buy_score > sell_score:
-            return "buy", 1.0, top_signal.get("name") if top_signal else None
+            chosen = top_buy or top_signal
+            return "buy", 1.0, chosen.get("name") if chosen else None
         reduce_pct = max(float(s.get("reduce_pct", 1.0)) for s in sells) if sells else 1.0
-        strategy = sells[0].get("name") if sells else (top_signal.get("name") if top_signal else None)
+        chosen = top_sell or top_signal
+        strategy = chosen.get("name") if chosen else None
         return "sell", reduce_pct, strategy
 
     def _update_account_metrics(self) -> None:
@@ -1014,11 +1047,19 @@ class TradingAgent:
         if self._equity_peak:
             drawdown_pct = (self._equity_peak - total_val) / self._equity_peak * 100.0
             DRAWDOWN.set(max(drawdown_pct, 0.0))
+            self._current_drawdown_pct = max(drawdown_pct, 0.0)
         ACCOUNT_TOTAL.set(total_val)
         ACCOUNT_CASH.set(cash_val)
         if buying_power_val is not None:
             ACCOUNT_BUYING_POWER.set(buying_power_val)
         ACCOUNT_INVESTED.set(total_val - cash_val)
+        today = datetime.utcnow().date()
+        if self._day_start_date != today or self._day_start_equity is None:
+            self._day_start_date = today
+            self._day_start_equity = total_val
+        if self._day_start_equity:
+            day_pnl_pct = (total_val - self._day_start_equity) / self._day_start_equity * 100.0
+            self.risk.update_daily_loss(day_pnl_pct)
 
     def _update_position_metrics(self, portfolio: dict) -> None:
         positions = portfolio.get("positions", {})

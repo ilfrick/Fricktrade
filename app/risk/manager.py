@@ -4,7 +4,8 @@ class RiskManager:
         self.daily_loss = 0.0
 
     def can_open_trade(self, exposure_pct: float, short_exposure_pct: float, leverage: float) -> bool:
-        if self.daily_loss >= self.cfg["max_daily_loss_pct"]:
+        max_daily_loss = float(self.cfg.get("max_daily_loss_pct", 0.0) or 0.0)
+        if max_daily_loss > 0 and self.daily_loss <= -max_daily_loss:
             return False
         if exposure_pct >= self.cfg["max_position_size_pct"]:
             return False
@@ -16,6 +17,9 @@ class RiskManager:
 
     def record_pnl(self, pnl_pct: float) -> None:
         self.daily_loss = min(0.0, self.daily_loss + pnl_pct)
+
+    def update_daily_loss(self, pnl_pct: float) -> None:
+        self.daily_loss = min(0.0, float(pnl_pct))
 
     def should_circuit_break(self, drawdown_pct: float) -> bool:
         return drawdown_pct >= self.cfg["circuit_breaker_drawdown_pct"]

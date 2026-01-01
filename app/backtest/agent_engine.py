@@ -33,9 +33,11 @@ class BacktestPlanResult:
 
 
 class SimBroker:
-    def __init__(self, initial_cash: float, commission_pct: float):
+    def __init__(self, initial_cash: float, commission_pct: float, slippage_bps: float = 0.0, spread_bps: float = 0.0):
         self.cash = float(initial_cash)
         self.commission_pct = float(commission_pct)
+        self.slippage_bps = float(slippage_bps)
+        self.spread_bps = float(spread_bps)
         self.positions: dict[str, float] = {}
         self.current_prices: dict[str, float] = {}
         self._order_id = 0
@@ -66,7 +68,8 @@ class SimBroker:
         price = self.current_prices.get(symbol)
         if price is None:
             raise ValueError(f"Missing price for {symbol}")
-        cost = qty * price
+        exec_price = _apply_slippage(price, side, self.slippage_bps, self.spread_bps)
+        cost = qty * exec_price
         commission = cost * (self.commission_pct / 100.0)
         if side.lower() == "buy":
             self.cash -= cost + commission
@@ -289,6 +292,8 @@ def _symbols_from_data_dir(data_dir: Path, interval: str | None) -> list[str]:
 def _build_sim_broker(cfg: dict, backtest_cfg: dict):
     exec_cfg = cfg.get("execution", {}).get("brokers", {})
     brokers_cfg = cfg.get("brokers", {})
+    slippage_bps = float(backtest_cfg.get("slippage_bps", 0.0) or 0.0)
+    spread_bps = float(backtest_cfg.get("spread_bps", 0.0) or 0.0)
     enabled = []
     if brokers_cfg.get("alpaca", {}).get("enabled", True):
         enabled.append("alpaca")
@@ -296,9 +301,23 @@ def _build_sim_broker(cfg: dict, backtest_cfg: dict):
         enabled.append("ibkr")
     if exec_cfg.get("enabled", False) and len(enabled) > 1:
         per_cash = float(backtest_cfg["initial_cash"]) / len(enabled)
-        brokers = {name: SimBroker(per_cash, backtest_cfg["commission_pct"]) for name in enabled}
+        brokers = {
+            name: SimBroker(per_cash, backtest_cfg["commission_pct"], slippage_bps, spread_bps)
+            for name in enabled
+        }
         return SimBrokerRouter(brokers, exec_cfg.get("routing", {}))
-    return SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"])
+    return SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"], slippage_bps, spread_bps)
+
+
+def _apply_slippage(price: float, side: str, slippage_bps: float, spread_bps: float) -> float:
+    if price <= 0:
+        return price
+    slippage = slippage_bps / 10000.0
+    half_spread = (spread_bps / 10000.0) / 2.0
+    bump = slippage + half_spread
+    if side.lower() == "sell":
+        return max(price * (1.0 - bump), 0.0)
+    return price * (1.0 + bump)
 
 
 def _load_csv(path: Path) -> pd.DataFrame:

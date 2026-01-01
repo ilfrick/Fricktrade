@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import random
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -61,7 +62,12 @@ def _as_runs(result) -> list[dict]:
     ]
 
 
-def _summary(runs: list[dict]) -> dict:
+def _summary(
+    runs: list[dict],
+    bootstrap_samples: int,
+    bootstrap_confidence: float,
+    bootstrap_seed: int,
+) -> dict:
     returns = [r["return_pct"] for r in runs if r.get("return_pct") is not None]
     trades = [r["trades"] for r in runs if r.get("trades") is not None]
     if not returns:
@@ -69,6 +75,12 @@ def _summary(runs: list[dict]) -> dict:
     mean = sum(returns) / len(returns)
     var = sum((val - mean) ** 2 for val in returns) / max(len(returns), 1)
     std = var**0.5
+    buy_hold = [r["buy_hold_return_pct"] for r in runs if r.get("buy_hold_return_pct") is not None]
+    buy_hold_mean = sum(buy_hold) / len(buy_hold) if buy_hold else None
+    buy_hold_std = None
+    if buy_hold:
+        bh_var = sum((val - buy_hold_mean) ** 2 for val in buy_hold) / max(len(buy_hold), 1)
+        buy_hold_std = bh_var**0.5
     summary = {
         "return_mean_pct": mean,
         "return_min_pct": min(returns),
@@ -78,8 +90,43 @@ def _summary(runs: list[dict]) -> dict:
         "trades_min": min(trades) if trades else 0,
         "trades_max": max(trades) if trades else 0,
     }
+    summary["return_ci_pct"] = _bootstrap_ci(returns, bootstrap_samples, bootstrap_confidence, bootstrap_seed)
+    if buy_hold_mean is not None:
+        summary["buy_hold_mean_pct"] = buy_hold_mean
+        summary["buy_hold_std_pct"] = buy_hold_std if buy_hold_std is not None else 0.0
+        summary["buy_hold_ci_pct"] = _bootstrap_ci(buy_hold, bootstrap_samples, bootstrap_confidence, bootstrap_seed)
+        alpha = [
+            float(run["return_pct"]) - float(run["buy_hold_return_pct"])
+            for run in runs
+            if run.get("buy_hold_return_pct") is not None and run.get("return_pct") is not None
+        ]
+        if alpha:
+            summary["alpha_mean_pct"] = sum(alpha) / len(alpha)
+            summary["alpha_std_pct"] = (
+                sum((val - summary["alpha_mean_pct"]) ** 2 for val in alpha) / max(len(alpha), 1)
+            ) ** 0.5
+            summary["alpha_ci_pct"] = _bootstrap_ci(alpha, bootstrap_samples, bootstrap_confidence, bootstrap_seed)
     summary.update(_scorecard(returns))
     return summary
+
+
+def _bootstrap_ci(values: list[float], samples: int, confidence: float, seed: int) -> dict | None:
+    if not values:
+        return None
+    if samples <= 0:
+        return None
+    alpha = (1.0 - confidence) / 2.0
+    rng = random.Random(seed)
+    means = []
+    for _ in range(samples):
+        batch = [rng.choice(values) for _ in range(len(values))]
+        means.append(sum(batch) / len(batch))
+    means.sort()
+    low_idx = int(alpha * len(means))
+    high_idx = int((1.0 - alpha) * len(means)) - 1
+    low_idx = max(min(low_idx, len(means) - 1), 0)
+    high_idx = max(min(high_idx, len(means) - 1), 0)
+    return {"low": means[low_idx], "high": means[high_idx], "confidence": confidence}
 
 
 def _scorecard(returns: list[float]) -> dict:
@@ -152,6 +199,28 @@ def _load_frames(cfg: dict) -> dict[str, pd.DataFrame]:
         df["Datetime"] = df["Datetime"].dt.tz_convert(None)
         frames[symbol] = df.set_index("Datetime").sort_index()
     return frames
+
+
+def _buy_hold_return(frames: dict[str, pd.DataFrame], symbols: list[str], start: str, end: str) -> float | None:
+    if not frames or not symbols:
+        return None
+    start_dt = pd.to_datetime(start)
+    end_dt = pd.to_datetime(end)
+    returns = []
+    for symbol in symbols:
+        df = frames.get(symbol)
+        if df is None or "Close" not in df.columns:
+            continue
+        window = df.loc[(df.index >= start_dt) & (df.index <= end_dt)]
+        if window.empty:
+            continue
+        first = float(window["Close"].iloc[0])
+        last = float(window["Close"].iloc[-1])
+        if first:
+            returns.append((last - first) / first * 100.0)
+    if not returns:
+        return None
+    return sum(returns) / len(returns)
 
 
 def _window_regime(frames: dict[str, pd.DataFrame], start: str, end: str) -> dict:
@@ -306,15 +375,85 @@ def _write_pdf(report_path: Path, plots: list[Path]) -> None:
 def run_benchmarks(cfg: dict, scenarios: list[tuple[str, dict]]) -> list[ScenarioResult]:
     results = []
     frames = _load_frames(cfg)
+    bench_cfg = cfg.get("benchmarking", {}) or {}
+    bootstrap_samples = int(bench_cfg.get("bootstrap_samples", 500))
+    bootstrap_confidence = float(bench_cfg.get("bootstrap_confidence", 0.95))
+    mc_cfg = bench_cfg.get("mc", {}) or {}
+    seed = int(bench_cfg.get("seed", 42))
+    rng = random.Random(seed)
     for name, updates in scenarios:
         scenario_cfg = _apply_updates(cfg, updates)
         result = run_agent_backtest(scenario_cfg)
         runs = _as_runs(result)
         for run in runs:
             run["regime"] = _window_regime(frames, run.get("start", ""), run.get("end", ""))
+            run["buy_hold_return_pct"] = _buy_hold_return(
+                frames,
+                run.get("symbols", []),
+                run.get("start", ""),
+                run.get("end", ""),
+            )
         _assign_regimes(runs)
-        results.append(ScenarioResult(name=name, runs=runs, summary=_summary(runs)))
+        summary = _summary(runs, bootstrap_samples, bootstrap_confidence, seed)
+        if mc_cfg.get("enabled", False):
+            summary["mc_stress"] = _run_mc_stress(
+                scenario_cfg,
+                mc_cfg,
+                rng,
+                bootstrap_samples,
+                bootstrap_confidence,
+                seed,
+            )
+        results.append(ScenarioResult(name=name, runs=runs, summary=summary))
     return results
+
+
+def _run_mc_stress(
+    base_cfg: dict,
+    mc_cfg: dict,
+    rng: random.Random,
+    bootstrap_samples: int,
+    bootstrap_confidence: float,
+    bootstrap_seed: int,
+) -> dict:
+    runs = int(mc_cfg.get("runs", 10))
+    slippage_min, slippage_max = _range_or_default(mc_cfg.get("slippage_bps_range"), (2.0, 10.0))
+    spread_min, spread_max = _range_or_default(mc_cfg.get("spread_bps_range"), (0.0, 8.0))
+    comm_min, comm_max = _range_or_default(mc_cfg.get("commission_pct_range"), (0.02, 0.2))
+    returns = []
+    trades = []
+    for _ in range(runs):
+        updates = {
+            "backtest.slippage_bps": rng.uniform(slippage_min, slippage_max),
+            "backtest.spread_bps": rng.uniform(spread_min, spread_max),
+            "backtest.commission_pct": rng.uniform(comm_min, comm_max),
+        }
+        scenario_cfg = _apply_updates(base_cfg, updates)
+        result = run_agent_backtest(scenario_cfg)
+        for run in _as_runs(result):
+            returns.append(float(run.get("return_pct", 0.0)))
+            trades.append(int(run.get("trades", 0)))
+    summary = {
+        "runs": runs,
+        "return_mean_pct": sum(returns) / len(returns) if returns else 0.0,
+        "return_min_pct": min(returns) if returns else 0.0,
+        "return_max_pct": max(returns) if returns else 0.0,
+        "return_std_pct": (
+            sum((val - (sum(returns) / len(returns))) ** 2 for val in returns) / max(len(returns), 1)
+        )
+        ** 0.5
+        if returns
+        else 0.0,
+        "trades_mean": sum(trades) / len(trades) if trades else 0.0,
+    }
+    summary["return_ci_pct"] = _bootstrap_ci(returns, bootstrap_samples, bootstrap_confidence, bootstrap_seed)
+    return summary
+
+
+def _range_or_default(value, default: tuple[float, float]) -> tuple[float, float]:
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        return float(value[0]), float(value[1])
+    return default
 
 
 def main() -> None:

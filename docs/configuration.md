@@ -55,7 +55,7 @@ Centralize runtime settings for all subsystems.
 - Volatility targeting: `risk.vol_targeting.enabled`.
 - Signal bias guard: `strategy.signal_bias_guard.*` (blocks counter-trend actions).
 - RL signal features: `learning.features.include_signal_features` and `learning.features.signal_interval`.
-- Benchmarks: `benchmarking.*` (walk-forward + stress scenarios, output/plot/PDF paths).
+- Benchmarks: `benchmarking.*` (walk-forward + stress scenarios, bootstrap CI, MC stress, output/plot/PDF paths).
 - Market-based stack sleep/wake: `healthwatch.market_shutdown.*` (stops services when markets are closed).
 - Manual kill switches: `kill_switch.*` (force sleep or force liquidation with interlock).
 - Daily top movers report: `reports.daily_top_movers.*` (daily winners, email, training data export; includes `feed`).
