@@ -13,6 +13,7 @@ import torch
 from app.learning.train_rl import train_from_config
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 from app.utils.restart import should_restart
+from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
 
 
 def _lock_path(cfg: dict) -> Path:
@@ -113,6 +114,7 @@ def run_online_updates(cfg: dict) -> None:
         logging.info("Online updates disabled in config")
         return
 
+    respect_ops_state = bool(online_cfg.get("respect_ops_state", True))
     interval_minutes = int(online_cfg.get("update_interval_minutes", 60))
     timesteps = int(online_cfg.get("timesteps", 1000))
     eval_split = float(online_cfg.get("eval_split", 0.1))
@@ -148,6 +150,16 @@ def run_online_updates(cfg: dict) -> None:
                 break
             time.sleep(60)
             continue
+        if respect_ops_state:
+            ms_cfg = cfg.get("healthwatch", {}).get("market_shutdown", {}) or {}
+            if ms_cfg.get("write_state", False):
+                ops_state = load_ops_state(ms_cfg.get("state_path", "/data/system_state.json"))
+                if ops_state_is_sleeping(ops_state):
+                    logging.info("Ops state sleeping; pausing online updates.")
+                    time.sleep(60)
+                    continue
+                if ops_state and not ops_state_is_running(ops_state):
+                    logging.info("Ops state unknown; continuing with online updates.")
         if should_restart(started_at):
             logging.info("Restart requested; exiting online updates.")
             break

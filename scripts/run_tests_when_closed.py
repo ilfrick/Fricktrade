@@ -5,6 +5,7 @@ import time
 
 from app.utils.config import load_config
 from app.utils.market import is_market_open
+from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
 
 
 def _run_pytest() -> int:
@@ -61,6 +62,19 @@ def main() -> None:
 
     while True:
         cfg = load_config(args.config)
+        ms_cfg = cfg.get("healthwatch", {}).get("market_shutdown", {}) or {}
+        if ms_cfg.get("write_state", False):
+            ops_state = load_ops_state(ms_cfg.get("state_path", "/data/system_state.json"))
+            if ops_state_is_running(ops_state):
+                logging.info("Ops state running; skipping tests.")
+                if args.once:
+                    break
+                time.sleep(interval * 60)
+                continue
+            if ops_state_is_sleeping(ops_state):
+                logging.info("Ops state sleeping; running tests.")
+            else:
+                logging.info("Ops state unknown; falling back to market check.")
         if is_market_open(cfg):
             logging.info("Market open; skipping tests.")
         else:

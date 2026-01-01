@@ -206,6 +206,8 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added active model pointer publishing and ops-state gating for trader/learner/tests.
+- Added ops state file output and aligned learner/tests with healthwatch scheduler state.
 - Kept tests-when-closed running during market shutdown via healthwatch keep_services.
 - Phase 6: added decision audit logs, compliance exports, and latency dashboards/metrics.
 - Phase 5: added model registry metadata, drift detection, and auto-rollback to best RL model.

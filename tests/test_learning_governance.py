@@ -5,7 +5,7 @@ import pandas as pd
 
 from app.learning.drift import DriftMonitor, compute_feature_stats
 from app.learning.features import observation_size
-from app.learning.registry import load_latest_feature_stats, register_model
+from app.learning.registry import load_active_model, load_latest_feature_stats, register_model, set_active_model
 
 
 def test_compute_feature_stats_matches_observation_size():
@@ -67,3 +67,13 @@ def test_register_model_writes_registry(tmp_path):
     raw = json.loads(registry_path.read_text(encoding="utf-8"))
     assert len(raw) == 1
     assert load_latest_feature_stats(str(registry_path)) == stats
+
+
+def test_set_active_model_writes_pointer(tmp_path):
+    registry_path = tmp_path / "registry.json"
+    record = {"model_path": "/app/models/model.zip", "model_sha256": "abc123", "ts": "2026-01-01T00:00:00Z"}
+    active_path = tmp_path / "active.json"
+    set_active_model(str(active_path), record, reason="latest")
+    active = load_active_model(str(active_path))
+    assert active["model_path"] == record["model_path"]
+    assert active["reason"] == "latest"

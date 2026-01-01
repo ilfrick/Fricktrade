@@ -57,6 +57,34 @@ def load_latest_feature_stats(registry_path: str) -> dict[str, Any] | None:
     return None
 
 
+def set_active_model(active_path: str, record: dict[str, Any], reason: str) -> None:
+    path = Path(active_path)
+    payload = {
+        "updated_at": datetime.utcnow().isoformat(),
+        "reason": reason,
+        "model_path": record.get("model_path"),
+        "model_sha256": record.get("model_sha256"),
+        "best_model_path": record.get("best_model_path"),
+        "best_model_sha256": record.get("best_model_sha256"),
+        "registry_ts": record.get("ts"),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception:
+        logging.warning("Failed to update active model pointer at %s", active_path)
+
+
+def load_active_model(active_path: str) -> dict[str, Any] | None:
+    path = Path(active_path)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def _load_registry(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []

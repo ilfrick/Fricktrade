@@ -161,6 +161,20 @@ def _run_checks(state: HealthState, targets: dict[str, str], interval: int, time
         time.sleep(interval)
 
 
+def _write_ops_state(path: Path, state: str, now: datetime, next_open: datetime | None, force_sleep: bool) -> None:
+    payload = {
+        "state": state,
+        "updated_at": now.isoformat(),
+        "next_open": next_open.isoformat() if next_open else None,
+        "force_sleep": bool(force_sleep),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logging.warning("Healthwatch state write failed: %s", exc)
+
+
 def _render_metrics(state: HealthState) -> bytes:
     status, checked = state.snapshot()
     lines = [
@@ -221,6 +235,8 @@ def _run_market_scheduler(cfg: dict) -> None:
     heartbeat_minutes = int(ms_cfg.get("heartbeat_minutes", 15))
     keep = set(ms_cfg.get("keep_services", ["healthwatch", "autoheal"]))
     stop_list = ms_cfg.get("stop_services")
+    state_path = Path(ms_cfg.get("state_path", "/data/system_state.json"))
+    write_state = bool(ms_cfg.get("write_state", True))
     client = docker.DockerClient(base_url="unix://var/run/docker.sock")
 
     last_state: str | None = None
@@ -261,6 +277,8 @@ def _run_market_scheduler(cfg: dict) -> None:
                 logging.info("Healthwatch market sleep: stopping services=%s", sorted(stop_services))
                 _stop_services(client, project, stop_services)
                 last_state = "stopped"
+        if write_state:
+            _write_ops_state(state_path, last_state or "unknown", now, next_open, force_sleep)
         if heartbeat_minutes > 0:
             if last_heartbeat is None or (now - last_heartbeat).total_seconds() >= heartbeat_minutes * 60:
                 next_open_str = next_open.isoformat() if next_open else "unknown"

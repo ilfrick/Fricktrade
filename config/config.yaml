@@ -288,6 +288,10 @@ learning:
     path: /app/models/model_registry.json
     artifact_dir: /app/models/registry
     artifact_prefix: ppo_policy
+    active_path: /app/models/model_active.json
+    use_active: true
+    publish_mode: best
+    refresh_minutes: 5
   drift:
     enabled: false
     window: 120
@@ -312,6 +316,7 @@ learning:
     update_interval_minutes: 60
     timesteps: 1000
     eval_split: 0.1
+    respect_ops_state: true
   training:
     data_dir: /data
     interval: 1m
@@ -495,6 +500,8 @@ healthwatch:
     check_interval_seconds: 60
     start_before_minutes: 15
     heartbeat_minutes: 15
+    write_state: true
+    state_path: /data/system_state.json
     keep_services:
     - healthwatch
     - autoheal

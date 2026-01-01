@@ -53,7 +53,10 @@ Centralize runtime settings for all subsystems.
 - Strategy performance reporting + kill switch: `strategy.performance.*`.
 - Online learning: `learning.online.enabled`.
 - Model registry: `learning.registry.enabled`.
+- Active model pointer: `learning.registry.active_path` + `learning.registry.use_active`.
+- Model publish mode: `learning.registry.publish_mode` (best or latest).
 - Drift monitoring: `learning.drift.enabled`.
+- Online learning ops-state gating: `learning.online.respect_ops_state`.
 - Decision audit logs: `monitoring.audit.enabled`.
 - Compliance exports: `monitoring.compliance.enabled`.
 - Checkpointing: `checkpointing.enabled`.
@@ -73,6 +76,7 @@ Centralize runtime settings for all subsystems.
 - Benchmarks: `benchmarking.*` (walk-forward + stress scenarios, bootstrap CI, MC stress, output/plot/PDF paths).
 - Market-based stack sleep/wake: `healthwatch.market_shutdown.*` (stops services when markets are closed).
 - `healthwatch.market_shutdown.keep_services` should include `tests-when-closed` so closed-market tests can run.
+- Ops state file: `healthwatch.market_shutdown.write_state` and `healthwatch.market_shutdown.state_path`.
 - Manual kill switches: `kill_switch.*` (force sleep or force liquidation with interlock).
 - Daily top movers report: `reports.daily_top_movers.*` (daily winners, email, training data export; includes `feed`).
 - Daily top movers signals/news: `reports.daily_top_movers.signal_thresholds.*` and `reports.daily_top_movers.news.*`.

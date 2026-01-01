@@ -61,9 +61,10 @@ from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols_for_config
 from app.data.scanner import ScanFilters, filter_universe_by_price, load_symbol_venues, load_universe, scan_symbols
 from app.learning.drift import DriftMonitor
-from app.learning.registry import load_latest_feature_stats
+from app.learning.registry import load_active_model, load_latest_feature_stats
 from app.brokers.config_utils import get_alpaca_account_cfg
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
+from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
 try:
     from app.data.ai_filter import score_symbols
 except Exception:
@@ -150,6 +151,8 @@ class TradingAgent:
         self._drift_monitor: DriftMonitor | None = None
         self._drift_auto_rollback = False
         self._drift_rollback_done = False
+        self._active_model_ref: str | None = None
+        self._active_model_checked_at: datetime | None = None
         self._init_drift_monitor()
         self._equity_start: float | None = None
         self._equity_peak: float | None = None
@@ -252,11 +255,36 @@ class TradingAgent:
         )
 
     def _select_model_path(self) -> str:
+        registry_cfg = self.learning_cfg.get("registry", {}) or {}
+        if registry_cfg.get("use_active", True):
+            active_path = registry_cfg.get("active_path", "/app/models/model_active.json")
+            active = load_active_model(active_path)
+            if isinstance(active, dict):
+                active_model = active.get("model_path")
+                if active_model and Path(active_model).exists():
+                    return str(active_model)
         model_path = self.learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
         if not self.learning_cfg.get("use_best_model", True):
             return model_path
         best_path = self.learning_cfg.get("best_model_path", "/app/models/ppo_policy_best.zip")
         return best_path if Path(best_path).exists() else model_path
+
+    def _maybe_reload_active_model(self) -> None:
+        registry_cfg = self.learning_cfg.get("registry", {}) or {}
+        if not registry_cfg.get("use_active", True):
+            return
+        refresh_minutes = int(registry_cfg.get("refresh_minutes", 5))
+        now = datetime.utcnow()
+        if self._active_model_checked_at and (now - self._active_model_checked_at).total_seconds() < refresh_minutes * 60:
+            return
+        active_path = registry_cfg.get("active_path", "/app/models/model_active.json")
+        active = load_active_model(active_path)
+        ref = _active_model_ref(active)
+        self._active_model_checked_at = now
+        if ref and ref != self._active_model_ref:
+            self._active_model_ref = ref
+            self._reload_rl_strategies()
+            logging.info("Active model updated; reloading RL strategies.")
 
     def _init_drift_monitor(self) -> None:
         drift_cfg = self.learning_cfg.get("drift", {}) or {}
@@ -1559,6 +1587,7 @@ class TradingAgent:
             self._refresh_symbol_venues()
             self._maybe_checkpoint()
             self._log_ai_filter_heartbeat()
+            self._maybe_reload_active_model()
             symbols = self._resolve_active_symbols()
             symbols = self._merge_symbols_with_positions(symbols, portfolio)
             current_symbols = set(symbols)
@@ -1580,6 +1609,9 @@ class TradingAgent:
                 if self._order_queue:
                     self._order_queue.update(self._open_orders_cache)
             self._flush_order_responses()
+            if self._ops_state_blocks_run():
+                time.sleep(interval_seconds)
+                continue
             market_open = is_market_open(self.cfg)
             brokers_cfg = self.cfg.get("brokers", {})
             broker_names = [
@@ -1635,6 +1667,17 @@ class TradingAgent:
         if not venue:
             return is_market_open(self.cfg)
         return is_venue_open(self.cfg, venue)
+
+    def _ops_state_blocks_run(self) -> bool:
+        ms_cfg = self.cfg.get("healthwatch", {}).get("market_shutdown", {}) or {}
+        if not ms_cfg.get("write_state", False):
+            return False
+        ops_state = load_ops_state(ms_cfg.get("state_path", "/data/system_state.json"))
+        if ops_state_is_sleeping(ops_state):
+            return True
+        if ops_state and not ops_state_is_running(ops_state):
+            return False
+        return False
 
     def _refresh_symbol_venues(self) -> None:
         market_cfg = self.cfg.get("market", {})
@@ -2520,3 +2563,13 @@ def _realized_volatility_pct(market_state: dict) -> float:
     mean = sum(returns) / len(returns)
     var = sum((r - mean) ** 2 for r in returns) / max(len(returns) - 1, 1)
     return (var**0.5) * 100.0
+
+
+def _active_model_ref(active: dict | None) -> str | None:
+    if not active:
+        return None
+    model_path = active.get("model_path")
+    model_sha = active.get("model_sha256")
+    if not model_path:
+        return None
+    return f"{model_path}:{model_sha or ''}"

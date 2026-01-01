@@ -48,6 +48,10 @@ Keep services (default):
 - `prometheus`
 - `tests-when-closed`
 
+Ops state file:
+- `healthwatch.market_shutdown.state_path` is written by healthwatch when `write_state: true`.
+- Other services can read the state to align behavior with scheduler transitions.
+
 ## Tests-When-Closed Service
 
 ```mermaid
@@ -62,6 +66,10 @@ stateDiagram-v2
     Idle --> Idle: market open (skip)
 ```
 
+Notes:
+- When `healthwatch.market_shutdown.write_state` is enabled, tests-when-closed respects ops state first,
+  then falls back to `is_market_open`.
+
 ## Learner Service (Online Updates)
 
 ```mermaid
@@ -71,3 +79,6 @@ stateDiagram-v2
     OnlineTraining --> Evaluate: update steps complete
     Evaluate --> LearnerIdle: interval sleep
 ```
+
+Notes:
+- When `learning.online.respect_ops_state` is true, the learner pauses if ops state indicates sleep.

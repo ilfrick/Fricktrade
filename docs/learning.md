@@ -24,6 +24,10 @@ Train and evaluate RL policies, and support online updates.
 - `learning.registry.path`
 - `learning.registry.artifact_dir`
 - `learning.registry.artifact_prefix`
+- `learning.registry.active_path`
+- `learning.registry.use_active`
+- `learning.registry.publish_mode`
+- `learning.registry.refresh_minutes`
 - `learning.drift.enabled`
 - `learning.drift.window`
 - `learning.drift.feature_zscore_threshold`
@@ -36,6 +40,7 @@ Train and evaluate RL policies, and support online updates.
 - `learning.drift.baseline_stride`
 - `learning.training.*`
 - `learning.online.*`
+- `learning.online.respect_ops_state`
 - `learning.features.include_signal_features` (adds intraday signal features to observations)
 - `learning.features.signal_interval`
 
@@ -57,3 +62,5 @@ The learner service runs online updates when enabled:
 - Training writes metadata + feature baselines into `learning.registry.path`.
 - Drift detection compares live features and rolling PnL against the baseline.
 - Auto rollback toggles `learning.use_best_model` when drift is detected.
+- The learner updates `learning.registry.active_path` when `publish_mode` allows it.
+- The trader periodically reloads RL policies when the active model pointer changes.

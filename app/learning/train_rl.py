@@ -12,7 +12,7 @@ from app.learning.data import load_csv_data
 from app.learning.drift import compute_feature_stats
 from app.learning.env import TradingEnv
 from app.learning.evaluate import evaluate_model
-from app.learning.registry import register_model
+from app.learning.registry import register_model, set_active_model
 
 
 def train_from_config(cfg: dict, resume: bool | None = None) -> str:
@@ -82,7 +82,8 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
         plot_dir=report_plot_dir,
     )
     best_report_path = training_cfg.get("best_report_path", "/app/models/training_report_best.json")
-    if _is_better_report(report, best_report_path):
+    is_best = _is_better_report(report, best_report_path)
+    if is_best:
         best_model_file = Path(best_model_path)
         best_model_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(model_path, best_model_file)
@@ -110,7 +111,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
             "device": device,
             "feature_config": feature_config,
         }
-        register_model(
+        record = register_model(
             model_path=model_path,
             best_model_path=best_model_path,
             report=report,
@@ -120,6 +121,11 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
             artifact_dir=registry_cfg.get("artifact_dir"),
             artifact_prefix=str(registry_cfg.get("artifact_prefix", "ppo_policy")),
         )
+        if registry_cfg.get("use_active", True):
+            publish_mode = str(registry_cfg.get("publish_mode", "best")).lower()
+            active_path = registry_cfg.get("active_path", "/app/models/model_active.json")
+            if publish_mode == "latest" or (publish_mode == "best" and is_best):
+                set_active_model(active_path, record, reason=publish_mode)
     return str(output_path)
 
 
