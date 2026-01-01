@@ -98,16 +98,21 @@ def _send_email(subject: str, body: str, cfg: dict) -> None:
         port = 587
     try:
         with smtplib.SMTP(host_name, port, timeout=30) as server:
+            server.ehlo()
             if settings.get("hello"):
                 server.helo(settings["hello"])
             if settings.get("require_tls", True):
-                try:
+                if server.has_extn("starttls"):
                     server.starttls()
-                except smtplib.SMTPNotSupportedError:
+                    server.ehlo()
+                else:
                     logging.warning("Daily report SMTP server does not support STARTTLS.")
                     return
             if settings.get("user") and settings.get("password"):
-                server.login(settings["user"], settings["password"])
+                if server.has_extn("auth"):
+                    server.login(settings["user"], settings["password"])
+                else:
+                    logging.warning("Daily report SMTP server does not support AUTH; sending without login.")
             server.send_message(msg)
     except Exception as exc:
         logging.warning("Daily report email failed: %s", exc)
@@ -325,6 +330,13 @@ def _write_status(output_dir: Path, venue: str, date_str: str, state: str, note:
     path = _status_path(output_dir, venue, date_str)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _save_report_body(output_dir: Path, venue: str, date_str: str, body: str) -> None:
+    report_dir = output_dir / date_str / "_email"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"daily_report_{venue}.txt"
+    report_path.write_text(body, encoding="utf-8")
 
 
 def _bar_field(obj: Any, name: str, aliases: list[str]) -> Any:
@@ -779,6 +791,7 @@ def run_daily_reports(config_path: str) -> None:
             if sections:
                 subject = f"Daily Top Movers - {venue_name} - {date_str}"
                 body = "\n\n".join(sections)
+                _save_report_body(output_dir, venue_name, date_str, body)
                 _send_email(subject, body, cfg)
             _write_status(output_dir, venue_name, date_str, "done")
             last_run[venue_name] = date_str

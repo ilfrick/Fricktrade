@@ -178,6 +178,7 @@ See `docs/configuration.md` for full details.
 Daily top movers reporting runs after each market close, emails a summary, and stores intraday 1-minute
 bars for the top performers. The report includes numeric indicators, signal hints, and optional news
 correlation for each top mover.
+The email body is also saved locally under `/data/reports/daily_top_movers/<YYYY-MM-DD>/_email/`.
 
 Key config under `reports.daily_top_movers.*`:
 - `feed` (iex or sip)

@@ -55,3 +55,4 @@ Centralize runtime settings for all subsystems.
 - Daily top movers report: `reports.daily_top_movers.*` (daily winners, email, training data export; includes `feed`).
 - Daily top movers signals/news: `reports.daily_top_movers.signal_thresholds.*` and `reports.daily_top_movers.news.*`.
 - Daily top movers email overrides: `reports.daily_top_movers.email.smtp_require_tls`.
+- Email body is saved under `/data/reports/daily_top_movers/<YYYY-MM-DD>/_email/`.
