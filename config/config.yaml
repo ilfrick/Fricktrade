@@ -468,7 +468,7 @@ reports:
     email:
       use_alertmanager_config: true
       alertmanager_config_path: /app/alertmanager/alertmanager.yml
-      smtp_require_tls: false
+      smtp_require_tls: true
 news:
   enabled: true
   provider: alpaca
