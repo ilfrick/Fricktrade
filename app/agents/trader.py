@@ -47,7 +47,10 @@ from app.monitoring.metrics import (
     OPEN_ORDERS_BY_BROKER,
     BROKER_ACTIVE,
     BROKER_MARKET_OPEN,
+    DECISION_LATENCY,
+    ORDER_LATENCY,
 )
+from app.monitoring.audit import AuditLogger, ComplianceLogger
 from app.risk.manager import RiskManager
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.trend_following import TrendFollowingStrategy
@@ -127,6 +130,23 @@ class TradingAgent:
         trace_cfg = report_cfg.get("decision_trace", {}) or {}
         self._decision_trace_enabled = bool(trace_cfg.get("enabled", True))
         self._decision_trace_dir = str(trace_cfg.get("output_dir", "/data/reports/decision_trace"))
+        monitoring_cfg = cfg.get("monitoring", {}) or {}
+        audit_cfg = monitoring_cfg.get("audit", {}) or {}
+        compliance_cfg = monitoring_cfg.get("compliance", {}) or {}
+        self._audit_logger: AuditLogger | None = None
+        self._audit_include_features = bool(audit_cfg.get("include_features", False))
+        self._audit_include_market_state = bool(audit_cfg.get("include_market_state", False))
+        if audit_cfg.get("enabled", False):
+            self._audit_logger = AuditLogger(str(audit_cfg.get("output_dir", "/data/reports/audit")))
+        self._compliance_logger: ComplianceLogger | None = None
+        self._compliance_include_features = bool(compliance_cfg.get("include_features", False))
+        self._compliance_include_market_state = bool(compliance_cfg.get("include_market_state", False))
+        if compliance_cfg.get("enabled", False):
+            self._compliance_logger = ComplianceLogger(
+                str(compliance_cfg.get("output_dir", "/data/reports/compliance")),
+                formats=compliance_cfg.get("formats", ["jsonl"]),
+            )
+        self._include_feature_snapshots = self._audit_include_features or self._compliance_include_features
         self._drift_monitor: DriftMonitor | None = None
         self._drift_auto_rollback = False
         self._drift_rollback_done = False
@@ -185,6 +205,7 @@ class TradingAgent:
                         device=device,
                         feature_config=feature_config,
                         drift_monitor=self._drift_monitor,
+                        include_features=self._include_feature_snapshots,
                     )
                 except FileNotFoundError as exc:
                     logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
@@ -205,6 +226,7 @@ class TradingAgent:
                         device=device,
                         feature_config=feature_config,
                         drift_monitor=self._drift_monitor,
+                        include_features=self._include_feature_snapshots,
                         broker_fees=broker_fees,
                         fee_guard=fee_guard,
                         risk_cfg=risk_cfg,
@@ -345,7 +367,7 @@ class TradingAgent:
         return []
 
     def _init_decision_trace(self, symbol: str, market_state: dict) -> dict:
-        if not self._decision_trace_enabled:
+        if not (self._decision_trace_enabled or self._audit_logger or self._compliance_logger):
             return {}
         trace = {
             "symbol": symbol,
@@ -353,16 +375,20 @@ class TradingAgent:
         }
         if market_state:
             trace["signal_inputs"] = self._signal_snapshot(market_state)
+            if self._audit_include_market_state or self._compliance_include_market_state:
+                trace["market_state"] = self._market_state_snapshot(market_state)
         venue = market_state.get("venue") or market_state.get("market_venue")
         if venue:
             trace["venue"] = venue
         return trace
 
-    def _signal_summary(self, signal: dict) -> dict:
+    def _signal_summary(self, signal: dict, include_features: bool = False) -> dict:
         summary = {"name": signal.get("name"), "action": signal.get("action")}
         for key in ("score", "confidence", "strength", "reason", "weight", "signal_bias", "signal_bias_block"):
             if key in signal:
                 summary[key] = signal.get(key)
+        if include_features and "features" in signal:
+            summary["features"] = signal.get("features")
         return summary
 
     def _signal_snapshot(self, market_state: dict) -> dict:
@@ -375,6 +401,16 @@ class TradingAgent:
             "abs_move": market_state.get("signal_abs_move"),
             "runup_abs": market_state.get("signal_runup_abs"),
             "drawdown_abs": market_state.get("signal_drawdown_abs"),
+        }
+
+    def _market_state_snapshot(self, market_state: dict) -> dict:
+        return {
+            "last_price": market_state.get("last_price"),
+            "prices": market_state.get("prices"),
+            "volumes": market_state.get("volumes"),
+            "spread_pct": market_state.get("spread_pct"),
+            "session_volume": market_state.get("session_volume"),
+            "signal_inputs": self._signal_snapshot(market_state),
         }
 
     def _signal_bias(self, market_state: dict) -> float | None:
@@ -440,7 +476,7 @@ class TradingAgent:
         stage: str,
         extra: dict | None = None,
     ) -> None:
-        if not self._decision_trace_enabled:
+        if not (self._decision_trace_enabled or self._audit_logger or self._compliance_logger):
             return
         payload = dict(base)
         payload.update(
@@ -450,12 +486,27 @@ class TradingAgent:
                 "stage": stage,
             }
         )
+        start = payload.pop("_decision_start", None)
+        if start is not None:
+            try:
+                latency = time.perf_counter() - float(start)
+            except (TypeError, ValueError):
+                latency = None
+            if latency is not None:
+                payload["decision_latency_seconds"] = latency
         if extra:
             payload.update(extra)
-        self._write_decision_trace(payload)
+        if self._decision_trace_enabled:
+            self._write_decision_trace(payload)
+        if self._audit_logger:
+            self._audit_logger.write(payload)
+        if self._compliance_logger:
+            self._compliance_logger.write(payload)
 
     def run_once(self, symbol: str, market_state: dict):
         trace = self._init_decision_trace(symbol, market_state)
+        if trace and "_decision_start" in market_state:
+            trace["_decision_start"] = market_state.get("_decision_start")
         if self._kill_switch_liquidated:
             return None
         self._apply_kill_switch_profile(market_state)
@@ -511,7 +562,9 @@ class TradingAgent:
                         signal["action"] = "hold"
                         signal["signal_bias_block"] = "positive_bias"
         if trace:
-            trace["signals"] = [self._signal_summary(sig) for sig in signals]
+            trace["signals"] = [
+                self._signal_summary(sig, include_features=self._include_feature_snapshots) for sig in signals
+            ]
         self._update_orchestrator(symbol, market_state)
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             names, weights = self._orchestrator.select(symbol, active_strategies, market_state, signals)
@@ -667,6 +720,7 @@ class TradingAgent:
 
         order_notional = qty * last_price
         order_queue = self._order_queues.get(broker_name, self._order_queue)
+        order_start = time.perf_counter()
         if slices:
             order_id = None
             for order_slice in slices:
@@ -688,6 +742,10 @@ class TradingAgent:
                 limit_price=limit_price,
                 notional=order_notional,
             )
+        order_latency = time.perf_counter() - order_start
+        ORDER_LATENCY.labels(symbol=symbol, side=action).observe(order_latency)
+        if trace:
+            trace["order_latency_seconds"] = order_latency
         if action == "buy":
             strategy_label = action_strategy or (names[0] if names else None)
             if strategy_label:
@@ -1552,7 +1610,10 @@ class TradingAgent:
                 self._enrich_market_state(market_state, portfolio, sym)
                 market_state["strategy_symbols"] = self._symbols_by_strategy
                 self._update_signal_metrics(sym, market_state)
+                decision_start = time.perf_counter()
+                market_state["_decision_start"] = decision_start
                 self.run_once(sym, market_state)
+                DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
             time.sleep(interval_seconds)
 
     def _merge_symbols_with_positions(self, symbols: list[str], portfolio: dict) -> list[str]:

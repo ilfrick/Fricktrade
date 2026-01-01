@@ -21,12 +21,14 @@ class RLPolicyStrategy(Strategy):
         device: str = "auto",
         feature_config: dict | None = None,
         drift_monitor: "DriftMonitor | None" = None,
+        include_features: bool = False,
     ):
         self.window_size = window_size
         self.device = _resolve_device(device)
         self.model_path = model_path
         self.feature_config = feature_config or {}
         self._drift_monitor = drift_monitor
+        self._include_features = include_features
         self.model = None
         self.position = 0.0
         self.prices = deque(maxlen=window_size * 4)
@@ -72,13 +74,16 @@ class RLPolicyStrategy(Strategy):
         action, _ = self.model.predict(obs, deterministic=True)
         action = int(action)
 
+        signal = {"action": "hold"}
         if action == 1:
             self.position = 1.0
-            return {"action": "buy"}
-        if action == 2:
+            signal["action"] = "buy"
+        elif action == 2:
             self.position = -1.0
-            return {"action": "sell"}
-        return {"action": "hold"}
+            signal["action"] = "sell"
+        if self._include_features:
+            signal["features"] = obs.tolist()
+        return signal
 
 
 def _resolve_device(device: str) -> str:

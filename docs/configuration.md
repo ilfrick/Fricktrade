@@ -54,6 +54,8 @@ Centralize runtime settings for all subsystems.
 - Online learning: `learning.online.enabled`.
 - Model registry: `learning.registry.enabled`.
 - Drift monitoring: `learning.drift.enabled`.
+- Decision audit logs: `monitoring.audit.enabled`.
+- Compliance exports: `monitoring.compliance.enabled`.
 - Checkpointing: `checkpointing.enabled`.
 - Multi-broker routing: `execution.brokers.enabled`.
 - Multi-account env auto-detect: `ALPACA_API_KEYS`/`ALPACA_API_SECRETS` or `ALPACA_API_KEY_1` +

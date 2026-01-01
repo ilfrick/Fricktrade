@@ -637,3 +637,16 @@ execution:
 monitoring:
   prometheus_port: 8001
   metrics_path: /metrics
+  audit:
+    enabled: false
+    output_dir: /data/reports/audit
+    include_features: true
+    include_market_state: false
+  compliance:
+    enabled: false
+    output_dir: /data/reports/compliance
+    formats:
+    - jsonl
+    - csv
+    include_features: false
+    include_market_state: false

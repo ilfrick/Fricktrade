@@ -94,6 +94,16 @@ BROKER_LATENCY = Histogram(
     "Broker API request latency",
     ["broker", "method"],
 )
+DECISION_LATENCY = Histogram(
+    "decision_latency_seconds",
+    "Time spent generating a decision per symbol",
+    ["symbol"],
+)
+ORDER_LATENCY = Histogram(
+    "order_enqueue_latency_seconds",
+    "Time to enqueue an order for execution",
+    ["symbol", "side"],
+)
 
 
 def start_metrics_server(port: int):

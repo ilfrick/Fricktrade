@@ -402,6 +402,15 @@ _DESCRIPTIONS = {
     "logging.backup_count": "Number of rotated log files to retain.",
     "monitoring.prometheus_port": "Prometheus metrics port.",
     "monitoring.metrics_path": "Metrics path.",
+    "monitoring.audit.enabled": "Enable audit trail logging for decisions.",
+    "monitoring.audit.output_dir": "Directory for audit log JSONL files.",
+    "monitoring.audit.include_features": "Include full feature snapshots in audit logs.",
+    "monitoring.audit.include_market_state": "Include market state snapshots in audit logs.",
+    "monitoring.compliance.enabled": "Enable compliance log exports.",
+    "monitoring.compliance.output_dir": "Directory for compliance log files.",
+    "monitoring.compliance.formats": "Compliance export formats (jsonl, csv).",
+    "monitoring.compliance.include_features": "Include feature snapshots in compliance logs.",
+    "monitoring.compliance.include_market_state": "Include market state snapshots in compliance logs.",
 }
 
 

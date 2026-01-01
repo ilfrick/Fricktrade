@@ -11,6 +11,7 @@ class FeeAwareRLPolicyStrategy(RLPolicyStrategy):
         device: str = "auto",
         feature_config: dict | None = None,
         drift_monitor=None,
+        include_features: bool = False,
         broker_fees: dict | None = None,
         fee_guard: dict | None = None,
         risk_cfg: dict | None = None,
@@ -21,6 +22,7 @@ class FeeAwareRLPolicyStrategy(RLPolicyStrategy):
             device=device,
             feature_config=feature_config,
             drift_monitor=drift_monitor,
+            include_features=include_features,
         )
         self.broker_fees = broker_fees or {}
         self.fee_guard = fee_guard or {}
