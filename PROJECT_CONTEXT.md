@@ -41,6 +41,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Rendered daily report emails as HTML and saved HTML bodies to disk.
 - Added decision trace logging in trader and surfaced it in daily report output.
 - Added absolute move values to daily report metrics alongside percentage signals.
 - Switched no-trade inference to use 24h symbol_active counts for stability during market sleep.

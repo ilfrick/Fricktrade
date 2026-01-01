@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import html
 import logging
 import smtplib
 import time
@@ -78,7 +79,7 @@ def _smtp_settings(cfg: dict) -> dict[str, str | list[str]]:
     }
 
 
-def _send_email(subject: str, body: str, cfg: dict) -> None:
+def _send_email(subject: str, body: str, html_body: str | None, cfg: dict) -> None:
     settings = _smtp_settings(cfg)
     if not settings.get("host") or not settings.get("from") or not settings.get("to"):
         logging.warning("Daily report email skipped: SMTP config incomplete.")
@@ -88,6 +89,8 @@ def _send_email(subject: str, body: str, cfg: dict) -> None:
     msg["From"] = settings["from"]
     msg["To"] = ", ".join(settings["to"])
     msg.set_content(body)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
 
     host = settings["host"]
     if ":" in host:
@@ -336,6 +339,13 @@ def _save_report_body(output_dir: Path, venue: str, date_str: str, body: str) ->
     report_dir = output_dir / date_str / "_email"
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / f"daily_report_{venue}.txt"
+    report_path.write_text(body, encoding="utf-8")
+
+
+def _save_report_html(output_dir: Path, venue: str, date_str: str, body: str) -> None:
+    report_dir = output_dir / date_str / "_email"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"daily_report_{venue}.html"
     report_path.write_text(body, encoding="utf-8")
 
 
@@ -768,6 +778,69 @@ def _render_report(
     return "\n".join(lines)
 
 
+def _render_report_html(
+    broker: str,
+    venue: str,
+    date_str: str,
+    movers: list[dict],
+) -> str:
+    title = f"Daily Top Movers - {broker} - {venue} - {date_str}"
+    rows = []
+    for idx, item in enumerate(movers, start=1):
+        traded = "yes" if item.get("traded") else "no"
+        reasons = ", ".join(item.get("reasons") or [])
+        metrics = item.get("metrics") or ""
+        hints = ", ".join(item.get("hints") or [])
+        trace = item.get("decision_trace") or {}
+        trace_bits = []
+        for key in ("decision", "stage", "reason", "action", "action_strategy", "broker"):
+            value = trace.get(key)
+            if value:
+                trace_bits.append(f"{key}={value}")
+        trace_line = ", ".join(trace_bits)
+        orch = trace.get("orchestrator_selected")
+        signals = trace.get("signals") or []
+        signals_line = ", ".join(
+            f"{s.get('name')}={s.get('action')}" for s in signals if s.get("name")
+        )
+        news_items = item.get("news") or []
+        news_html = ""
+        if news_items:
+            news_html = "<ul>" + "".join(
+                f"<li>{html.escape((n.get('created_at') or '').isoformat() if isinstance(n.get('created_at'), datetime) else '')} "
+                f"{html.escape(n.get('headline') or '')}</li>"
+                for n in news_items
+            ) + "</ul>"
+        rows.append(
+            "<tr>"
+            f"<td>{idx}</td>"
+            f"<td>{html.escape(item['symbol'])}</td>"
+            f"<td>{item['gain_pct']:.2f}%</td>"
+            f"<td>{traded}</td>"
+            f"<td>{html.escape(reasons)}</td>"
+            f"<td>{html.escape(metrics)}</td>"
+            f"<td>{html.escape(hints)}</td>"
+            f"<td>{html.escape(trace_line)}</td>"
+            f"<td>{html.escape(str(orch)) if orch else ''}</td>"
+            f"<td>{html.escape(signals_line)}</td>"
+            f"<td>{news_html}</td>"
+            "</tr>"
+        )
+    return (
+        "<html><body>"
+        f"<h2>{html.escape(title)}</h2>"
+        "<table border='1' cellspacing='0' cellpadding='6'>"
+        "<thead><tr>"
+        "<th>#</th><th>Symbol</th><th>Gain %</th><th>Traded</th><th>Reasons</th>"
+        "<th>Metrics</th><th>Signals</th><th>Decision Trace</th>"
+        "<th>Orchestrator</th><th>Signals Trace</th><th>News</th>"
+        "</tr></thead><tbody>"
+        + "".join(rows) +
+        "</tbody></table>"
+        "</body></html>"
+    )
+
+
 def run_daily_reports(config_path: str) -> None:
     cfg = load_config(config_path)
     report_cfg = cfg.get("reports", {}).get("daily_top_movers", {}) or {}
@@ -837,6 +910,7 @@ def run_daily_reports(config_path: str) -> None:
                 reverse=True,
             )
             sections = []
+            sections_html = []
             for broker in brokers:
                 if venue_name not in broker_venues.get(broker, []):
                     continue
@@ -910,11 +984,14 @@ def run_daily_reports(config_path: str) -> None:
                                     for entry in news_items
                                 )
                 sections.append(_render_report(broker, venue_name, date_str, movers, cfg))
+                sections_html.append(_render_report_html(broker, venue_name, date_str, movers))
             if sections:
                 subject = f"Daily Top Movers - {venue_name} - {date_str}"
                 body = "\n\n".join(sections)
+                html_body = "<hr/>".join(sections_html)
                 _save_report_body(output_dir, venue_name, date_str, body)
-                _send_email(subject, body, cfg)
+                _save_report_html(output_dir, venue_name, date_str, html_body)
+                _send_email(subject, body, html_body, cfg)
             _write_status(output_dir, venue_name, date_str, "done")
             last_run[venue_name] = date_str
         time.sleep(poll_seconds)
