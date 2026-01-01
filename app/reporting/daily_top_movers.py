@@ -560,6 +560,40 @@ def _query_prometheus(prom_url: str, query: str) -> dict:
     return data.get("data", {}).get("result", [])
 
 
+def _query_prometheus_value(prom_url: str, query: str) -> float | None:
+    try:
+        result = _query_prometheus(prom_url, query)
+    except Exception:
+        return None
+    if not result:
+        return None
+    try:
+        return float(result[0].get("value", [0, 0])[1])
+    except Exception:
+        return None
+
+
+def _diagnose_no_trade(prom_url: str, symbol: str) -> str:
+    total_active = _query_prometheus_value(prom_url, "sum(count_over_time(symbol_active[24h]))")
+    if total_active is None or total_active <= 0:
+        return "metrics_unavailable"
+    active = _query_prometheus_value(
+        prom_url,
+        f'sum(count_over_time(symbol_active{{symbol="{symbol}"}}[24h]))',
+    )
+    if active is None:
+        return "not_in_active_universe"
+    if active < 0.5:
+        return "not_in_active_universe"
+    open_orders = _query_prometheus_value(prom_url, f'sum(open_orders{{symbol="{symbol}"}})')
+    if open_orders and open_orders > 0:
+        return "open_order_pending"
+    position_qty = _query_prometheus_value(prom_url, f'sum(position_qty{{symbol="{symbol}"}})')
+    if position_qty and position_qty > 0:
+        return "held_position_no_trade"
+    return "no_signal_or_filtered"
+
+
 def _build_skip_reasons(prom_url: str, symbol: str) -> list[str]:
     result = _query_prometheus(
         prom_url,
@@ -749,7 +783,7 @@ def run_daily_reports(config_path: str) -> None:
                     if not traded:
                         reasons = _build_skip_reasons(prom_url, symbol)
                         if not reasons:
-                            reasons = ["no_trades_detected"]
+                            reasons = [_diagnose_no_trade(prom_url, symbol)]
                         item["reasons"] = reasons
                         ai_reason = _explain_with_ai(symbol, reasons, cfg)
                         if ai_reason:

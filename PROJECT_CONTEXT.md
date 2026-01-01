@@ -41,6 +41,9 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Switched no-trade inference to use 24h symbol_active counts for stability during market sleep.
+- Treated missing symbol_active metrics as not_in_active_universe when Prometheus is healthy.
+- Added inferred no-trade reasons using Prometheus gauges when no skip metrics exist.
 - Restored SMTP STARTTLS for daily report emails after server required it.
 - Saved daily report email bodies to disk and made SMTP auth optional based on server capabilities.
 - Added SMTP TLS override for daily report emails and guarded SMTP failures.

@@ -179,6 +179,8 @@ Daily top movers reporting runs after each market close, emails a summary, and s
 bars for the top performers. The report includes numeric indicators, signal hints, and optional news
 correlation for each top mover.
 The email body is also saved locally under `/data/reports/daily_top_movers/<YYYY-MM-DD>/_email/`.
+If a symbol has no trades and no skip metrics, the report will infer a reason such as
+`not_in_active_universe`, `open_order_pending`, `held_position_no_trade`, or `no_signal_or_filtered`.
 
 Key config under `reports.daily_top_movers.*`:
 - `feed` (iex or sip)
