@@ -7,6 +7,8 @@ from typing import Iterable
 
 import requests
 
+from app.brokers.config_utils import get_alpaca_account_cfg
+
 
 def fetch_catalyst_symbols(
     symbols: Iterable[str],
@@ -58,7 +60,7 @@ def fetch_catalyst_symbols_for_config(
     brokers_cfg: dict,
 ) -> dict[str, bool]:
     provider = str(news_cfg.get("provider", "alpaca"))
-    alpaca_cfg = brokers_cfg.get("alpaca", {}) if isinstance(brokers_cfg, dict) else {}
+    alpaca_cfg = get_alpaca_account_cfg(brokers_cfg if isinstance(brokers_cfg, dict) else {})
     api_key = str(news_cfg.get("api_key", "")) or str(alpaca_cfg.get("api_key", ""))
     api_secret = str(news_cfg.get("api_secret", "")) or str(alpaca_cfg.get("api_secret", ""))
     if provider != "brokers":

@@ -23,6 +23,7 @@ Centralize runtime settings for all subsystems.
 - `execution.brokers.*` (multi-broker routing)
 - `learning.*`
 - `brokers.*`
+- `brokers.<name>.accounts[]` (optional multi-account entries; each becomes a broker instance)
 - `backtest.*`
 - `monitoring.*`
 - `checkpointing.*` (periodic state checkpoints + retention)
@@ -48,8 +49,13 @@ Centralize runtime settings for all subsystems.
 - Online learning: `learning.online.enabled`.
 - Checkpointing: `checkpointing.enabled`.
 - Multi-broker routing: `execution.brokers.enabled`.
+- Multi-account env auto-detect: `ALPACA_API_KEYS`/`ALPACA_API_SECRETS` or `ALPACA_API_KEY_1` +
+  `ALPACA_API_SECRET_1`, and `IBKR_CLIENT_IDS` or `IBKR_CLIENT_ID_1` (optional `IBKR_ACCOUNT_ID_*`).
 - Execution algos: `execution.algos.enabled`.
 - Volatility targeting: `risk.vol_targeting.enabled`.
+- Signal bias guard: `strategy.signal_bias_guard.*` (blocks counter-trend actions).
+- RL signal features: `learning.features.include_signal_features` and `learning.features.signal_interval`.
+- Benchmarks: `benchmarking.*` (walk-forward + stress scenarios, output/plot/PDF paths).
 - Market-based stack sleep/wake: `healthwatch.market_shutdown.*` (stops services when markets are closed).
 - Manual kill switches: `kill_switch.*` (force sleep or force liquidation with interlock).
 - Daily top movers report: `reports.daily_top_movers.*` (daily winners, email, training data export; includes `feed`).

@@ -16,6 +16,8 @@ Expose Prometheus metrics and Grafana dashboards.
 - `account_total`, `account_cash`, `account_buying_power`, `account_invested`
 - `position_qty`, `position_value`
 - `open_orders`
+- `signal_return_30m_pct`, `signal_return_60m_pct`, `signal_early_volume_pct`
+- `signal_runup_pct`, `signal_drawdown_pct`, `signal_abs_move`, `signal_runup_abs`, `signal_drawdown_abs`
 
 ## Configuration
 `config/config.yaml`:

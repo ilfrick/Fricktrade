@@ -10,6 +10,7 @@ import requests
 
 from app.data.downloader import download_yfinance, download_alpaca_bars
 from app.data.scanner import load_universe
+from app.brokers.config_utils import get_alpaca_account_cfg
 
 
 def _save_ohlcv(df: pd.DataFrame, out_dir: str, symbol: str, interval: str) -> Path:
@@ -102,7 +103,7 @@ def ingest_from_config(cfg: dict) -> list[Path]:
             continue
 
         if provider == "alpaca":
-            alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
+            alpaca_cfg = get_alpaca_account_cfg(cfg)
             api_key = source.get("api_key", alpaca_cfg.get("api_key", ""))
             api_secret = source.get("api_secret", alpaca_cfg.get("api_secret", ""))
             universe_cfg = source.get("universe")

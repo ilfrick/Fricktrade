@@ -206,6 +206,15 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added benchmarking plots, regime tagging, scorecard metrics, and PDF summaries.
+- Added benchmark runner and documentation for walk-forward and stress tests.
+- Added Grafana panels for intraday signal metrics (percent + absolute).
+- Fixed AI filter retrain to pass broker config to news fetcher.
+- Fixed RL orchestrator AI feature extraction indentation regression.
+- Fixed Alpaca market data prefetch using missing IBKR handle; align AI filter signals to latest day.
+- Added intraday signal metrics to live decisions, RL features, and AI filter training.
+- Added env-based auto-detection for multi-account brokers with graceful fallback on invalid keys.
+- Added multi-account broker support with per-account routing and config helpers.
 - Added daily top movers report with email + training data export.
 - Added manual kill switches for force sleep and force liquidation with interlock.
 - Added healthwatch scheduler heartbeat logging.

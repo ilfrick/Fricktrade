@@ -30,6 +30,7 @@ from app.utils.market import is_venue_open
 import argparse
 
 from app.utils.config import load_config
+from app.brokers.config_utils import get_alpaca_account_cfg
 
 
 def _read_alertmanager_config(path: Path) -> dict[str, Any]:
@@ -182,7 +183,7 @@ def _venue_close_dt(venue_cfg: dict, now: datetime) -> datetime:
 def _alpaca_client(cfg: dict) -> StockHistoricalDataClient | None:
     if StockHistoricalDataClient is None:
         return None
-    alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {}) or {}
+    alpaca_cfg = get_alpaca_account_cfg(cfg)
     api_key = alpaca_cfg.get("api_key", "")
     api_secret = alpaca_cfg.get("api_secret", "")
     if not api_key or not api_secret:
@@ -196,7 +197,7 @@ def _resolve_universe(cfg: dict) -> list[str]:
     if universe is None:
         universe = cfg.get("data", {}).get("dynamic_symbols", {}).get("universe", "alpaca_active")
     max_universe = int(report_cfg.get("max_universe", 5000))
-    alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {}) or {}
+    alpaca_cfg = get_alpaca_account_cfg(cfg)
     api_key = alpaca_cfg.get("api_key", "")
     api_secret = alpaca_cfg.get("api_secret", "")
     return load_universe(api_key, api_secret, universe, max_universe=max_universe)
@@ -527,7 +528,7 @@ def _load_decision_traces(cfg: dict, date_str: str) -> dict[str, dict]:
 
 def _alpaca_news_keys(cfg: dict) -> tuple[str, str, str]:
     news_cfg = cfg.get("news", {}) or {}
-    alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {}) or {}
+    alpaca_cfg = get_alpaca_account_cfg(cfg)
     api_key = str(news_cfg.get("api_key", "")) or str(alpaca_cfg.get("api_key", ""))
     api_secret = str(news_cfg.get("api_secret", "")) or str(alpaca_cfg.get("api_secret", ""))
     base_url = str(news_cfg.get("base_url", "https://data.alpaca.markets"))
@@ -868,7 +869,7 @@ def run_daily_reports(config_path: str) -> None:
         exchange_map = auto_cfg.get("exchange_venue_map", {}) or {}
         max_symbols_map = int(auto_cfg.get("max_symbols", 50000))
         if exchange_map:
-            alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {}) or {}
+            alpaca_cfg = get_alpaca_account_cfg(cfg)
             try:
                 symbol_venues = load_symbol_venues(
                     alpaca_cfg.get("api_key", ""),

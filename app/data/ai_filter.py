@@ -17,6 +17,7 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from app.data.news import fetch_catalyst_symbols_for_config
+from app.utils.signal_features import compute_signal_metrics_from_window
 
 
 @dataclass
@@ -52,7 +53,7 @@ def score_symbols(
     api_secret: str,
     cfg: dict,
     brokers_cfg: dict | None = None,
-) -> tuple[list[str], dict[str, float]]:
+) -> tuple[list[str], dict[str, float], dict[str, dict[str, float]]]:
     symbols = [s for s in symbols if s]
     if not symbols or not api_key or not api_secret:
         return [], {}
@@ -60,7 +61,7 @@ def score_symbols(
     model_path = Path(config.model_path)
     model, stats = _load_model(model_path, config.retrain_hours)
     if model is None or stats is None:
-        model, stats = _train_model(symbols, api_key, api_secret, config)
+        model, stats = _train_model(symbols, api_key, api_secret, config, brokers_cfg or {})
         if model is not None and stats is not None:
             _save_model(model_path, model, stats)
 
@@ -74,17 +75,35 @@ def score_symbols(
 
     bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
     scores = {}
+    signal_map: dict[str, dict[str, float]] = {}
     for symbol, frame in bars.items():
-        features = _latest_features(frame, config.window, catalyst_map.get(symbol, False))
+        features = _latest_features(frame, config.window, catalyst_map.get(symbol, False), config.interval)
         if features is None:
             scores[symbol] = 0.0
             continue
         score = _predict(model, stats, features)
         scores[symbol] = float(score)
+        if frame is not None and not frame.empty:
+            try:
+                idx = frame.index
+                last_day = idx[-1].date()
+                day_frame = frame.loc[idx.date == last_day]
+                if day_frame.empty:
+                    day_frame = frame
+                signal_map[symbol] = compute_signal_metrics_from_window(
+                    prices=day_frame["close"].astype(float).tolist(),
+                    volumes=day_frame["volume"].astype(float).tolist(),
+                    highs=day_frame["high"].astype(float).tolist() if "high" in day_frame else None,
+                    lows=day_frame["low"].astype(float).tolist() if "low" in day_frame else None,
+                    interval=config.interval,
+                )
+            except Exception:
+                signal_map[symbol] = {}
     for symbol in symbols:
         scores.setdefault(symbol, 0.0)
+        signal_map.setdefault(symbol, {})
     ordered = sorted(symbols, key=lambda s: scores.get(s, 0.0), reverse=True)
-    return ordered, scores
+    return ordered, scores, signal_map
 
 
 def _read_config(cfg: dict) -> AISymbolFilterConfig:
@@ -181,7 +200,13 @@ def _save_model(model_path: Path, model, stats: dict):
     torch.save(payload, model_path)
 
 
-def _train_model(symbols: list[str], api_key: str, api_secret: str, cfg: AISymbolFilterConfig):
+def _train_model(
+    symbols: list[str],
+    api_key: str,
+    api_secret: str,
+    cfg: AISymbolFilterConfig,
+    brokers_cfg: dict,
+):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logging.info("AI filter train device: %s", device)
     train_symbols = symbols[: cfg.train_max_symbols]
@@ -345,12 +370,16 @@ def _features_and_labels(frame: pd.DataFrame, cfg: AISymbolFilterConfig, catalys
     for idx in range(cfg.window, len(returns) - 1):
         window_ret = returns[idx - cfg.window : idx]
         window_vol = volume[idx - cfg.window : idx]
-        feat_rows.append(_feature_vector(window_ret, window_vol, catalyst))
+        window_prices = close[idx - cfg.window : idx + 1]
+        window_vol_prices = volume[idx - cfg.window : idx + 1]
+        feat_rows.append(
+            _feature_vector(window_ret, window_vol, catalyst, window_prices, window_vol_prices, cfg.interval)
+        )
         labels.append(_target_value(returns[idx + 1], window_vol, cfg.objective, cfg.time_penalty_per_bar))
     return np.array(feat_rows, dtype=float), np.array(labels, dtype=float)
 
 
-def _latest_features(frame: pd.DataFrame, window: int, catalyst: bool):
+def _latest_features(frame: pd.DataFrame, window: int, catalyst: bool, interval: str):
     if frame is None or frame.empty:
         return None
     close = frame["close"].astype(float).values
@@ -360,10 +389,19 @@ def _latest_features(frame: pd.DataFrame, window: int, catalyst: bool):
         return None
     window_ret = returns[-window:]
     window_vol = volume[-window:]
-    return _feature_vector(window_ret, window_vol, catalyst)
+    window_prices = close[-(window + 1) :]
+    window_vol_prices = volume[-(window + 1) :]
+    return _feature_vector(window_ret, window_vol, catalyst, window_prices, window_vol_prices, interval)
 
 
-def _feature_vector(returns: np.ndarray, volume: np.ndarray, catalyst: bool) -> np.ndarray:
+def _feature_vector(
+    returns: np.ndarray,
+    volume: np.ndarray,
+    catalyst: bool,
+    prices: np.ndarray | None,
+    prices_volume: np.ndarray | None,
+    interval: str,
+) -> np.ndarray:
     mean_ret = float(np.mean(returns))
     std_ret = float(np.std(returns))
     momentum = float(np.sum(returns))
@@ -372,7 +410,27 @@ def _feature_vector(returns: np.ndarray, volume: np.ndarray, catalyst: bool) -> 
     vol_std = float(np.std(volume)) if volume.size else 0.0
     vol_z = (float(volume[-1]) - vol_mean) / vol_std if vol_std else 0.0
     catalyst_flag = 1.0 if catalyst else 0.0
-    return np.array([mean_ret, std_ret, momentum, last_ret, vol_z, catalyst_flag], dtype=float)
+    features = [mean_ret, std_ret, momentum, last_ret, vol_z, catalyst_flag]
+    if prices is not None and prices.size > 1:
+        vol_series = prices_volume if prices_volume is not None and prices_volume.size > 0 else volume
+        signal_vals = compute_signal_metrics_from_window(
+            prices=prices.tolist(),
+            volumes=vol_series.tolist(),
+            interval=interval,
+        )
+        features.extend(
+            [
+                signal_vals.get("signal_30m_return_pct", 0.0),
+                signal_vals.get("signal_60m_return_pct", 0.0),
+                signal_vals.get("signal_early_volume_pct", 0.0),
+                signal_vals.get("signal_runup_pct", 0.0),
+                signal_vals.get("signal_drawdown_pct", 0.0),
+                signal_vals.get("signal_abs_move", 0.0),
+                signal_vals.get("signal_runup_abs", 0.0),
+                signal_vals.get("signal_drawdown_abs", 0.0),
+            ]
+        )
+    return np.array(features, dtype=float)
 
 
 def _target_value(
@@ -462,6 +520,7 @@ def build_feature_vector_from_series(
     volumes: list[float] | None,
     window: int,
     catalyst: bool,
+    interval: str = "5m",
 ) -> np.ndarray | None:
     if prices is None or len(prices) < window + 1:
         return None
@@ -478,7 +537,9 @@ def build_feature_vector_from_series(
         return None
     window_ret = returns[-window:]
     window_vol = volume[-window:]
-    return _feature_vector(window_ret, window_vol, catalyst)
+    window_prices = close[-(window + 1) :]
+    window_vol_prices = volume[-(window + 1) :]
+    return _feature_vector(window_ret, window_vol, catalyst, window_prices, window_vol_prices, interval)
 
 
 def latest_features_for_symbol(
@@ -495,4 +556,4 @@ def latest_features_for_symbol(
     frame = bars.get(symbol)
     if frame is None or frame.empty:
         return None
-    return _latest_features(frame, config.window, catalyst)
+    return _latest_features(frame, config.window, catalyst, config.interval)

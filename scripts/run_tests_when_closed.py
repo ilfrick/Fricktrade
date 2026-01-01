@@ -23,6 +23,32 @@ def _run_backtest(config_path: str) -> int:
     return result.returncode
 
 
+def _run_benchmarks(cfg: dict, config_path: str) -> int:
+    bench_cfg = cfg.get("benchmarking", {}) or {}
+    args = [
+        "python",
+        "scripts/benchmark_runner.py",
+        "--config",
+        config_path,
+        "--output",
+        str(bench_cfg.get("output_path", "/data/reports/benchmark_report.json")),
+    ]
+    if bench_cfg.get("use_plan", True):
+        args.append("--use-plan")
+        args.extend(["--plan-window-days", str(bench_cfg.get("plan_window_days", 60))])
+        args.extend(["--plan-step-days", str(bench_cfg.get("plan_step_days", 30))])
+        args.extend(["--plan-liquidity-tiers", str(bench_cfg.get("plan_liquidity_tiers", 3))])
+        args.extend(["--plan-sample-per-tier", str(bench_cfg.get("plan_sample_per_tier", 10))])
+    plot_dir = bench_cfg.get("plot_dir")
+    if plot_dir:
+        args.extend(["--plot-dir", str(plot_dir)])
+    pdf_path = bench_cfg.get("pdf_path")
+    if pdf_path:
+        args.extend(["--pdf-path", str(pdf_path)])
+    result = subprocess.run(args, check=False)
+    return result.returncode
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="/app/config/config.yaml")
@@ -46,6 +72,11 @@ def main() -> None:
                 logging.info("Market closed; running backtest.")
                 backtest_code = _run_backtest(args.config)
                 logging.info("Backtest finished with exit code %d.", backtest_code)
+            bench_cfg = cfg.get("benchmarking", {})
+            if bench_cfg.get("run_when_closed", False):
+                logging.info("Market closed; running benchmarks.")
+                bench_code = _run_benchmarks(cfg, args.config)
+                logging.info("Benchmarks finished with exit code %d.", bench_code)
         if args.once:
             break
         time.sleep(interval * 60)

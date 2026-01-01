@@ -34,10 +34,24 @@ _DESCRIPTIONS = {
     "brokers.alpaca.base_url": "Alpaca API base URL (paper or live).",
     "brokers.alpaca.api_key": "Alpaca API key (use ENV var).",
     "brokers.alpaca.api_secret": "Alpaca API secret (use ENV var).",
+    "brokers.alpaca.accounts": "Optional list of Alpaca accounts (each becomes its own broker instance).",
+    "brokers.alpaca.accounts[].name": "Account label used in broker routing (alpaca:<name>).",
+    "brokers.alpaca.accounts[].enabled": "Enable this Alpaca account entry.",
+    "brokers.alpaca.accounts[].base_url": "Alpaca API base URL for this account.",
+    "brokers.alpaca.accounts[].api_key": "Alpaca API key for this account (use ENV var).",
+    "brokers.alpaca.accounts[].api_secret": "Alpaca API secret for this account (use ENV var).",
     "brokers.ibkr.enabled": "Enable IBKR broker.",
     "brokers.ibkr.host": "IBKR host.",
     "brokers.ibkr.port": "IBKR port.",
     "brokers.ibkr.client_id": "IBKR client id.",
+    "brokers.ibkr.account_id": "Optional IBKR account id for routing positions/orders.",
+    "brokers.ibkr.accounts": "Optional list of IBKR accounts (each becomes its own broker instance).",
+    "brokers.ibkr.accounts[].name": "Account label used in broker routing (ibkr:<name>).",
+    "brokers.ibkr.accounts[].enabled": "Enable this IBKR account entry.",
+    "brokers.ibkr.accounts[].host": "IBKR host for this account.",
+    "brokers.ibkr.accounts[].port": "IBKR port for this account.",
+    "brokers.ibkr.accounts[].client_id": "IBKR client id for this account.",
+    "brokers.ibkr.accounts[].account_id": "IBKR account id for this account.",
     "risk.max_daily_loss_pct": "Max daily loss percentage.",
     "risk.max_position_size_pct": "Max position size percentage.",
     "risk.max_portfolio_leverage": "Max leverage.",
@@ -77,6 +91,8 @@ _DESCRIPTIONS = {
     "strategy.params.market_maker.inventory_target_pct": "Market maker inventory target percentage.",
     "strategy.params.market_maker.skew_pct": "Market maker inventory skew percentage.",
     "strategy.params.market_maker.min_qty": "Market maker minimum order quantity.",
+    "strategy.signal_bias_guard.enabled": "Enable signal bias guard for strategy actions.",
+    "strategy.signal_bias_guard.threshold": "Bias threshold used to block counter-trend actions.",
     "orchestrator.mode": "Orchestrator mode: direct, select, or weight.",
     "orchestrator.top_k": "Max strategies selected per symbol.",
     "orchestrator.min_score": "Minimum score to include a strategy.",
@@ -174,6 +190,8 @@ _DESCRIPTIONS = {
     "learning.device": "Device for RL model (cpu, cuda, auto).",
     "learning.window_size": "Feature window size.",
     "learning.features.include_returns": "Include returns in features.",
+    "learning.features.include_signal_features": "Include intraday signal features in features.",
+    "learning.features.signal_interval": "Interval used to compute intraday signal features.",
     "learning.features.sma_periods": "SMA periods.",
     "learning.features.ema_periods": "EMA periods.",
     "learning.features.rsi_periods": "RSI periods.",
@@ -236,6 +254,15 @@ _DESCRIPTIONS = {
     "backtest.slippage_bps": "Backtest slippage in bps.",
     "backtest.use_gpu": "Enable GPU acceleration (if available).",
     "backtest.mode": "Backtest mode: agent (live logic) or sma (legacy).",
+    "benchmarking.run_when_closed": "Run benchmarks when markets are closed.",
+    "benchmarking.use_plan": "Enable walk-forward backtest plan for benchmarks.",
+    "benchmarking.plan_window_days": "Benchmark plan window size in days.",
+    "benchmarking.plan_step_days": "Benchmark plan step size in days.",
+    "benchmarking.plan_liquidity_tiers": "Benchmark plan liquidity tiers.",
+    "benchmarking.plan_sample_per_tier": "Benchmark samples per liquidity tier.",
+    "benchmarking.output_path": "Benchmark report output path.",
+    "benchmarking.plot_dir": "Benchmark plot output directory.",
+    "benchmarking.pdf_path": "Benchmark PDF summary output path.",
     "data.provider": "Data provider (yfinance, alpaca, or brokers).",
     "data.symbols": "Symbols to trade.",
     "data.interval": "Data interval (e.g., 1m).",
@@ -329,11 +356,7 @@ async def health():
 @app.get("/config")
 async def get_config():
     cfg = load_config("/app/config/config.yaml")
-    cfg["brokers"]["alpaca"]["api_key"] = "***"
-    cfg["brokers"]["alpaca"]["api_secret"] = "***"
-    if "news" in cfg:
-        cfg["news"]["api_key"] = "***"
-        cfg["news"]["api_secret"] = "***"
+    _mask_secrets(cfg)
     return cfg
 
 
@@ -394,6 +417,15 @@ def _mask_secrets(cfg: dict) -> None:
     except Exception:
         pass
     try:
+        accounts = cfg.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
+        for acct in accounts:
+            if not isinstance(acct, dict):
+                continue
+            acct["api_key"] = "***"
+            acct["api_secret"] = "***"
+    except Exception:
+        pass
+    try:
         cfg["news"]["api_key"] = "***"
         cfg["news"]["api_secret"] = "***"
     except Exception:
@@ -423,6 +455,20 @@ def _merge_secrets(target: dict, source: dict) -> None:
                 new_val[path[-1]] = current
         except Exception:
             continue
+    try:
+        current_accounts = source.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
+        new_accounts = target.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
+        for idx, acct in enumerate(new_accounts):
+            if not isinstance(acct, dict):
+                continue
+            if idx >= len(current_accounts):
+                continue
+            current_acct = current_accounts[idx] if isinstance(current_accounts[idx], dict) else {}
+            for key in ("api_key", "api_secret"):
+                if acct.get(key) == "***":
+                    acct[key] = current_acct.get(key, "")
+    except Exception:
+        pass
 
 
 def _validate_config_keys(new_cfg: object, current_cfg: object, prefix: str = "") -> list[str]:

@@ -20,6 +20,8 @@ Train and evaluate RL policies, and support online updates.
 - `learning.use_best_model`
 - `learning.training.*`
 - `learning.online.*`
+- `learning.features.include_signal_features` (adds intraday signal features to observations)
+- `learning.features.signal_interval`
 
 ## Train
 ```bash

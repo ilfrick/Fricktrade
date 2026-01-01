@@ -21,6 +21,11 @@ Notes:
 - Uses CSVs from `backtest.data_dir`.
 - If `data.symbols` is empty, backtests can fall back to CSV symbols.
 
+## Benchmarks
+Benchmarks run when markets are closed if `benchmarking.run_when_closed: true`.
+They use `scripts/benchmark_runner.py` and write reports/plots/PDFs under
+`/data/reports/`.
+
 ## Smoke Checks
 - `/health` endpoint returns `ok`.
 - Grafana shows active broker, symbols, and orders.

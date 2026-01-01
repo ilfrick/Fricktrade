@@ -71,6 +71,14 @@ POSITION_QTY = Gauge("position_qty", "Position quantity", ["symbol"])
 POSITION_VALUE = Gauge("position_value", "Position market value", ["symbol"])
 POSITION_QTY_BY_BROKER = Gauge("position_qty_by_broker", "Position quantity", ["broker", "symbol"])
 POSITION_VALUE_BY_BROKER = Gauge("position_value_by_broker", "Position market value", ["broker", "symbol"])
+SIGNAL_RETURN_30M = Gauge("signal_return_30m_pct", "30m return percent", ["symbol"])
+SIGNAL_RETURN_60M = Gauge("signal_return_60m_pct", "60m return percent", ["symbol"])
+SIGNAL_EARLY_VOL = Gauge("signal_early_volume_pct", "Early volume percent", ["symbol"])
+SIGNAL_RUNUP = Gauge("signal_runup_pct", "Runup percent", ["symbol"])
+SIGNAL_DRAWDOWN = Gauge("signal_drawdown_pct", "Drawdown percent", ["symbol"])
+SIGNAL_ABS_MOVE = Gauge("signal_abs_move", "Absolute move", ["symbol"])
+SIGNAL_RUNUP_ABS = Gauge("signal_runup_abs", "Runup absolute", ["symbol"])
+SIGNAL_DRAWDOWN_ABS = Gauge("signal_drawdown_abs", "Drawdown absolute", ["symbol"])
 BROKER_REQUESTS = Counter(
     "broker_requests_total",
     "Broker API requests",

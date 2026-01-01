@@ -41,6 +41,8 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added benchmark scorecard metrics, regime tagging plots, and PDF summary output.
+- Updated benchmarking docs/config for new plots and PDF reports.
 - Rendered daily report emails as HTML and saved HTML bodies to disk.
 - Added decision trace logging in trader and surfaced it in daily report output.
 - Added absolute move values to daily report metrics alongside percentage signals.
@@ -206,6 +208,15 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and restarted v2.0 services after adding AI filter pre-run logs.
 - Raised the AI filter universe cap and set refresh interval to 1 minute.
 - Rebuilt and restarted v2.0 services after AI filter cadence updates.
+- Added benchmarking plots, regime tagging, and top-tier roadmap docs.
+- Added benchmark runner and documentation for walk-forward and stress tests.
+- Added Grafana panels for intraday signal metrics (percent + absolute).
+- Fixed AI filter retrain to pass broker config to news fetcher.
+- Fixed RL orchestrator AI feature extraction indentation regression.
+- Fixed Alpaca market data prefetch using missing IBKR handle; align AI filter signals to latest day.
+- Added intraday signal metrics to live decisions, RL features, and AI filter training.
+- Added env-based auto-detection for multi-account brokers with graceful fallback on invalid keys.
+- Added multi-account broker support with per-account routing and config helpers.
 - Enabled online updates for the AI symbol filter.
 - Rebuilt and restarted v2.0 services after enabling AI filter online updates.
 - Increased AI filter online update steps and max symbols for continuous training, then redeployed v2.0.

@@ -10,6 +10,7 @@ import pandas as pd
 
 from app.agents.trader import TradingAgent
 from app.data.downloader import download_alpaca_bars
+from app.brokers.config_utils import get_alpaca_account_cfg
 from app.backtest.sampling import BacktestWindow, build_backtest_plan
 
 
@@ -77,7 +78,7 @@ class SimBroker:
         self.trades += 1
         return f"sim-{self._order_id}"
 
-    def close_position(self, symbol: str) -> None:
+    def close_position(self, symbol: str, **kwargs) -> None:
         qty = self.positions.get(symbol, 0.0)
         if qty == 0.0:
             return
@@ -397,7 +398,7 @@ def _download_missing_bars(cfg: dict, symbols: list[str], interval: str, data_di
             missing.append(symbol)
     if not missing:
         return
-    alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
+    alpaca_cfg = get_alpaca_account_cfg(cfg)
     api_key = alpaca_cfg.get("api_key", "")
     api_secret = alpaca_cfg.get("api_secret", "")
     backtest_cfg = cfg.get("backtest", {})

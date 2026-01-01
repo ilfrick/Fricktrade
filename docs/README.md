@@ -28,5 +28,8 @@ Subsystem reference:
 - `ai-symbol-filter.md`
 - `learning.md`
 - `backtesting.md`
+- `benchmarking.md`
+- `top_tier_epics.md`
+- `top_tier_backlog.md`
 - `monitoring.md`
 - `api.md`

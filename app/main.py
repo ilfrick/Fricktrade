@@ -15,6 +15,7 @@ from app.agents.trader import TradingAgent
 from app.brokers.alpaca import AlpacaBroker
 from app.brokers.ibkr import IBKRBroker
 from app.brokers.router import BrokerRouter
+from app.brokers.config_utils import get_alpaca_account_cfg, iter_alpaca_accounts, iter_ibkr_accounts
 from app.backtest.engine import run_backtest
 from app.backtest.agent_engine import run_agent_backtest
 from app.data.downloader import download_yfinance
@@ -25,6 +26,7 @@ from app.learning.evaluate import evaluate_from_config
 from app.monitoring.metrics import start_metrics_server
 from app.utils.config import load_config
 from app.utils.logging import setup_logging
+from app.utils.signal_features import compute_signal_metrics_from_df
 
 
 def _empty_market_state() -> dict:
@@ -43,6 +45,14 @@ def _empty_market_state() -> dict:
         "relative_volume": 0.0,
         "session_gain_pct": 0.0,
         "spread_pct": None,
+        "signal_30m_return_pct": 0.0,
+        "signal_60m_return_pct": 0.0,
+        "signal_early_volume_pct": 0.0,
+        "signal_runup_pct": 0.0,
+        "signal_drawdown_pct": 0.0,
+        "signal_abs_move": 0.0,
+        "signal_runup_abs": 0.0,
+        "signal_drawdown_abs": 0.0,
     }
 
 
@@ -58,42 +68,8 @@ def _market_state_from_yf(symbol: str, lookback: int, interval: str, session_gai
             data.columns = data.columns.get_level_values(-1)
     if "Close" not in data.columns:
         return _empty_market_state()
-    close = data["Close"]
-    volume = data["Volume"] if "Volume" in data else None
-    open_ = data["Open"] if "Open" in data else None
-    high = data["High"] if "High" in data else None
-    low = data["Low"] if "Low" in data else None
-    if isinstance(close, type(data)):
-        close = close.iloc[:, 0]
-    if volume is not None and isinstance(volume, type(data)):
-        volume = volume.iloc[:, 0]
-    lookback_bars = _bars_for_lookback(lookback, interval)
-    prices = close.iloc[-lookback_bars:].tolist()
-    volumes = volume.iloc[-lookback_bars:].tolist() if volume is not None else []
-    opens = open_.iloc[-lookback_bars:].tolist() if open_ is not None else []
-    highs = high.iloc[-lookback_bars:].tolist() if high is not None else []
-    lows = low.iloc[-lookback_bars:].tolist() if low is not None else []
-    last_price = prices[-1] if prices else None
-    avg_volume = float(sum(volumes) / len(volumes)) if volumes else 0.0
-    session_volume = float(sum(volumes)) if volumes else 0.0
-    rel_volume = float(volumes[-1] / avg_volume) if avg_volume else 0.0
-    session_gain_pct = _session_gain_pct(data, prices, session_gain_mode)
-    return {
-        "prices": prices,
-        "volumes": volumes,
-        "qty": 1,
-        "exposure_pct": 1.0,
-        "short_exposure_pct": 0.0,
-        "leverage": 1.0,
-        "last_price": last_price,
-        "opens": opens,
-        "highs": highs,
-        "lows": lows,
-        "session_volume": session_volume,
-        "relative_volume": rel_volume,
-        "session_gain_pct": session_gain_pct,
-        "spread_pct": None,
-    }
+    state = _market_state_from_df(data, lookback, interval, session_gain_mode)
+    return state
 
 
 def _alpaca_timeframe(interval: str) -> TimeFrame:
@@ -164,7 +140,7 @@ def _market_state_from_df(data: pd.DataFrame, lookback_days: int, interval: str,
     session_volume = float(sum(volumes)) if volumes else 0.0
     rel_volume = float(volumes[-1] / avg_volume) if avg_volume else 0.0
     session_gain_pct = _session_gain_pct(data, prices, session_gain_mode)
-    return {
+    state = {
         "prices": prices,
         "volumes": volumes,
         "qty": 1,
@@ -180,6 +156,8 @@ def _market_state_from_df(data: pd.DataFrame, lookback_days: int, interval: str,
         "session_gain_pct": session_gain_pct,
         "spread_pct": None,
     }
+    state.update(compute_signal_metrics_from_df(data, interval))
+    return state
 
 
 def _fetch_bars(client: StockHistoricalDataClient, req: StockBarsRequest, timeout: int, retries: int):
@@ -230,9 +208,6 @@ class AlpacaMarketDataProvider:
 
     def prepare(self, symbols: list[str]) -> None:
         if not symbols:
-            return
-        if not self._ib.isConnected():
-            logging.warning("IBKR market data provider not connected; skipping refresh.")
             return
         now = datetime.now(timezone.utc)
         refresh_seconds = _interval_seconds(self._interval)
@@ -407,26 +382,52 @@ def _session_gain_pct(data, prices: list[float], mode: str) -> float:
 
 def _build_broker(cfg: dict):
     brokers: dict[str, object] = {}
-    if cfg.get("brokers", {}).get("alpaca", {}).get("enabled", True):
-        paper = os.getenv("TRADING_MODE", "paper").lower() == "paper"
-        brokers["alpaca"] = AlpacaBroker(
-            cfg["brokers"]["alpaca"]["api_key"],
-            cfg["brokers"]["alpaca"]["api_secret"],
-            cfg["brokers"]["alpaca"]["base_url"],
-            paper=paper,
-        )
-    if cfg.get("brokers", {}).get("ibkr", {}).get("enabled", False):
-        brokers["ibkr"] = IBKRBroker(
-            cfg["brokers"]["ibkr"]["host"],
-            cfg["brokers"]["ibkr"]["port"],
-            cfg["brokers"]["ibkr"]["client_id"],
-        )
+    paper = os.getenv("TRADING_MODE", "paper").lower() == "paper"
+    for account in iter_alpaca_accounts(cfg):
+        try:
+            broker = AlpacaBroker(
+                account.get("api_key", ""),
+                account.get("api_secret", ""),
+                account.get("base_url", ""),
+                paper=paper,
+                name=account["name"],
+            )
+            if not broker.is_connected():
+                logging.warning("Alpaca account %s unavailable; skipping.", account["name"])
+                continue
+            brokers[account["name"]] = broker
+        except Exception as exc:
+            logging.warning("Alpaca account %s failed to initialize: %s", account.get("name", "unknown"), exc)
+            continue
+    for account in iter_ibkr_accounts(cfg):
+        try:
+            broker = IBKRBroker(
+                account.get("host", "127.0.0.1"),
+                int(account.get("port", 7497)),
+                int(account.get("client_id", 1)),
+                name=account["name"],
+                account_id=account.get("account_id", ""),
+            )
+            if not broker.is_connected():
+                logging.warning("IBKR account %s unavailable; skipping.", account["name"])
+                continue
+            brokers[account["name"]] = broker
+        except Exception as exc:
+            logging.warning("IBKR account %s failed to initialize: %s", account.get("name", "unknown"), exc)
+            continue
     exec_cfg = cfg.get("execution", {}).get("brokers", {})
-    if exec_cfg.get("enabled", False) and len(brokers) > 1:
+    if len(brokers) > 1:
+        if exec_cfg.get("enabled", False):
+            return BrokerRouter(brokers, exec_cfg.get("routing", {}))
+        logging.warning("Multiple brokers configured but routing disabled; defaulting to BrokerRouter.")
         return BrokerRouter(brokers, exec_cfg.get("routing", {}))
-    if "ibkr" in brokers and len(brokers) == 1:
-        return brokers["ibkr"]
-    return brokers.get("alpaca")
+    if len(brokers) == 1:
+        return next(iter(brokers.values()))
+    return None
+
+
+def _primary_alpaca_cfg(cfg: dict) -> dict:
+    return get_alpaca_account_cfg(cfg)
 
 
 def main():
@@ -545,7 +546,7 @@ def main():
         symbols = cfg["data"]["symbols"]
         provider = str(cfg.get("data", {}).get("provider", "yfinance")).lower()
         if provider == "alpaca":
-            alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
+            alpaca_cfg = _primary_alpaca_cfg(cfg)
             api_key = alpaca_cfg.get("api_key", "")
             api_secret = alpaca_cfg.get("api_secret", "")
             dyn_cfg = cfg.get("data", {}).get("dynamic_symbols", {})
@@ -572,7 +573,7 @@ def main():
         elif provider == "brokers":
             providers: dict[str, object] = {}
             routing_cfg = cfg.get("execution", {}).get("brokers", {}).get("routing", {})
-            alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
+            alpaca_cfg = _primary_alpaca_cfg(cfg)
             api_key = alpaca_cfg.get("api_key", "")
             api_secret = alpaca_cfg.get("api_secret", "")
             dyn_cfg = cfg.get("data", {}).get("dynamic_symbols", {})

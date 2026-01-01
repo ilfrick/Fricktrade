@@ -5,21 +5,29 @@ from app.monitoring.broker_metrics import record_broker_call
 
 
 class IBKRBroker(Broker):
-    def __init__(self, host: str, port: int, client_id: int):
+    def __init__(self, host: str, port: int, client_id: int, name: str = "ibkr", account_id: str | None = None):
         self.ib = IB()
         self.ib.connect(host, port, clientId=client_id)
-        self._name = "ibkr"
+        self._name = name
+        self._account_id = str(account_id) if account_id else ""
 
     def is_connected(self) -> bool:
         return self.ib.isConnected()
 
     def get_account(self) -> dict:
-        summary = record_broker_call(self._name, "get_account", self.ib.accountSummary)
+        if self._account_id:
+            summary = record_broker_call(
+                self._name, "get_account", self.ib.accountSummary, account=self._account_id
+            )
+        else:
+            summary = record_broker_call(self._name, "get_account", self.ib.accountSummary)
         return {s.tag: s.value for s in summary}
 
     def get_positions(self) -> list[dict]:
         positions = []
         for pos in record_broker_call(self._name, "get_positions", self.ib.positions):
+            if self._account_id and getattr(pos, "account", None) != self._account_id:
+                continue
             positions.append(
                 {
                     "symbol": pos.contract.symbol,
@@ -36,6 +44,14 @@ class IBKRBroker(Broker):
             status = trade.orderStatus.status
             if status not in {"Submitted", "PreSubmitted"}:
                 continue
+            if self._account_id:
+                account = (
+                    getattr(trade, "account", None)
+                    or getattr(order, "account", None)
+                    or getattr(trade.orderStatus, "account", None)
+                )
+                if account and account != self._account_id:
+                    continue
             orders.append(
                 {
                     "order_id": str(order.orderId),
@@ -60,6 +76,8 @@ class IBKRBroker(Broker):
             order = LimitOrder(action, qty, float(limit_price))
         else:
             order = MarketOrder(action, qty)
+        if self._account_id:
+            order.account = self._account_id
         trade = record_broker_call(self._name, "place_order", self.ib.placeOrder, contract, order)
         self.ib.sleep(0.5)
         return str(trade.order.permId)
@@ -67,9 +85,13 @@ class IBKRBroker(Broker):
     def close_position(self, symbol: str) -> None:
         positions = record_broker_call(self._name, "close_position", self.ib.positions)
         for pos in positions:
+            if self._account_id and getattr(pos, "account", None) != self._account_id:
+                continue
             if pos.contract.symbol == symbol:
                 side = "SELL" if pos.position > 0 else "BUY"
                 order = MarketOrder(side, abs(pos.position))
+                if self._account_id:
+                    order.account = self._account_id
                 record_broker_call(self._name, "close_position", self.ib.placeOrder, pos.contract, order)
 
     def cancel_order(self, order_id: str) -> None:
@@ -79,6 +101,14 @@ class IBKRBroker(Broker):
             return
         for trade in record_broker_call(self._name, "cancel_order", self.ib.trades):
             order = trade.order
+            if self._account_id:
+                account = (
+                    getattr(trade, "account", None)
+                    or getattr(order, "account", None)
+                    or getattr(trade.orderStatus, "account", None)
+                )
+                if account and account != self._account_id:
+                    continue
             if order.orderId == oid or getattr(order, "permId", None) == oid:
                 record_broker_call(self._name, "cancel_order", self.ib.cancelOrder, order)
                 return

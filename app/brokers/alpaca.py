@@ -7,9 +7,9 @@ from app.monitoring.broker_metrics import record_broker_call
 
 
 class AlpacaBroker(Broker):
-    def __init__(self, api_key: str, api_secret: str, base_url: str, paper: bool = True):
+    def __init__(self, api_key: str, api_secret: str, base_url: str, paper: bool = True, name: str = "alpaca"):
         self.client = TradingClient(api_key, api_secret, paper=paper, url_override=base_url)
-        self._name = "alpaca"
+        self._name = name
 
     def is_connected(self) -> bool:
         try:

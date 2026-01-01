@@ -25,6 +25,14 @@ from app.monitoring.metrics import (
     POSITION_VALUE,
     POSITION_QTY_BY_BROKER,
     POSITION_VALUE_BY_BROKER,
+    SIGNAL_RETURN_30M,
+    SIGNAL_RETURN_60M,
+    SIGNAL_EARLY_VOL,
+    SIGNAL_RUNUP,
+    SIGNAL_DRAWDOWN,
+    SIGNAL_ABS_MOVE,
+    SIGNAL_RUNUP_ABS,
+    SIGNAL_DRAWDOWN_ABS,
     SYMBOL_ACTIVE,
     STRATEGY_ACTIVE,
     ORCHESTRATOR_STRATEGY_ACTIVE,
@@ -48,6 +56,7 @@ from app.strategies.market_maker import MarketMakerStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols_for_config
 from app.data.scanner import ScanFilters, filter_universe_by_price, load_symbol_venues, load_universe, scan_symbols
+from app.brokers.config_utils import get_alpaca_account_cfg
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 try:
     from app.data.ai_filter import score_symbols
@@ -106,6 +115,7 @@ class TradingAgent:
         self._ai_filter_last_run_at: datetime | None = None
         self._ai_filter_last_log_at: datetime | None = None
         self._ai_filter_last_count: int = 0
+        self._ai_filter_last_signals: dict[str, dict[str, float]] = {}
         self._ai_filter_executor = ThreadPoolExecutor(max_workers=1)
         self._ai_filter_future = None
         self._ai_filter_inflight_at: datetime | None = None
@@ -291,6 +301,8 @@ class TradingAgent:
             "symbol": symbol,
             "ts": datetime.utcnow().isoformat(),
         }
+        if market_state:
+            trace["signal_inputs"] = self._signal_snapshot(market_state)
         venue = market_state.get("venue") or market_state.get("market_venue")
         if venue:
             trace["venue"] = venue
@@ -298,10 +310,57 @@ class TradingAgent:
 
     def _signal_summary(self, signal: dict) -> dict:
         summary = {"name": signal.get("name"), "action": signal.get("action")}
-        for key in ("score", "confidence", "strength", "reason", "weight"):
+        for key in ("score", "confidence", "strength", "reason", "weight", "signal_bias", "signal_bias_block"):
             if key in signal:
                 summary[key] = signal.get(key)
         return summary
+
+    def _signal_snapshot(self, market_state: dict) -> dict:
+        return {
+            "30m_return_pct": market_state.get("signal_30m_return_pct"),
+            "60m_return_pct": market_state.get("signal_60m_return_pct"),
+            "early_volume_pct": market_state.get("signal_early_volume_pct"),
+            "runup_pct": market_state.get("signal_runup_pct"),
+            "drawdown_pct": market_state.get("signal_drawdown_pct"),
+            "abs_move": market_state.get("signal_abs_move"),
+            "runup_abs": market_state.get("signal_runup_abs"),
+            "drawdown_abs": market_state.get("signal_drawdown_abs"),
+        }
+
+    def _signal_bias(self, market_state: dict) -> float | None:
+        vals = []
+        for key in (
+            "signal_30m_return_pct",
+            "signal_60m_return_pct",
+            "signal_runup_pct",
+            "signal_drawdown_pct",
+        ):
+            raw = market_state.get(key)
+            if raw is None:
+                continue
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if val == 0.0:
+                continue
+            vals.append(1.0 if val > 0 else -1.0)
+        if not vals:
+            return None
+        return float(sum(vals) / len(vals))
+
+    def _update_signal_metrics(self, symbol: str, market_state: dict) -> None:
+        self._update_signal_metrics_from_values(symbol, market_state)
+
+    def _update_signal_metrics_from_values(self, symbol: str, values: dict) -> None:
+        SIGNAL_RETURN_30M.labels(symbol=symbol).set(float(values.get("signal_30m_return_pct", 0.0) or 0.0))
+        SIGNAL_RETURN_60M.labels(symbol=symbol).set(float(values.get("signal_60m_return_pct", 0.0) or 0.0))
+        SIGNAL_EARLY_VOL.labels(symbol=symbol).set(float(values.get("signal_early_volume_pct", 0.0) or 0.0))
+        SIGNAL_RUNUP.labels(symbol=symbol).set(float(values.get("signal_runup_pct", 0.0) or 0.0))
+        SIGNAL_DRAWDOWN.labels(symbol=symbol).set(float(values.get("signal_drawdown_pct", 0.0) or 0.0))
+        SIGNAL_ABS_MOVE.labels(symbol=symbol).set(float(values.get("signal_abs_move", 0.0) or 0.0))
+        SIGNAL_RUNUP_ABS.labels(symbol=symbol).set(float(values.get("signal_runup_abs", 0.0) or 0.0))
+        SIGNAL_DRAWDOWN_ABS.labels(symbol=symbol).set(float(values.get("signal_drawdown_abs", 0.0) or 0.0))
 
     def _portfolio_snapshot_for_trace(self, portfolio: dict, symbol: str) -> dict:
         positions = portfolio.get("positions", {}) if isinstance(portfolio, dict) else {}
@@ -380,6 +439,21 @@ class TradingAgent:
                 continue
             signal["name"] = name
             signals.append(signal)
+        bias = self._signal_bias(market_state)
+        guard_cfg = self.cfg.get("strategy", {}).get("signal_bias_guard", {}) or {}
+        if bias is not None:
+            for signal in signals:
+                signal["signal_bias"] = bias
+            if guard_cfg.get("enabled", True):
+                threshold = float(guard_cfg.get("threshold", 0.2))
+                for signal in signals:
+                    action = str(signal.get("action", "hold")).lower()
+                    if action == "buy" and bias < -threshold:
+                        signal["action"] = "hold"
+                        signal["signal_bias_block"] = "negative_bias"
+                    elif action == "sell" and bias > threshold:
+                        signal["action"] = "hold"
+                        signal["signal_bias_block"] = "positive_bias"
         if trace:
             trace["signals"] = [self._signal_summary(sig) for sig in signals]
         self._update_orchestrator(symbol, market_state)
@@ -1231,6 +1305,7 @@ class TradingAgent:
                 market_state = market_data_provider(sym)
                 self._enrich_market_state(market_state, portfolio, sym)
                 market_state["strategy_symbols"] = self._symbols_by_strategy
+                self._update_signal_metrics(sym, market_state)
                 self.run_once(sym, market_state)
             time.sleep(interval_seconds)
 
@@ -1263,7 +1338,7 @@ class TradingAgent:
         interval = int(auto_cfg.get("refresh_minutes", 60))
         if self._symbol_venues_at and (now - self._symbol_venues_at).total_seconds() < interval * 60:
             return
-        alpaca_cfg = self.cfg.get("brokers", {}).get("alpaca", {})
+        alpaca_cfg = get_alpaca_account_cfg(self.cfg)
         api_key = alpaca_cfg.get("api_key", "")
         api_secret = alpaca_cfg.get("api_secret", "")
         if not api_key or not api_secret:
@@ -1430,7 +1505,7 @@ class TradingAgent:
         provider = dyn_cfg.get("provider", "alpaca")
         if provider != "alpaca":
             return
-        alpaca_cfg = self.cfg.get("brokers", {}).get("alpaca", {})
+        alpaca_cfg = get_alpaca_account_cfg(self.cfg)
         api_key = alpaca_cfg.get("api_key", "")
         api_secret = alpaca_cfg.get("api_secret", "")
 
@@ -1459,11 +1534,17 @@ class TradingAgent:
             if not self._ai_filter_future.done():
                 return
             try:
-                ordered, scores = self._ai_filter_future.result()
+                result = self._ai_filter_future.result()
+                if isinstance(result, tuple) and len(result) == 3:
+                    ordered, scores, signal_map = result
+                else:
+                    ordered, scores = result
+                    signal_map = {}
             except Exception as exc:
                 logging.warning("AI filter run failed: %s", exc)
                 ordered = []
                 scores = {}
+                signal_map = {}
             self._ai_filter_future = None
             self._ai_filter_inflight_at = None
             logging.info(
@@ -1473,6 +1554,11 @@ class TradingAgent:
             )
             self._ai_filter_last_run_at = now
             self._ai_filter_last_count = len(ordered)
+            self._ai_filter_last_signals = dict(signal_map)
+            if signal_map:
+                for sym, vals in signal_map.items():
+                    if vals:
+                        self._update_signal_metrics_from_values(sym, vals)
             if not ordered:
                 ordered = list(universe)
             ordered = self._merge_with_positions(ordered, portfolio, max_symbols)

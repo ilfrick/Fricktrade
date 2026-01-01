@@ -16,7 +16,9 @@ Scores a large universe of symbols and returns an ordered list for trading.
 ## Feature Window
 - Uses the last `window` returns and volumes for each symbol.
 - Feature vector: mean return, std return, momentum sum, last return,
-  volume z-score, catalyst flag.
+  volume z-score, catalyst flag, plus intraday signal metrics
+  (30m/60m returns, early volume %, runup/drawdown %, and absolute moves).
+When signal features are added or removed, retrain the model to avoid shape mismatches.
 - Keep `lookback_days` low for live runs to reduce scoring latency (current default: 2).
 
 ## Configuration

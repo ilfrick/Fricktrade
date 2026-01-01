@@ -2,6 +2,8 @@
 
 ## Purpose
 Generate buy/sell/hold/exit signals from market state.
+Intraday signal metrics (30m/60m returns, early volume, runup/drawdown) are injected into
+market state and influence actions via the signal bias guard.
 
 ## Implementations
 - Intraday momentum: `app/strategies/intraday_momentum.py`.
@@ -28,6 +30,7 @@ Generate buy/sell/hold/exit signals from market state.
 - `pattern_trading.*`
 - `orchestrator.*`
 - `orchestrator.rl.time_penalty_per_bar`
+- `strategy.signal_bias_guard.*`
 
 ## Usage
 - Single strategy: set `strategy.name: rl_policy` (or another name).

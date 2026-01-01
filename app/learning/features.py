@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 import numpy as np
 
+from app.utils.signal_features import compute_signal_metrics_from_window
+
 
 def _sma(values: np.ndarray, period: int) -> float:
     if values.size < period:
@@ -39,12 +41,15 @@ def observation_size(window_size: int, feature_config: dict | None = None) -> in
     if not feature_config:
         return base
     include_returns = feature_config.get("include_returns", True)
+    include_signal_features = feature_config.get("include_signal_features", False)
     sma_periods = feature_config.get("sma_periods", [])
     ema_periods = feature_config.get("ema_periods", [])
     rsi_periods = feature_config.get("rsi_periods", [])
     extra = 0
     if include_returns:
         extra += 1
+    if include_signal_features:
+        extra += 8
     extra += len(sma_periods) + len(ema_periods) + len(rsi_periods)
     return base + extra
 
@@ -90,6 +95,28 @@ def build_observation(
         if feature_config.get("include_returns", True):
             ret = (closes_window[-1] - closes_window[0]) / max(closes_window[0], 1e-6)
             features.append(np.array([ret], dtype=np.float32))
+        if feature_config.get("include_signal_features", False):
+            interval = str(feature_config.get("signal_interval") or feature_config.get("interval") or "5m")
+            signal_vals = compute_signal_metrics_from_window(
+                prices=closes_window.tolist(),
+                volumes=volumes_window.tolist(),
+                interval=interval,
+            )
+            features.append(
+                np.array(
+                    [
+                        signal_vals.get("signal_30m_return_pct", 0.0),
+                        signal_vals.get("signal_60m_return_pct", 0.0),
+                        signal_vals.get("signal_early_volume_pct", 0.0),
+                        signal_vals.get("signal_runup_pct", 0.0),
+                        signal_vals.get("signal_drawdown_pct", 0.0),
+                        signal_vals.get("signal_abs_move", 0.0),
+                        signal_vals.get("signal_runup_abs", 0.0),
+                        signal_vals.get("signal_drawdown_abs", 0.0),
+                    ],
+                    dtype=np.float32,
+                )
+            )
         for period in feature_config.get("sma_periods", []):
             features.append(np.array([_sma(closes_window, int(period))], dtype=np.float32))
         for period in feature_config.get("ema_periods", []):

@@ -21,6 +21,8 @@ try:
 except Exception:
     ai_filter_module = None
 
+from app.brokers.config_utils import get_alpaca_account_cfg
+
 
 @dataclass
 class OrchestratorConfig:
@@ -330,7 +332,7 @@ class RLStrategyOrchestrator:
         self._output_dim: int | None = None
         self._strategy_names: list[str] = []
         self._ai_filter_cfg = cfg.get("data", {}).get("dynamic_symbols", {}).get("ai_filter", {})
-        self._alpaca_cfg = cfg.get("brokers", {}).get("alpaca", {})
+        self._alpaca_cfg = get_alpaca_account_cfg(cfg)
         self._buffer: deque[tuple[torch.Tensor, torch.Tensor]] = deque(maxlen=self.cfg.buffer_size)
         self._last_state: dict[str, dict[str, object]] = {}
         self._feature_history: dict[str, deque[list[float]]] = {}
@@ -710,7 +712,13 @@ class RLStrategyOrchestrator:
         catalyst = bool(market_state.get("catalyst", False))
         prices = market_state.get("prices") or []
         volumes = market_state.get("volumes") or []
-        features = ai_filter_module.build_feature_vector_from_series(prices, volumes, window, catalyst)
+        features = ai_filter_module.build_feature_vector_from_series(
+            prices,
+            volumes,
+            window,
+            catalyst,
+            interval=str(self._ai_filter_cfg.get("interval", "5m")),
+        )
         allow_fetch = bool(self._ai_filter_cfg.get("allow_orchestrator_fetch", False))
         if features is None and allow_fetch:
             api_key = str(self._alpaca_cfg.get("api_key", ""))
@@ -792,6 +800,14 @@ def _extract_features(market_state: dict) -> dict[str, float]:
         "session_gain_pct": float(market_state.get("session_gain_pct", 0.0) or 0.0),
         "spread": float(market_state.get("spread_pct", 0.0) or 0.0),
         "catalyst": 1.0 if market_state.get("catalyst") else 0.0,
+        "signal_30m_return_pct": float(market_state.get("signal_30m_return_pct", 0.0) or 0.0),
+        "signal_60m_return_pct": float(market_state.get("signal_60m_return_pct", 0.0) or 0.0),
+        "signal_early_volume_pct": float(market_state.get("signal_early_volume_pct", 0.0) or 0.0),
+        "signal_runup_pct": float(market_state.get("signal_runup_pct", 0.0) or 0.0),
+        "signal_drawdown_pct": float(market_state.get("signal_drawdown_pct", 0.0) or 0.0),
+        "signal_abs_move": float(market_state.get("signal_abs_move", 0.0) or 0.0),
+        "signal_runup_abs": float(market_state.get("signal_runup_abs", 0.0) or 0.0),
+        "signal_drawdown_abs": float(market_state.get("signal_drawdown_abs", 0.0) or 0.0),
     }
 
 
@@ -803,6 +819,14 @@ _FEATURE_NAMES = [
     "session_gain_pct",
     "spread",
     "catalyst",
+    "signal_30m_return_pct",
+    "signal_60m_return_pct",
+    "signal_early_volume_pct",
+    "signal_runup_pct",
+    "signal_drawdown_pct",
+    "signal_abs_move",
+    "signal_runup_abs",
+    "signal_drawdown_abs",
 ]
 
 
@@ -812,7 +836,7 @@ def _feature_vector(market_state: dict) -> list[float]:
 
 
 def _ai_feature_dim() -> int:
-    return 6
+    return 14
 
 
 def _order_feature_dim() -> int:

@@ -33,20 +33,6 @@ market:
       open: 09:00
       close: '17:30'
     holidays:
-    - '2025-01-01'
-    - '2025-01-06'
-    - '2025-04-18'
-    - '2025-04-20'
-    - '2025-04-21'
-    - '2025-04-25'
-    - '2025-05-01'
-    - '2025-06-02'
-    - '2025-06-09'
-    - '2025-08-15'
-    - '2025-11-01'
-    - '2025-12-08'
-    - '2025-12-25'
-    - '2025-12-26'
     - '2026-01-01'
     - '2026-01-06'
     - '2026-04-03'
@@ -62,6 +48,21 @@ market:
     - '2026-12-08'
     - '2026-12-25'
     - '2026-12-26'
+    - '2027-01-01'
+    - '2027-01-06'
+    - '2027-03-26'
+    - '2027-03-28'
+    - '2027-03-29'
+    - '2027-04-25'
+    - '2027-05-01'
+    - '2027-05-17'
+    - '2027-06-02'
+    - '2027-08-15'
+    - '2027-10-04'
+    - '2027-11-01'
+    - '2027-12-08'
+    - '2027-12-25'
+    - '2027-12-26'
   - name: NYSE
     timezone: America/New_York
     trading_hours:
@@ -75,28 +76,25 @@ market:
     - '2026-05-25'
     - '2026-06-19'
     - '2026-09-07'
+    - '2027-01-01'
+    - '2027-01-18'
+    - '2027-02-15'
+    - '2027-03-26'
+    - '2027-05-31'
+    - '2027-09-06'
   - name: Nasdaq
     timezone: America/New_York
     trading_hours:
       open: 09:30
       close: '16:00'
-    holidays:
-    - '2025-01-01'
-    - '2025-01-20'
-    - '2025-02-17'
-    - '2025-04-18'
-    - '2025-05-26'
-    - '2025-06-19'
-    - '2025-07-04'
-    - '2025-09-01'
-    - '2025-11-27'
-    - '2025-12-25'
+    holidays: []
 brokers:
   alpaca:
     enabled: true
     base_url: https://paper-api.alpaca.markets
     api_key: ${ALPACA_API_KEY}
     api_secret: ${ALPACA_API_SECRET}
+    accounts: []
     fees:
       commission_pct: 0.0
       per_trade_fee: 0.0
@@ -108,6 +106,8 @@ brokers:
     host: 127.0.0.1
     port: 7497
     client_id: 1
+    account_id: ''
+    accounts: []
     fees:
       commission_pct: 0.0
       per_trade_fee: 0.0
@@ -149,6 +149,9 @@ strategy:
     min_edge_pct: 0.005
     edge_multiplier: 0.5
     min_notional: 50.0
+  signal_bias_guard:
+    enabled: true
+    threshold: 0.2
   performance:
     enabled: true
     window_days: 30
@@ -243,6 +246,8 @@ learning:
   reward_time_penalty_per_step: 0.15
   features:
     include_returns: true
+    include_signal_features: true
+    signal_interval: 1m
     sma_periods:
     - 5
     - 20
@@ -297,6 +302,16 @@ backtest:
     liquidity_tiers: 3
     sample_per_tier: 50
     seed: 42
+benchmarking:
+  run_when_closed: false
+  use_plan: true
+  plan_window_days: 60
+  plan_step_days: 30
+  plan_liquidity_tiers: 3
+  plan_sample_per_tier: 10
+  output_path: /data/reports/benchmark_report.json
+  plot_dir: /data/reports/benchmark_plots
+  pdf_path: /data/reports/benchmark_report.pdf
 data:
   provider: alpaca
   symbols: []
@@ -426,9 +441,9 @@ healthwatch:
     stop_services: []
 kill_switch:
   armed: false
-  confirm_code: ""
+  confirm_code: ''
   required_code: ${KILL_SWITCH_CODE}
-  confirm_phrase: "YES"
+  confirm_phrase: 'YES'
   force_sleep: false
   force_liquidate: false
 reports:
