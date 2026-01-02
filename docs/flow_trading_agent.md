@@ -9,20 +9,21 @@ flowchart TD
     A[Start Loop] --> B[Load Portfolio + Symbols]
     B --> C[Refresh News + Dynamic Symbols]
     C --> D[Update Metrics + Open Orders]
-    D --> E{Market Open?}
-    E -- No --> F[Sleep Interval]
-    F --> A
-    E -- Yes --> G[Per-Symbol Market Data]
-    G --> H[Generate Strategy Signals + Features]
-    H --> I[Drift Monitor + Auto Rollback]
-    I --> J[Orchestrator Direct Strategy Selection]
-    J --> K[Guardrail Optional]
-    K --> L[Risk + Limits + VaR/CVaR + Caps]
-    L --> M[Execution Algo + Queue]
-    M --> N[Broker Router Submit]
-    N --> O[Order Feedback + Metrics]
-    O --> P[Decision Trace + Audit/Compliance Logs]
-    P --> A
+    D --> E[Read Ops State]
+    E --> F{Market Open?}
+    F -- No --> G[Sleep Interval]
+    G --> A
+    F -- Yes --> H[Per-Symbol Market Data]
+    H --> I[Generate Strategy Signals + Features]
+    I --> J[Drift Monitor + Auto Rollback]
+    J --> K[Orchestrator Direct Strategy Selection]
+    K --> L[Guardrail Optional]
+    L --> M[Risk + Limits + VaR/CVaR + Caps]
+    M --> N[Execution Algo + Queue]
+    N --> O[Broker Router Submit]
+    O --> P[Order Feedback + Metrics]
+    P --> Q[Decision Trace + Audit/Compliance Logs]
+    Q --> A
 ```
 
 ## Orchestrator Decision Path (Direct)

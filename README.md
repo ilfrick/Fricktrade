@@ -35,6 +35,7 @@ flowchart LR
     subgraph Models["Model Store"]
         ModelStore[/data + /app/models/]
         ModelRegistry[Model Registry<br/>metadata + artifacts]
+        ActiveModel[Active Model Pointer<br/>model_active.json]
     end
     subgraph Core["Trading Loop"]
         Trader[TradingAgent]
@@ -55,6 +56,7 @@ flowchart LR
         RLTrain[RL training + online updates]
         OrchPretrain[Orchestrator pretrain]
         AIFilterTrain[AI filter training]
+        TestsWhenClosed[Tests When Closed]
     end
     subgraph Backtest["Backtesting"]
         AgentBT[Agent backtest engine]
@@ -72,6 +74,8 @@ flowchart LR
         Logs[Rotating Logs]
         Audit[Audit Logs]
         Compliance[Compliance Exports]
+        OpsState[Ops State File<br/>system_state.json]
+        Healthwatch[Healthwatch Scheduler]
     end
 
     YF --> Trader
@@ -89,10 +93,13 @@ flowchart LR
     News --> AIFilter
     Ingest --> AlpacaBars
     RLTrain --> ModelStore
-    RLTrain --> ModelRegistry
+    RLTrain --> ModelRegistry --> ActiveModel
     OrchPretrain --> ModelStore
     AIFilterTrain --> ModelStore
     Trader --> Strat --> Drift --> Orchestrator --> Risk --> Impact --> Algo --> Queue --> Orders --> Exec --> Router
+    OpsState --> Trader
+    OpsState --> RLTrain
+    OpsState --> TestsWhenClosed
     Router --> Alpaca
     Router --> IBKR
     Alpaca --> BrokerUniverse
@@ -109,6 +116,7 @@ flowchart LR
     Trader --> Logs
     Trader --> Audit
     Trader --> Compliance
+    Healthwatch --> OpsState
     API <--> Trader
 ```
 
