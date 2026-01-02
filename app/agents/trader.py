@@ -805,6 +805,11 @@ class TradingAgent:
 
         order_notional = qty * last_price
         order_queue = self._order_queues.get(broker_name, self._order_queue)
+        if order_queue is None:
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_queue_missing").inc()
+            logging.warning("Skipping %s for %s: no order queue for broker %s", action, symbol, broker_name)
+            self._emit_decision_trace(trace, "skip", "order_queue_missing", "execution")
+            return None
         order_start = time.perf_counter()
         if slices:
             order_id = None
