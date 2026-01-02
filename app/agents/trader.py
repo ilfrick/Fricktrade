@@ -97,6 +97,7 @@ class TradingAgent:
         self._broker_map = self._resolve_broker_map()
         self._broker_names = list(self._broker_map.keys())
         self._broker_name = self._resolve_default_broker_name()
+        self._broker_name = self._normalize_broker_name(self._broker_name)
         retry_cfg = cfg.get("execution", {}).get("retry", {})
         self._order_queues = {name: OrderQueue(item, name, retry_cfg) for name, item in self._broker_map.items()}
         self._order_queue = self._order_queues.get(self._broker_name)
@@ -1144,7 +1145,8 @@ class TradingAgent:
         routing = self._routing_cfg or {}
         symbol_map = routing.get("symbols", {}) or {}
         if symbol in symbol_map:
-            return self._maybe_fallback_broker(str(symbol_map[symbol]))
+            broker_name = self._normalize_broker_name(str(symbol_map[symbol]))
+            return self._maybe_fallback_broker(broker_name)
         strategy_map = routing.get("strategies", {}) or {}
         strategy = action_strategy
         if not strategy and selected_strategies:
@@ -1152,11 +1154,22 @@ class TradingAgent:
         if not strategy and signals:
             strategy = signals[0].get("name")
         if strategy and strategy in strategy_map:
-            return self._maybe_fallback_broker(str(strategy_map[strategy]))
+            broker_name = self._normalize_broker_name(str(strategy_map[strategy]))
+            return self._maybe_fallback_broker(broker_name)
         default = routing.get("default")
         if default:
-            return self._maybe_fallback_broker(str(default))
+            broker_name = self._normalize_broker_name(str(default))
+            return self._maybe_fallback_broker(broker_name)
         return self._maybe_fallback_broker(self._broker_name)
+
+    def _normalize_broker_name(self, broker_name: str) -> str:
+        if broker_name in self._broker_map:
+            return broker_name
+        base = broker_name.split(":", 1)[0]
+        matches = [name for name in self._broker_map if name == base or name.startswith(f"{base}:")]
+        if matches:
+            return matches[0]
+        return next(iter(self._broker_map.keys()), broker_name)
 
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
