@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
+
 import json
 
 from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping

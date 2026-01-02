@@ -286,6 +286,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Added AGPLv3 SPDX headers across source files.
 - Added AGPLv3 licensing and third-party attribution inventory.
 - Added configurable extended-hours trading window and broker order flags.
 - Added audit/compliance decision logs and latency metrics + Grafana dashboard.
