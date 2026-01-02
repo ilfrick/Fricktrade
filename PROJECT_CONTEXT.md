@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
+
 # Autotrader Project Context
 
 This file captures the key state and workflows for this repo so a new Codex session
@@ -16,7 +19,7 @@ can reload context quickly. Keep it updated when the setup changes.
 ## Docker Notes
 - Main compose file: `docker-compose.yml`
 - Ports are fixed in compose; to run dev alongside live, use a separate project name:
-  - Example: `docker compose -p autotrader-dev ...` in `/path/to/Autotrader/dev`
+- Example: `docker compose -p autotrader-dev ...` in `/path/to/Autotrader/dev`
 - Docker socket access may require approval in this environment.
 
 ## Usual Entry Points
@@ -42,6 +45,7 @@ can reload context quickly. Keep it updated when the setup changes.
 
 ## Recent Tasks
 - Added explainability fields to decision traces and new oversight runbook doc.
+- Added SPDX headers to text/config files and scrubbed secrets from tracked env files.
 - Added AGPLv3 SPDX headers across source files.
 - Added AGPLv3 licensing and third-party attribution inventory.
 - Added configurable extended-hours trading windows and broker extended-hour order flags.

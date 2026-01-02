@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
+
 # Autotrader (Multi-Market)
 
 Autotrader is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana). It combines multiple strategies, an RL-based orchestrator, broker adapters, risk controls, and monitoring into a Docker-first stack for live trading, backtesting, and continuous learning.
@@ -286,6 +289,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Added SPDX headers to all text/config files and scrubbed secrets from tracked env files.
 - Added AGPLv3 SPDX headers across source files.
 - Added AGPLv3 licensing and third-party attribution inventory.
 - Added configurable extended-hours trading window and broker order flags.
