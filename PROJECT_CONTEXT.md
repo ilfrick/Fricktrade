@@ -7,8 +7,8 @@ This file captures the key state and workflows for this repo so a new Codex sess
 can reload context quickly. Keep it updated when the setup changes.
 
 ## Worktrees and Branches
-- Live worktree: `/path/to/Autotrader` on branch `v3.0`
-- Dev worktree: `/path/to/Autotrader/dev` on branch `master` (created via `git worktree`)
+- Live worktree: `./` on branch `v3.0`
+- Dev worktree: `./dev` on branch `master` (created via `git worktree`)
 
 ## Dev vs Live Intent
 - Live (v3.0) is running and trading.
@@ -19,7 +19,7 @@ can reload context quickly. Keep it updated when the setup changes.
 ## Docker Notes
 - Main compose file: `docker-compose.yml`
 - Ports are fixed in compose; to run dev alongside live, use a separate project name:
-- Example: `docker compose -p autotrader-dev ...` in `/path/to/Autotrader/dev`
+- Example: `docker compose -p autotrader-dev ...` in `./dev`
 - Docker socket access may require approval in this environment.
 
 ## Usual Entry Points
@@ -194,7 +194,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Hardened backtests against live data calls and disabled on-demand orchestrator feature fetching.
 - Ignored dev worktree artifacts and cleaned up transient log/output files.
 - Removed unused orchestrator config parameters now that the RL orchestrator is standard.
-- Created dev worktree on `master` under `/path/to/Autotrader/dev`.
+- Created dev worktree on `master` under `./dev`.
 - Live worktree remains on `v2.0`.
 - Enabled a strategy-level pending-order guard to skip signal evaluation while orders are open.
 - Cleared stale open-order metric labels so Grafana reflects only current pending orders.
@@ -210,7 +210,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and redeployed live v1 services after enabling the pending-order strategy guard.
 - Rebuilt and redeployed live v1 services after clearing stale open-order metrics.
 - Verified Grafana datasource queries show no open orders and position metrics align with Alpaca.
-- Created branch `v2.0` from `master`, deployed it live, and synced dev-trained models into `/path/to/Autotrader/models`.
+- Created branch `v2.0` from `master`, deployed it live, and synced dev-trained models into `./models`.
 - Stopped the dev backtest container so only the live v2.0 agent runs.
 - Stopped the old GPU learner container and restarted the v2.0 stack so only v2.0 services remain.
 - Added a safe fallback when the AI filter module is missing to keep live services from crashing.

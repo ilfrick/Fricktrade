@@ -13,7 +13,7 @@ License expressions are taken from SBOM metadata; `NOASSERTION` means the licens
 
 ## Packages
 
-- /path/to/Autotrader | version(s): unknown | license(s): NOASSERTION | source SBOM(s): autotrader-source.spdx.json
+- ./ | version(s): unknown | license(s): NOASSERTION | source SBOM(s): autotrader-source.spdx.json
 - @grafana-plugins/grafana-azure-monitor-datasource | version(s): 11.1.4 | license(s): NOASSERTION | source SBOM(s): grafana__grafana-oss_11.1.4.spdx.json
 - @grafana-plugins/grafana-postgresql-datasource | version(s): 11.1.4 | license(s): NOASSERTION | source SBOM(s): grafana__grafana-oss_11.1.4.spdx.json
 - @grafana-plugins/grafana-pyroscope-datasource | version(s): 11.1.4 | license(s): NOASSERTION | source SBOM(s): grafana__grafana-oss_11.1.4.spdx.json
