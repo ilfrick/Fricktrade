@@ -59,6 +59,8 @@ Centralize runtime settings for all subsystems.
 - Online learning ops-state gating: `learning.online.respect_ops_state`.
 - Decision audit logs: `monitoring.audit.enabled`.
 - Compliance exports: `monitoring.compliance.enabled`.
+- Audit/compliance retention: `monitoring.audit.retention_days` + `monitoring.compliance.retention_days`.
+- Audit/compliance signing: `monitoring.audit.signing.*` + `monitoring.compliance.signing.*`.
 - Checkpointing: `checkpointing.enabled`.
 - Multi-broker routing: `execution.brokers.enabled`.
 - Multi-account env auto-detect: `ALPACA_API_KEYS`/`ALPACA_API_SECRETS` or `ALPACA_API_KEY_1` +
@@ -71,6 +73,8 @@ Centralize runtime settings for all subsystems.
 - VaR/CVaR gating: `risk.var.enabled`.
 - Exposure caps: `risk.exposure_caps.enabled`.
 - Kill switch profiles: `risk.kill_switch_profiles.enabled`.
+- Stress haircuts: `risk.stress.enabled`.
+- Liquidity haircuts: `risk.liquidity_haircut.enabled`.
 - Signal bias guard: `strategy.signal_bias_guard.*` (blocks counter-trend actions).
 - RL signal features: `learning.features.include_signal_features` and `learning.features.signal_interval`.
 - Benchmarks: `benchmarking.*` (walk-forward + stress scenarios, bootstrap CI, MC stress, output/plot/PDF paths).

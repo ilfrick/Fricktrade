@@ -206,6 +206,9 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- Added explainability fields to decision traces and new oversight runbook doc.
+- Added stress/liquidity haircuts to sizing for real-time risk controls.
+- Added audit/compliance retention, signing, and reason-code enforcement support.
 - Added active model pointer publishing and ops-state gating for trader/learner/tests.
 - Added ops state file output and aligned learner/tests with healthwatch scheduler state.
 - Kept tests-when-closed running during market shutdown via healthwatch keep_services.

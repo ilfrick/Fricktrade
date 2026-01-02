@@ -20,6 +20,13 @@ Enforce exposure, leverage, and safety limits before execution.
 - `risk.vol_targeting.target_vol_pct`
 - `risk.vol_targeting.min_scale`
 - `risk.vol_targeting.max_scale`
+- `risk.stress.enabled`
+- `risk.stress.shock_pct`
+- `risk.liquidity_haircut.enabled`
+- `risk.liquidity_haircut.max_participation`
+- `risk.liquidity_haircut.min_session_volume`
+- `risk.liquidity_haircut.max_spread_pct`
+- `risk.liquidity_haircut.volume_haircut_pct`
 - `risk.var.enabled`
 - `risk.var.window`
 - `risk.var.confidence`
@@ -51,3 +58,5 @@ Enforce exposure, leverage, and safety limits before execution.
 - Use `risk.var.*` to block new entries when tail risk grows.
 - Configure `risk.exposure_caps.*` to limit per-venue or per-sector concentration.
 - Use `risk.kill_switch_profiles` with `mode: adaptive` to tighten risk in high-volatility regimes.
+- Enable `risk.stress.*` to reduce new risk under shock scenarios.
+- Enable `risk.liquidity_haircut.*` to cap order sizing under thin liquidity.

@@ -27,6 +27,8 @@ Expose Prometheus metrics and Grafana dashboards.
 - Audit logs capture full decision traces in JSONL for later replay.
 - Compliance exports can write JSONL and CSV summaries per day.
 - Enable via `monitoring.audit.enabled` and `monitoring.compliance.enabled`.
+- Retention and reason-code enforcement are controlled via `monitoring.audit.*` and `monitoring.compliance.*`.
+- Compliance exports write `.sha256` sidecar digests (and optional signatures).
 
 ## Configuration
 `config/config.yaml`:

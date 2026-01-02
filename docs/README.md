@@ -33,4 +33,5 @@ Subsystem reference:
 - `top_tier_epics.md`
 - `top_tier_backlog.md`
 - `monitoring.md`
+- `oversight.md`
 - `api.md`

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -52,6 +53,7 @@ from app.monitoring.metrics import (
 )
 from app.monitoring.audit import AuditLogger, ComplianceLogger
 from app.risk.manager import RiskManager
+from app.risk.haircut import apply_haircuts
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
 from app.strategies.trend_following import TrendFollowingStrategy
 from app.strategies.factor_model import FactorModelStrategy
@@ -138,14 +140,36 @@ class TradingAgent:
         self._audit_include_features = bool(audit_cfg.get("include_features", False))
         self._audit_include_market_state = bool(audit_cfg.get("include_market_state", False))
         if audit_cfg.get("enabled", False):
-            self._audit_logger = AuditLogger(str(audit_cfg.get("output_dir", "/data/reports/audit")))
+            audit_signing = audit_cfg.get("signing", {}) or {}
+            audit_secret = None
+            secret_env = audit_signing.get("secret_env")
+            if secret_env:
+                audit_secret = os.getenv(str(secret_env))
+            self._audit_logger = AuditLogger(
+                str(audit_cfg.get("output_dir", "/data/reports/audit")),
+                retention_days=int(audit_cfg.get("retention_days", 0)),
+                enforce_reason_codes=bool(audit_cfg.get("enforce_reason_codes", False)),
+                reason_codes_path=audit_cfg.get("reason_codes_path"),
+                signing_secret=audit_secret,
+                signing_enabled=bool(audit_signing.get("enabled", False)),
+            )
         self._compliance_logger: ComplianceLogger | None = None
         self._compliance_include_features = bool(compliance_cfg.get("include_features", False))
         self._compliance_include_market_state = bool(compliance_cfg.get("include_market_state", False))
         if compliance_cfg.get("enabled", False):
+            compliance_signing = compliance_cfg.get("signing", {}) or {}
+            compliance_secret = None
+            secret_env = compliance_signing.get("secret_env")
+            if secret_env:
+                compliance_secret = os.getenv(str(secret_env))
             self._compliance_logger = ComplianceLogger(
                 str(compliance_cfg.get("output_dir", "/data/reports/compliance")),
                 formats=compliance_cfg.get("formats", ["jsonl"]),
+                retention_days=int(compliance_cfg.get("retention_days", 0)),
+                enforce_reason_codes=bool(compliance_cfg.get("enforce_reason_codes", False)),
+                reason_codes_path=compliance_cfg.get("reason_codes_path"),
+                signing_secret=compliance_secret,
+                signing_enabled=bool(compliance_signing.get("enabled", False)),
             )
         self._include_feature_snapshots = self._audit_include_features or self._compliance_include_features
         self._drift_monitor: DriftMonitor | None = None
@@ -153,6 +177,7 @@ class TradingAgent:
         self._drift_rollback_done = False
         self._active_model_ref: str | None = None
         self._active_model_checked_at: datetime | None = None
+        self._active_model_snapshot: dict | None = None
         self._init_drift_monitor()
         self._equity_start: float | None = None
         self._equity_peak: float | None = None
@@ -281,10 +306,18 @@ class TradingAgent:
         active = load_active_model(active_path)
         ref = _active_model_ref(active)
         self._active_model_checked_at = now
+        if active:
+            self._active_model_snapshot = active
         if ref and ref != self._active_model_ref:
             self._active_model_ref = ref
             self._reload_rl_strategies()
             logging.info("Active model updated; reloading RL strategies.")
+
+    def _current_model_snapshot(self) -> dict | None:
+        registry_cfg = self.learning_cfg.get("registry", {}) or {}
+        if not registry_cfg.get("use_active", True):
+            return None
+        return self._active_model_snapshot
 
     def _init_drift_monitor(self) -> None:
         drift_cfg = self.learning_cfg.get("drift", {}) or {}
@@ -486,6 +519,17 @@ class TradingAgent:
             "position_qty": position.get("qty"),
         }
 
+    @staticmethod
+    def _haircut_snapshot(market_state: dict) -> dict:
+        fields = (
+            "stress_haircut_pct",
+            "liquidity_haircut_pct",
+            "max_participation",
+            "session_volume",
+            "spread_pct",
+        )
+        return {key: market_state.get(key) for key in fields if key in market_state}
+
     def _write_decision_trace(self, payload: dict) -> None:
         try:
             date_str = datetime.utcnow().date().isoformat()
@@ -535,6 +579,10 @@ class TradingAgent:
         trace = self._init_decision_trace(symbol, market_state)
         if trace and "_decision_start" in market_state:
             trace["_decision_start"] = market_state.get("_decision_start")
+        if trace:
+            model_snapshot = self._current_model_snapshot()
+            if model_snapshot:
+                trace["model_active"] = model_snapshot
         if self._kill_switch_liquidated:
             return None
         self._apply_kill_switch_profile(market_state)
@@ -593,6 +641,7 @@ class TradingAgent:
             trace["signals"] = [
                 self._signal_summary(sig, include_features=self._include_feature_snapshots) for sig in signals
             ]
+            trace["orchestrator_mode"] = self.cfg.get("orchestrator", {}).get("mode", "direct")
         self._update_orchestrator(symbol, market_state)
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             names, weights = self._orchestrator.select(symbol, active_strategies, market_state, signals)
@@ -697,6 +746,8 @@ class TradingAgent:
             qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, market_state, reduce_pct=reduce_pct)
         else:
             qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, market_state)
+        if trace:
+            trace["haircuts"] = self._haircut_snapshot(market_state)
         if qty <= 0:
             if skip_reason:
                 SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=skip_reason).inc()
@@ -886,7 +937,21 @@ class TradingAgent:
             if remaining_value <= 0:
                 return 0, "position_limit"
             allowed_value = min(remaining_value, cash)
+            allowed_value, haircut_reasons, haircut_metrics = apply_haircuts(
+                self.cfg.get("risk", {}),
+                allowed_value,
+                last_price,
+                market_state,
+            )
+            if haircut_metrics:
+                market_state.update(haircut_metrics)
             if allowed_value < last_price:
+                if "illiquid_spread" in haircut_reasons:
+                    return 0, "illiquid_spread"
+                if "illiquid_volume" in haircut_reasons:
+                    return 0, "illiquid_volume"
+                if haircut_reasons:
+                    return 0, "liquidity_haircut"
                 return 0, "insufficient_cash"
             return int(allowed_value // last_price), None
 
@@ -907,7 +972,21 @@ class TradingAgent:
             if buying_power <= 0:
                 buying_power = cash
             allowed_value = min(remaining_value, buying_power)
+            allowed_value, haircut_reasons, haircut_metrics = apply_haircuts(
+                self.cfg.get("risk", {}),
+                allowed_value,
+                last_price,
+                market_state,
+            )
+            if haircut_metrics:
+                market_state.update(haircut_metrics)
             if allowed_value < last_price:
+                if "illiquid_spread" in haircut_reasons:
+                    return 0, "illiquid_spread"
+                if "illiquid_volume" in haircut_reasons:
+                    return 0, "illiquid_volume"
+                if haircut_reasons:
+                    return 0, "liquidity_haircut"
                 return 0, "insufficient_buying_power"
             return int(allowed_value // last_price), None
 

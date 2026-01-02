@@ -26,6 +26,7 @@
 ## Logs
 - Use `docker compose logs -f trader`.
 - Watch AI filter heartbeat and order queue messages.
+- Audit/compliance logs rotate based on `monitoring.*.retention_days`.
 
 ## Safe Restart
 ```bash

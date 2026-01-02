@@ -130,6 +130,15 @@ risk:
     target_vol_pct: 2.0
     min_scale: 0.5
     max_scale: 1.5
+  stress:
+    enabled: false
+    shock_pct: 5.0
+  liquidity_haircut:
+    enabled: false
+    max_participation: 0.1
+    min_session_volume: 100000
+    max_spread_pct: 1.0
+    volume_haircut_pct: 50.0
   var:
     enabled: true
     window: 60
@@ -650,6 +659,12 @@ monitoring:
     output_dir: /data/reports/audit
     include_features: true
     include_market_state: false
+    retention_days: 30
+    enforce_reason_codes: false
+    reason_codes_path: /app/config/reason_codes.json
+    signing:
+      enabled: false
+      secret_env: AUDIT_SIGNING_SECRET
   compliance:
     enabled: false
     output_dir: /data/reports/compliance
@@ -658,3 +673,9 @@ monitoring:
     - csv
     include_features: false
     include_market_state: false
+    retention_days: 30
+    enforce_reason_codes: false
+    reason_codes_path: /app/config/reason_codes.json
+    signing:
+      enabled: false
+      secret_env: COMPLIANCE_SIGNING_SECRET
