@@ -104,7 +104,8 @@
       },
       "targets": [
         {
-          "expr": "account_buying_power",
+          "expr": "account_buying_power_by_broker",
+          "legendFormat": "{{broker}}",
           "refId": "A"
         }
       ],
@@ -132,7 +133,8 @@
       },
       "targets": [
         {
-          "expr": "account_cash",
+          "expr": "account_cash_by_broker",
+          "legendFormat": "{{broker}}",
           "refId": "A"
         }
       ],
