@@ -289,6 +289,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Sanitized Alertmanager SMTP config to remove hardcoded credentials.
 - Added SPDX headers to all text/config files and scrubbed secrets from tracked env files.
 - Added AGPLv3 SPDX headers across source files.
 - Added AGPLv3 licensing and third-party attribution inventory.
