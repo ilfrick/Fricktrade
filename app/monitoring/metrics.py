@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
+
 from prometheus_client import Gauge, Counter, start_http_server
 
 TRADES = Counter("trades_total", "Total trades executed", ["symbol", "side"])

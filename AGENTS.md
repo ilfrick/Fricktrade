@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
+
 ## Autotrader Agent Guide
 
 This repo contains a Python intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana), with broker adapters, risk controls, backtesting, data download, and metrics/monitoring.

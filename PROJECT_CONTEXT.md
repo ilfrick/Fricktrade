@@ -1,11 +1,14 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
+
 # Autotrader Project Context
 
 This file captures the key state and workflows for this repo so a new Codex session
 can reload context quickly. Keep it updated when the setup changes.
 
 ## Worktrees and Branches
-- Live worktree: `/path/to/Autotrader` on branch `v1.0`
-- Dev worktree: `/path/to/Autotrader/dev` on branch `master` (created via `git worktree`)
+- Live worktree: `./` on branch `v1.0`
+- Dev worktree: `./dev` on branch `master` (created via `git worktree`)
 
 ## Dev vs Live Intent
 - Live (v1.0) is running and trading.
@@ -15,7 +18,7 @@ can reload context quickly. Keep it updated when the setup changes.
 ## Docker Notes
 - Main compose file: `docker-compose.yml`
 - Ports are fixed in compose; to run dev alongside live, use a separate project name:
-  - Example: `docker compose -p autotrader-dev ...` in `/path/to/Autotrader/dev`
+  - Example: `docker compose -p autotrader-dev ...` in `./dev`
 - Docker socket access may require approval in this environment.
 
 ## Usual Entry Points
@@ -31,7 +34,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Keep tracked configs unchanged; use temporary config copies for each run when possible.
 
 ## Recent Tasks
-- Created dev worktree on `master` under `/path/to/Autotrader/dev`.
+- Created dev worktree on `master` under `./dev`.
 - Live worktree remains on `v1.0`.
 - Enabled a strategy-level pending-order guard to skip signal evaluation while orders are open.
 - Cleared stale open-order metric labels so Grafana reflects only current pending orders.
@@ -45,3 +48,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and redeployed live v1 services after enabling the pending-order strategy guard.
 - Rebuilt and redeployed live v1 services after clearing stale open-order metrics.
 - Verified Grafana datasource queries show no open orders and position metrics align with Alpaca.
+- Added AGPLv3 license and third-party notices to legacy branches.

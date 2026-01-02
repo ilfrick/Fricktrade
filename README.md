@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
+
 # Autotrader (Multi-Market)
 
 An intraday trading agent with shorting support, Alpaca + IBKR integration, configurable risk controls, backtesting, local data download (yfinance), and Grafana monitoring. Supports multi-market trading gates (NYSE, Nasdaq, Borsa Italiana).
@@ -561,6 +564,11 @@ One-off refresh:
 ```bash
 docker compose run --rm calendar-updater python -m app.utils.holiday_update --config /app/config/config.yaml --once
 ```
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0 (AGPLv3). See `LICENSE`.
+Third-party attributions and license metadata are documented in `THIRD_PARTY_NOTICES.md`.
+
 
 ## History
 
