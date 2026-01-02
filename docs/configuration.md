@@ -68,6 +68,7 @@ Centralize runtime settings for all subsystems.
 - Audit/compliance signing: `monitoring.audit.signing.*` + `monitoring.compliance.signing.*`.
 - Checkpointing: `checkpointing.enabled`.
 - Multi-broker routing: `execution.brokers.enabled`.
+- Auto-split routing across brokers: `execution.brokers.routing.mode: auto_split`.
 - Multi-account env auto-detect: `ALPACA_API_KEYS`/`ALPACA_API_SECRETS` or `ALPACA_API_KEY_1` +
   `ALPACA_API_SECRET_1`, and `IBKR_CLIENT_IDS` or `IBKR_CLIENT_ID_1` (optional `IBKR_ACCOUNT_ID_*`).
 - Execution algos: `execution.algos.enabled`.
@@ -80,6 +81,7 @@ Centralize runtime settings for all subsystems.
 - Kill switch profiles: `risk.kill_switch_profiles.enabled`.
 - Stress haircuts: `risk.stress.enabled`.
 - Liquidity haircuts: `risk.liquidity_haircut.enabled`.
+- Minimum order price: `trading_limits.min_price`.
 - Signal bias guard: `strategy.signal_bias_guard.*` (blocks counter-trend actions).
 - RL signal features: `learning.features.include_signal_features` and `learning.features.signal_interval`.
 - Benchmarks: `benchmarking.*` (walk-forward + stress scenarios, bootstrap CI, MC stress, output/plot/PDF paths).

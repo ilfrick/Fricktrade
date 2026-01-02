@@ -2,6 +2,7 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 import json
+import hashlib
 import logging
 import os
 import time
@@ -710,6 +711,12 @@ class TradingAgent:
             logging.info("Skipping %s for %s: no price available", action, symbol)
             self._emit_decision_trace(trace, "skip", "no_price", "pricing")
             return None
+        min_price = self.cfg.get("trading_limits", {}).get("min_price")
+        if min_price is not None and last_price < float(min_price):
+            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="min_price").inc()
+            logging.info("Skipping %s for %s: price below min_price", action, symbol)
+            self._emit_decision_trace(trace, "skip", "min_price", "limits")
+            return None
         try:
             self._last_prices[symbol] = float(last_price)
         except (TypeError, ValueError):
@@ -1156,11 +1163,23 @@ class TradingAgent:
         if strategy and strategy in strategy_map:
             broker_name = self._normalize_broker_name(str(strategy_map[strategy]))
             return self._maybe_fallback_broker(broker_name)
+        routing_mode = str(routing.get("mode", "default")).lower()
+        if routing_mode == "auto_split":
+            broker_name = self._auto_split_broker(symbol)
+            return self._maybe_fallback_broker(broker_name)
         default = routing.get("default")
         if default:
             broker_name = self._normalize_broker_name(str(default))
             return self._maybe_fallback_broker(broker_name)
         return self._maybe_fallback_broker(self._broker_name)
+
+    def _auto_split_broker(self, symbol: str) -> str:
+        broker_names = sorted(self._broker_map.keys())
+        if not broker_names:
+            return self._broker_name
+        digest = hashlib.md5(symbol.encode("utf-8")).hexdigest()
+        idx = int(digest[:8], 16) % len(broker_names)
+        return broker_names[idx]
 
     def _normalize_broker_name(self, broker_name: str) -> str:
         if broker_name in self._broker_map:

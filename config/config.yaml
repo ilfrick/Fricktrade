@@ -181,6 +181,7 @@ trading_limits:
   enforce_account_flags: true
   blocked_symbols: []
   blocked_actions: []
+  min_price: 2.0
 strategy:
   name: rl_policy
   names:
@@ -656,6 +657,7 @@ execution:
   brokers:
     enabled: true
     routing:
+      mode: auto_split
       default: alpaca
       symbols: {}
       strategies: {}
