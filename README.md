@@ -5,20 +5,12 @@
 
 Autotrader is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana). It combines multiple strategies, an RL-based orchestrator, broker adapters, risk controls, and monitoring into a Docker-first stack for live trading, backtesting, and continuous learning.
 
-## Start Here
-- Getting started: `docs/getting-started.md`
-- Configuration guide: `docs/configuration.md`
-- Operations: `docs/operations.md`
-- Testing: `docs/testing.md`
-- Deployment: `docs/deployment.md`
-- Troubleshooting: `docs/troubleshooting.md`
-
 ## Goals
 - Trade intraday with configurable strategies and strict risk controls.
 - Operate live or in backtest mode with shared core logic.
 - Provide observability (Prometheus + Grafana) and operational controls (FastAPI UI).
 - Support GPU acceleration where available, with CPU fallback.
-- Resume safely after reboots via periodic state checkpoints.
+- Be resilient to restarts via periodic state checkpoints.
 
 ## Repository Layout
 - `app/`: core trading agent code
@@ -37,20 +29,25 @@ flowchart LR
         YF[yfinance live data]
         AlpacaBars[Alpaca historical bars]
         AlpacaAssets[Alpaca assets/universe]
+        BrokerUniverse[Broker universes<br/>enabled brokers - Alpaca today]
         Ingest[Ingest pipeline]
         Scan[Dynamic symbol scanner]
         AIFilter[AI symbol filter<br/>online updates + news]
-        News[News catalyst fetcher]
+        News[News catalyst fetcher<br/>broker-backed - Alpaca today]
     end
     subgraph Models["Model Store"]
         ModelStore[/data + /app/models/]
+        ModelRegistry[Model Registry<br/>metadata + artifacts]
+        ActiveModel[Active Model Pointer<br/>model_active.json]
     end
     subgraph Core["Trading Loop"]
         Trader[TradingAgent]
         Strat[Strategies<br/>rl_policy / rl_policy_fees / intraday_momentum / pattern_trading / trend_following / factor_model / stat_arb_pairs / market_maker]
         Orchestrator[RL Strategy Orchestrator]
-        Risk[Risk Manager<br/>vol targeting]
+        Drift[Drift Monitor<br/>feature + PnL]
+        Risk[Risk Manager<br/>vol targeting + VaR/CVaR + caps]
         Algo[Execution Algos<br/>TWAP / VWAP / POV]
+        Impact[Market Impact Model]
         Exec[Execution Engine]
         Queue[Order Queue<br/>FIFO + feedback]
         Orders[Open order tracking<br/>cancel/skip]
@@ -62,20 +59,26 @@ flowchart LR
         RLTrain[RL training + online updates]
         OrchPretrain[Orchestrator pretrain]
         AIFilterTrain[AI filter training]
+        TestsWhenClosed[Tests When Closed]
     end
     subgraph Backtest["Backtesting"]
         AgentBT[Agent backtest engine]
     end
     subgraph Broker["Broker Layer"]
+        Router[Broker Router]
         Alpaca[Alpaca]
         IBKR[IBKR]
     end
     subgraph Observability["Monitoring & Control"]
         Metrics[Prometheus Metrics]
-        Grafana[Grafana Dashboard]
+        Grafana[Grafana Dashboards<br/>overview + latency]
         Alerting[Alertmanager]
         API[FastAPI Config/UI]
         Logs[Rotating Logs]
+        Audit[Audit Logs]
+        Compliance[Compliance Exports]
+        OpsState[Ops State File<br/>system_state.json]
+        Healthwatch[Healthwatch Scheduler]
     end
 
     YF --> Trader
@@ -84,6 +87,8 @@ flowchart LR
     AlpacaBars --> AIFilterTrain
     AlpacaAssets --> Scan
     AlpacaAssets --> AIFilter
+    BrokerUniverse --> Scan
+    BrokerUniverse --> AIFilter
     Scan --> Trader
     AIFilter --> Trader
     AIFilter --> AIFeatures --> Orchestrator
@@ -91,10 +96,19 @@ flowchart LR
     News --> AIFilter
     Ingest --> AlpacaBars
     RLTrain --> ModelStore
+    RLTrain --> ModelRegistry --> ActiveModel
     OrchPretrain --> ModelStore
     AIFilterTrain --> ModelStore
-    Trader --> Strat --> Orchestrator --> Risk --> Algo --> Queue --> Orders --> Exec --> Alpaca
-    Exec --> IBKR
+    Trader --> Strat --> Drift --> Orchestrator --> Risk --> Impact --> Algo --> Queue --> Orders --> Exec --> Router
+    OpsState --> Trader
+    OpsState --> RLTrain
+    OpsState --> TestsWhenClosed
+    Router --> Alpaca
+    Router --> IBKR
+    Alpaca --> BrokerUniverse
+    IBKR --> BrokerUniverse
+    Alpaca --> News
+    IBKR --> News
     Alpaca --> Queue
     IBKR --> Queue
     Queue --> Orchestrator
@@ -103,68 +117,72 @@ flowchart LR
     Trader --> Metrics --> Grafana
     Metrics --> Alerting
     Trader --> Logs
+    Trader --> Audit
+    Trader --> Compliance
+    Healthwatch --> OpsState
     API <--> Trader
 ```
 
-## How It Works (High Level)
-1) Resolve symbols (static list or dynamic scanner/AI filter).
-2) Check market hours and per-symbol venue gates.
-3) Generate signals from strategies and select with the RL orchestrator.
-4) Apply risk controls and open-order guards.
-5) Submit orders via FIFO order queue and broker execution.
-6) Record metrics, update models, and checkpoint state.
-
 ## Core Components
 ### Trading Loop
-- Entry point: `app/agents/trader.py`.
-- Runs the end-to-end cycle with per-symbol venue gating.
-- See: `docs/trading-loop.md`.
+- Entry point: `app/agents/trader.py`
+- Resolves active symbols (static list or dynamic scanner/AI filter)
+- Applies per-symbol venue gating and market-hours checks
+- Runs strategies, orchestrator selection, and risk checks
+- Submits orders via the execution engine and order queue
+- Updates metrics and checkpointed state
 
 ### Strategies
-- `rl_policy`: RL policy inference with optional GPU acceleration.
-- `rl_policy_fees`: fee-aware RL policy with broker fee guardrails.
-- `intraday_momentum`: price/volume threshold strategy.
-- `pattern_trading`: momentum breakout with filters and trailing exits.
-- `trend_following`: moving-average trend breakout.
-- `factor_model`: momentum + liquidity + volatility composite.
-- `stat_arb_pairs`: rolling correlation pair trading.
-- `market_maker`: inventory-skewed limit quoting.
-- See: `docs/strategies.md`.
+- `rl_policy`: RL policy inference with optional GPU acceleration
+- `rl_policy_fees`: fee-aware RL policy with broker fee guardrails
+- `intraday_momentum`: price/volume threshold strategy
+- `pattern_trading`: momentum breakout with filters and trailing exits
+- `trend_following`: moving-average trend breakout
+- `factor_model`: momentum + liquidity + volatility composite
+- `stat_arb_pairs`: rolling correlation pair trading
+- `market_maker`: inventory-skewed limit quoting
 
 ### Orchestrator
-- RL-based strategy selection using strategy signals + AI filter features.
-- Online updates and periodic checkpoints for resilience.
-- See: `docs/learning.md`.
+- RL-based strategy selection that consumes strategy signals and AI-filter features
+- Records per-symbol decisions and updates on price movement + order feedback
+- Checkpoints biases/models on an interval
 
 ### Execution
-- Broker-agnostic execution engine + FIFO queue.
-- Cancel/replace + pending-order guardrails.
-- Optional TWAP/VWAP/POV slicing for larger orders.
-- See: `docs/execution.md`.
+- `app/execution/executor.py`: broker-agnostic execution
+- `app/execution/order_queue.py`: FIFO submission, broker feedback loop
+- Open-order guardrails + cancel/replace logic
+- Optional TWAP/VWAP/POV slicing for larger orders
 
 ### Data & Scanning
-- Live data via yfinance in trade mode.
-- Historical data via Alpaca for training/backtesting.
-- Dynamic scanner + AI symbol filter with news catalysts.
-- See: `docs/data.md` and `docs/ai-symbol-filter.md`.
+- Live data from yfinance in trade mode
+- Historical bars from Alpaca for training/backtesting/ingestion
+- Dynamic scanner and AI filter for symbol selection
+- News catalyst support (Alpaca news)
+
+### Learning
+- Offline RL training and online updates
+- GPU acceleration if available
+- Best-model selection via `learning.use_best_model`
+- Model registry snapshots and drift monitoring with auto rollback
 
 ### Monitoring & API
-- Prometheus metrics + Grafana dashboards.
-- FastAPI config/health UI.
-- See: `docs/monitoring.md` and `docs/api.md`.
+- Prometheus metrics (`app/monitoring/metrics.py`)
+- Grafana dashboards for orders, positions, PnL, account status, and latency
+- FastAPI `/health`, `/config`, `/config/update`, `/restart`, `/ui`
+- Audit and compliance logs (JSONL/CSV) for decision traces
 
-### Resilience
-- Per-minute checkpoints for trader/learner/orchestrator state.
-- Retention pruning to avoid disk growth.
-- See: `docs/operations.md`.
+### Resilience & Storage
+- Periodic checkpoints for trader/learner state (`checkpointing.*`)
+- Retention pruning by age and count to avoid disk growth
 
 ## Configuration Overview
 All configuration lives in `config/config.yaml`.
 
 Key sections:
 - `market.*`: venue gating, hours, symbol venue mapping
+- `brokers.*`: broker credentials and adapters (supports `brokers.<name>.accounts[]` or env auto-detect for multi-account routing)
 - `data.*`: symbols, dynamic scan, sources, AI filter
-- `news.*`: catalyst fetch config (optional `news.llm.*` for Ollama gating)
+- `news.*`: catalyst fetch config (optional `news.llm.*` for Ollama gating; default base_url `http://ollama:11434`)
 - `strategy.*`: strategy selection and params
 - `orchestrator.*`: RL orchestrator settings
 - `risk.*`: risk limits, stops, cool-downs
@@ -173,8 +191,38 @@ Key sections:
 - `backtest.*`: backtest range and engine settings
 - `monitoring.*`: metrics and alerts
 - `checkpointing.*`: checkpoint cadence + retention
+- `kill_switch.*`: manual interlocked kill switches (sleep or liquidation)
+- `reports.daily_top_movers.*`: daily top movers report + training exports
 
-See `docs/configuration.md` for full details and guidance.
+See `docs/configuration.md` for full details.
+
+## Daily Reporting
+Daily top movers reporting runs after each market close, emails a summary, and stores intraday 1-minute
+bars for the top performers. The report includes numeric indicators, signal hints, and optional news
+correlation for each top mover.
+The email body is also saved locally under `/data/reports/daily_top_movers/<YYYY-MM-DD>/_email/` as
+`.txt` and `.html`.
+If a symbol has no trades and no skip metrics, the report will infer a reason such as
+`not_in_active_universe`, `open_order_pending`, `held_position_no_trade`, or `no_signal_or_filtered`.
+The metrics line now includes absolute move values (open->close, runup, drawdown) alongside %.
+Decision traces from the trading agent are loaded (when enabled) and summarized in the report.
+
+Key config under `reports.daily_top_movers.*`:
+- `feed` (iex or sip)
+- `signal_thresholds.*` (early momentum / volume / runup / drawdown)
+- `news.*` (headlines + correlation hints)
+- `email.*` (SMTP overrides; `smtp_require_tls` can disable STARTTLS)
+
+## Safeguards
+- Market-hours gating by venue
+- Per-symbol venue mapping (manual + broker refresh)
+- Risk manager limits (loss caps, exposure, leverage)
+- VaR/CVaR gating and exposure caps by venue/sector
+- Volatility-aware kill switch profiles
+- Cool-down windows and stop logic
+- Fee-aware guardrails for RL strategy
+- Rolling strategy performance report and kill switch thresholds (`strategy.performance.*`)
+- Open-order guard and order-queue serialization
 
 ## Quick Start (Docker)
 1) Copy env template:
@@ -194,9 +242,9 @@ docker compose up -d --build
 ```
 
 4) Verify:
-- API health: `http://localhost:18081/health`
-- Config UI: `http://localhost:18081/ui`
-- Grafana: `http://localhost:3002`
+- API health: `http://localhost:18083/health`
+- Config UI: `http://localhost:18083/ui`
+- Grafana: `http://localhost:3003`
 - Healthwatch metrics: `http://localhost:9105/metrics` (internal in Docker; use Prometheus to view)
 
 Services:
@@ -206,6 +254,7 @@ Services:
 - `calendar-updater`: weekly market holidays refresh
 - `tests-when-closed`: runs tests/backtests when markets are closed
 - `healthwatch`: health probes + Prometheus metrics
+- `daily-report`: daily top movers email + training data export
 
 ## Common Commands
 Download data:
@@ -228,19 +277,52 @@ Evaluate:
 docker compose run --rm trader python3 -m app.main evaluate --config /app/config/config.yaml
 ```
 
-## Documentation Index
-- `docs/README.md`
-- Subpages: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration
+## Documentation
+- `docs/README.md` for the full index
+- Subpages cover: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration
 
 ## License
 
 This project is licensed under the GNU Affero General Public License v3.0 (AGPLv3). See `LICENSE`.
 Third-party attributions and license metadata are documented in `THIRD_PARTY_NOTICES.md`.
 
-
 ## History
 
 Recent changes (newest first):
+- Sanitized Alertmanager SMTP config to remove hardcoded credentials.
+- Added SPDX headers to all text/config files and scrubbed secrets from tracked env files.
+- Added AGPLv3 SPDX headers across source files.
+- Added AGPLv3 licensing and third-party attribution inventory.
+- Added configurable extended-hours trading window and broker order flags.
+- Added audit/compliance decision logs and latency metrics + Grafana dashboard.
+- Added model registry metadata, drift detection, and auto-rollback to best RL model.
+- Added VaR/CVaR gating, exposure caps, and volatility-aware kill switch profiles.
+- Added market impact estimates, adaptive execution selection, and retry policy for queued orders.
+- Added OHLCV validation, split/dividend adjustments, and data quality reports for ingestion.
+- Added bootstrap CI, Monte Carlo stress, and buy/hold baseline to benchmarks.
+- Added benchmarking plots, regime tagging, scorecard metrics, and PDF summaries.
+- Added benchmark runner and documentation for walk-forward and stress tests.
+- Added Grafana panels for intraday signal metrics (percent + absolute).
+- Fixed AI filter retrain to pass broker config to news fetcher.
+- Fixed RL orchestrator AI feature extraction indentation regression.
+- Fixed Alpaca market data prefetch using missing IBKR handle; align AI filter signals to latest day.
+- Added intraday signal metrics to live decisions, RL features, and AI filter training.
+- Added env-based auto-detection for multi-account brokers with graceful fallback on invalid keys.
+- Added multi-account broker support with per-account routing and config helpers.
+- Added daily top movers report with email + training data export.
+- Added manual kill switches for force sleep and force liquidation with interlock.
+- Added healthwatch scheduler heartbeat logging.
+- Enabled healthwatch market-based stack sleep/wake in config.
+- Fixed market-based sleep/wake scheduling to use timezone-aware UTC timestamps.
+- Added optional healthwatch market-based stack sleep/wake control.
+- Added explicit logs when news catalyst refresh starts/completes.
+- Made news catalyst refresh async so the trader keeps running while Ollama updates.
+- Added a separate Grafana dashboard for strategy performance metrics.
+- Added Grafana stat panel for 24h PDT blocks.
+- Added Grafana panel for PDT blocks (day-trading protection).
+- Added rolling strategy performance reporting and kill switch thresholds.
+- Added PDT-protection block counter for broker-rejected orders.
+- Run Ollama as a docker service for news LLM gating.
 - Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day instead of raw days count.
 - Added multi-broker live market data provider support (alpaca/ibkr) with routing.
@@ -254,7 +336,7 @@ Recent changes (newest first):
 - Capped dynamic symbol list size to the tradeable universe count (plus positions/open orders).
 - Raised dynamic_symbols.max_symbols to 50000 to allow the full active universe.
 - Enforced cash-aware symbol filtering to cap candidates by available cash and always include open-order symbols.
-- Added flow diagrams for the trading agent (v2.0).
+- Added flow diagrams for the trading agent (dev).
 - Switched orchestrator to direct mode (single strategy selection) using all strategy signals.
 - Tweaked broker market status panel to show only current status (no history).
 - Added Grafana broker market status panel and broker_market_open metric.
@@ -263,7 +345,7 @@ Recent changes (newest first):
 - Fixed yfinance downloads by only passing proxy when configured.
 - Guarded factor model and AI filter features against zero prices to avoid divide warnings.
 - Guarded intraday momentum strategy against zero prices during backtests.
-- Enabled production strategy set (trend following, factor model, stat-arb pairs, market making) with execution algos and volatility targeting.
+- Added production strategy set (trend, factor, stat-arb, market making) with execution algos and vol targeting.
 - Added limit-order support for brokers and time-sliced order queue scheduling.
 - Added tests for strategy models and execution algos.
 - Cleared stale active-symbol metrics so Grafana only shows current symbols.
@@ -271,8 +353,13 @@ Recent changes (newest first):
 - Raised minimum trade price to 2.0 across dynamic scanning and pattern selection.
 - Added universe price filtering by cash-aware price bounds for dynamic symbols.
 - Added Grafana panel for broker API call activity.
+- Fixed Mermaid label text so the architecture diagram renders in master.
+- Ensured dynamic universe always keeps positions/orders and hardened broker-backed news fetching.
+- Fixed architecture diagram to show broker-backed news inputs.
 - Fixed OrderQueue snapshot response handling so tests pass.
-- Ensured dynamic universe always keeps positions/orders and hardened news fetching.
+- Updated the architecture diagram to show broker-backed news and broker universe inputs.
+- Added broker-backed news catalysts and a broker-aware universe option for AI symbol filtering.
+- Added multi-broker routing with broker-aware metrics, backtest support, and config/UI updates.
 - Verified healthwatch metrics and sent test alert via Alertmanager.
 - Restarted healthwatch after fixing targets config.
 - Rebuilt dev stack with healthwatch/autoheal and resolved API port conflict.

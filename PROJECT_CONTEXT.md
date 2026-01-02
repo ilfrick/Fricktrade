@@ -7,18 +7,19 @@ This file captures the key state and workflows for this repo so a new Codex sess
 can reload context quickly. Keep it updated when the setup changes.
 
 ## Worktrees and Branches
-- Live worktree: `./` on branch `v2.0`
+- Live worktree: `./` on branch `v3.0`
 - Dev worktree: `./dev` on branch `master` (created via `git worktree`)
 
 ## Dev vs Live Intent
-- Live (v2.0) is running and trading.
+- Live (v3.0) is running and trading.
+- v2.0 is offline.
 - Dev is for development and backtesting only; no live broker credentials.
 - `dev/.env` exists and is based on `.env.example` with empty broker keys.
 
 ## Docker Notes
 - Main compose file: `docker-compose.yml`
 - Ports are fixed in compose; to run dev alongside live, use a separate project name:
-  - Example: `docker compose -p autotrader-dev ...` in `./dev`
+- Example: `docker compose -p autotrader-dev ...` in `./dev`
 - Docker socket access may require approval in this environment.
 
 ## Usual Entry Points
@@ -43,7 +44,53 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
-- Added AGPLv3 license and third-party notices to legacy branches.
+- Sanitized Alertmanager SMTP config and removed hardcoded credentials.
+- Added explainability fields to decision traces and new oversight runbook doc.
+- Added SPDX headers to text/config files and scrubbed secrets from tracked env files.
+- Added AGPLv3 SPDX headers across source files.
+- Added AGPLv3 licensing and third-party attribution inventory.
+- Added configurable extended-hours trading windows and broker extended-hour order flags.
+- Added stress/liquidity haircuts to sizing for real-time risk controls.
+- Added audit/compliance retention, signing, and reason-code enforcement support.
+- Added active model pointer publishing and ops-state gating for trader/learner/tests.
+- Added ops state file output and aligned learner/tests with healthwatch scheduler state.
+- Kept tests-when-closed running during market shutdown via healthwatch keep_services.
+- Phase 6: added decision audit logs, compliance exports, and latency dashboard metrics.
+- Phase 5: added model registry metadata, feature drift detection, and auto-rollback for RL policies.
+- Phase 4: added VaR/CVaR gating, exposure caps, and volatility-aware kill switch profiles.
+- Phase 3: added market impact estimates, adaptive execution selection, and retry policy for queued orders.
+- Phase 2: added OHLCV validation, split/dividend adjustments, and data quality reports for ingestion.
+- Phase 1: added bootstrap CI, Monte Carlo stress, buy/hold baseline to benchmarks; added backtest spread/slippage.
+- Started top-tier Phase 0 planning for benchmark enhancements (bootstrap CI, MC stress, buy/hold baseline).
+- Added benchmark scorecard metrics, regime tagging plots, and PDF summary output.
+- Updated benchmarking docs/config for new plots and PDF reports.
+- Rendered daily report emails as HTML and saved HTML bodies to disk.
+- Added decision trace logging in trader and surfaced it in daily report output.
+- Added absolute move values to daily report metrics alongside percentage signals.
+- Switched no-trade inference to use 24h symbol_active counts for stability during market sleep.
+- Treated missing symbol_active metrics as not_in_active_universe when Prometheus is healthy.
+- Added inferred no-trade reasons using Prometheus gauges when no skip metrics exist.
+- Restored SMTP STARTTLS for daily report emails after server required it.
+- Saved daily report email bodies to disk and made SMTP auth optional based on server capabilities.
+- Added SMTP TLS override for daily report emails and guarded SMTP failures.
+- Hardened daily top movers bar parsing to support Alpaca Bar lists and avoid SIP errors.
+- Added daily top movers feed config (default IEX) and guarded Alpaca SIP errors.
+- Added env_file to daily-report service so Alpaca credentials load.
+- Added daily top movers signal thresholds, numeric metrics, and news correlation in the report.
+- Added daily top movers report with email + training data export.
+- Added manual kill switches for force sleep and force liquidation with interlock.
+- Added healthwatch scheduler heartbeat logging.
+- Enabled healthwatch market-based stack sleep/wake in config.
+- Fixed market-based sleep/wake scheduling to use timezone-aware UTC timestamps.
+- Added optional healthwatch market-based stack sleep/wake control.
+- Added explicit logs when news catalyst refresh starts/completes.
+- Made news catalyst refresh async so the trader keeps running while Ollama updates.
+- Added a separate Grafana dashboard for strategy performance metrics.
+- Added Grafana stat panel for 24h PDT blocks.
+- Added Grafana panel for PDT blocks (day-trading protection).
+- Added PDT-protection block counter for broker-rejected orders.
+- Added rolling strategy performance reporting and kill switch thresholds.
+- Run Ollama as a docker service for news LLM gating.
 - Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day for intraday intervals.
 - Added multi-broker live market data provider routing for Alpaca/IBKR.
@@ -58,7 +105,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Raised dynamic_symbols.max_symbols to 50000 to allow the full active universe.
 - Ensured universe price filtering respects cash caps; no fallback to full universe when cash is below price_min.
 - Enforced cash-aware symbol filtering to cap candidates by available cash and always include open-order symbols.
-- Added flow diagrams for the trading agent (v2.0).
+- Added flow diagrams for the trading agent (dev).
 - Switched orchestrator to direct mode (single strategy selection) using all strategy signals.
 - Tweaked broker market status panel to show only current status (no history).
 - Added Grafana broker market status panel and broker_market_open metric.
@@ -67,18 +114,23 @@ can reload context quickly. Keep it updated when the setup changes.
 - Fixed yfinance downloads by only passing proxy when configured to avoid unsupported keyword errors.
 - Guarded factor model and AI filter features against zero prices to avoid divide warnings.
 - Guarded intraday momentum strategy against zero prices to prevent backtest crashes.
-- Added production strategy set (trend following, factor model, stat-arb pairs, market making) and execution algos (TWAP/VWAP/POV).
-- Enabled volatility targeting for position sizing in config defaults.
+- Added production strategy set (trend, factor, stat-arb, market making) with execution algos and vol targeting.
 - Added limit-order support for brokers and order queue scheduling for algo slices.
 - Added tests for strategy models and execution algos.
-- Updated docs and README for the new strategy set and execution algos.
 - Cleared stale active-symbol metrics so Grafana only shows current symbols.
 - Ensured held positions stay in dynamic symbols even when scanner filters exclude them.
 - Raised minimum trade price to 2.0 across dynamic scanning and pattern selection.
 - Added universe price filtering by cash-aware price bounds for dynamic symbols.
 - Added Grafana panel for broker API call activity.
+- Fixed Mermaid label text so the architecture diagram renders in master.
+- Ensured dynamic universe always keeps positions/orders and hardened broker-backed news fetching.
+- Fixed architecture diagram to show broker-backed news inputs.
 - Fixed OrderQueue snapshot response handling so tests pass.
-- Ensured dynamic universe always keeps positions/orders and hardened news fetching.
+- Updated the architecture diagram to show broker-backed news and broker universe inputs.
+- Added broker-backed news catalysts and a broker-aware universe option for the AI symbol filter.
+- Fixed multi-broker symbol aggregation, action-based routing, and fallback routing.
+- Guarded routing default to only select enabled brokers.
+- Added multi-broker routing support with broker-aware metrics and alerts.
 - Added rejection reason labels to order rejection alerts and logs.
 - Added order rejection metrics/alerts with broker and error code.
 - Guarded sell actions to skip when no long position exists.
@@ -159,7 +211,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and redeployed live v1 services after enabling the pending-order strategy guard.
 - Rebuilt and redeployed live v1 services after clearing stale open-order metrics.
 - Verified Grafana datasource queries show no open orders and position metrics align with Alpaca.
-- Created branch `v2.0` from `master`, deployed it live, and synced dev-trained models into `.//models`.
+- Created branch `v2.0` from `master`, deployed it live, and synced dev-trained models into `./models`.
 - Stopped the dev backtest container so only the live v2.0 agent runs.
 - Stopped the old GPU learner container and restarted the v2.0 stack so only v2.0 services remain.
 - Added a safe fallback when the AI filter module is missing to keep live services from crashing.
@@ -177,6 +229,15 @@ can reload context quickly. Keep it updated when the setup changes.
 - Rebuilt and restarted v2.0 services after adding AI filter pre-run logs.
 - Raised the AI filter universe cap and set refresh interval to 1 minute.
 - Rebuilt and restarted v2.0 services after AI filter cadence updates.
+- Added benchmarking plots, regime tagging, and top-tier roadmap docs.
+- Added benchmark runner and documentation for walk-forward and stress tests.
+- Added Grafana panels for intraday signal metrics (percent + absolute).
+- Fixed AI filter retrain to pass broker config to news fetcher.
+- Fixed RL orchestrator AI feature extraction indentation regression.
+- Fixed Alpaca market data prefetch using missing IBKR handle; align AI filter signals to latest day.
+- Added intraday signal metrics to live decisions, RL features, and AI filter training.
+- Added env-based auto-detection for multi-account brokers with graceful fallback on invalid keys.
+- Added multi-account broker support with per-account routing and config helpers.
 - Enabled online updates for the AI symbol filter.
 - Rebuilt and restarted v2.0 services after enabling AI filter online updates.
 - Increased AI filter online update steps and max symbols for continuous training, then redeployed v2.0.
