@@ -570,7 +570,7 @@ reports:
       provider: ollama
       base_url: http://ollama:11434
       model: llama3.1:8b
-      timeout_seconds: 10
+      timeout_seconds: 30
       max_text_chars: 800
     email:
       use_alertmanager_config: true
@@ -592,7 +592,7 @@ news:
     provider: ollama
     base_url: http://ollama:11434
     model: llama3.1:8b
-    timeout_seconds: 10
+    timeout_seconds: 30
     max_items: 25
     max_text_chars: 800
 pattern_trading:

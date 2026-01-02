@@ -42,7 +42,7 @@ class RLPolicyStrategy(Strategy):
         path = Path(model_path)
         if not path.exists():
             raise FileNotFoundError(f"RL model not found at {model_path}")
-        self.model = PPO.load(str(path), device=self.device)
+        self.model = PPO.load(str(path), device=self.device, custom_objects=_sb3_custom_objects())
         logging.info("Loaded RL model from %s", model_path)
 
     def _update_state(self, market_state: dict) -> None:
@@ -99,3 +99,10 @@ def _resolve_device(device: str) -> str:
     if device != "auto":
         return device
     return "cpu"
+
+
+def _sb3_custom_objects() -> dict:
+    return {
+        "clip_range": lambda _: 0.2,
+        "lr_schedule": lambda _: 0.0,
+    }

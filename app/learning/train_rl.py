@@ -62,7 +62,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     vec_env = DummyVecEnv(envs)
 
     if resume and Path(model_path).exists():
-        model = PPO.load(model_path, env=vec_env, device=device)
+        model = PPO.load(model_path, env=vec_env, device=device, custom_objects=_sb3_custom_objects())
     else:
         model = PPO("MlpPolicy", vec_env, verbose=1, device=device)
     logging.info("Starting RL training for %d timesteps", timesteps)
@@ -142,6 +142,13 @@ def _resolve_device(device: str) -> str:
     if device != "auto":
         return device
     return "cpu"
+
+
+def _sb3_custom_objects() -> dict:
+    return {
+        "clip_range": lambda _: 0.2,
+        "lr_schedule": lambda _: 0.0,
+    }
 
 
 def _is_better_report(report: dict, best_report_path: str) -> bool:

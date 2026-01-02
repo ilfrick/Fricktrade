@@ -154,7 +154,7 @@ def evaluate_from_config(cfg: dict) -> dict:
         eval_df = df.iloc[split_idx:] if split_idx > 0 else df
         eval_sets.append(eval_df)
 
-    model = PPO.load(model_path, device=device)
+    model = PPO.load(model_path, device=device, custom_objects=_sb3_custom_objects())
     return evaluate_model(
         model=model,
         datasets=eval_sets,
@@ -176,6 +176,13 @@ def _resolve_device(device: str) -> str:
     if device != "auto":
         return device
     return "cpu"
+
+
+def _sb3_custom_objects() -> dict:
+    return {
+        "clip_range": lambda _: 0.2,
+        "lr_schedule": lambda _: 0.0,
+    }
 
 
 def _select_model_path(learning_cfg: dict) -> str:
