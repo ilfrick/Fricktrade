@@ -27,7 +27,7 @@ market:
       AMEX: NYSE
   open_mode: any
   extended_hours:
-    enabled: false
+    enabled: true
   holiday_update:
     enabled: true
     interval_days: 7
@@ -654,7 +654,7 @@ execution:
     max_notional: 5000
     reasons: [unknown, insufficient_funds]
   brokers:
-    enabled: false
+    enabled: true
     routing:
       default: alpaca
       symbols: {}

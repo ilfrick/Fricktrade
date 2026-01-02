@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from app.brokers.base import Broker
@@ -26,12 +27,12 @@ class BrokerRouter(Broker):
         total_cash = 0.0
         total_buying_power = 0.0
         per_broker: dict[str, dict[str, Any]] = {}
-        for name, broker in self._brokers.items():
-            try:
-                account = broker.get_account()
-            except Exception as exc:
-                logging.warning("Account fetch failed for %s: %s", name, exc)
-                account = {}
+        accounts = self._fetch_per_broker(
+            lambda broker: broker.get_account(),
+            "Account fetch failed for %s: %s",
+            {},
+        )
+        for name, account in accounts.items():
             equity, cash, buying_power = _extract_equity_cash(account)
             total_equity += equity
             total_cash += cash
@@ -51,12 +52,12 @@ class BrokerRouter(Broker):
 
     def get_positions(self) -> list[dict]:
         positions: list[dict] = []
-        for name, broker in self._brokers.items():
-            try:
-                raw_positions = broker.get_positions()
-            except Exception as exc:
-                logging.warning("Position fetch failed for %s: %s", name, exc)
-                continue
+        positions_map = self._fetch_per_broker(
+            lambda broker: broker.get_positions(),
+            "Position fetch failed for %s: %s",
+            [],
+        )
+        for name, raw_positions in positions_map.items():
             for pos in raw_positions:
                 item = dict(pos)
                 item["broker"] = name
@@ -65,12 +66,12 @@ class BrokerRouter(Broker):
 
     def get_open_orders(self) -> list[dict]:
         orders: list[dict] = []
-        for name, broker in self._brokers.items():
-            try:
-                raw_orders = broker.get_open_orders()
-            except Exception as exc:
-                logging.warning("Open orders fetch failed for %s: %s", name, exc)
-                continue
+        orders_map = self._fetch_per_broker(
+            lambda broker: broker.get_open_orders(),
+            "Open orders fetch failed for %s: %s",
+            [],
+        )
+        for name, raw_orders in orders_map.items():
             for order in raw_orders:
                 item = dict(order)
                 item["broker"] = name
@@ -125,6 +126,24 @@ class BrokerRouter(Broker):
         if default:
             return str(default)
         return next(iter(self._brokers.keys()))
+
+    def _fetch_per_broker(self, func, error_template: str, default: Any) -> dict[str, Any]:
+        if not self._brokers:
+            return {}
+        max_workers = min(8, len(self._brokers))
+        results: dict[str, Any] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(func, broker): name for name, broker in self._brokers.items()
+            }
+            for future in as_completed(futures):
+                name = futures[future]
+                try:
+                    results[name] = future.result()
+                except Exception as exc:
+                    logging.warning(error_template, name, exc)
+                    results[name] = default
+        return results
 
 
 def _extract_equity_cash(account: dict) -> tuple[float, float, float]:

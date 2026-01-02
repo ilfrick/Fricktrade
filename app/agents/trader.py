@@ -132,6 +132,9 @@ class TradingAgent:
         self._ai_filter_executor = ThreadPoolExecutor(max_workers=1)
         self._ai_filter_future = None
         self._ai_filter_inflight_at: datetime | None = None
+        self._broker_missing_at: datetime | None = None
+        self._broker_missing_last_log = 0.0
+        self._broker_missing_reason: str | None = None
         report_cfg = cfg.get("reports", {}).get("daily_top_movers", {}) or {}
         trace_cfg = report_cfg.get("decision_trace", {}) or {}
         self._decision_trace_enabled = bool(trace_cfg.get("enabled", True))
@@ -1656,6 +1659,13 @@ class TradingAgent:
                 logging.info("Restart requested; exiting trading loop.")
                 raise SystemExit(0)
             portfolio = self._get_portfolio_snapshot()
+            if portfolio is None:
+                self._log_broker_missing()
+                for broker_name in self._broker_names or [self._broker_name]:
+                    BROKER_ACTIVE.labels(broker=broker_name).set(0)
+                    BROKER_MARKET_OPEN.labels(broker=broker_name).set(0)
+                time.sleep(interval_seconds)
+                continue
             symbols = self._resolve_active_symbols()
             for name in self._strategy_names:
                 STRATEGY_ACTIVE.labels(strategy=name).set(0 if name in self._disabled_strategies else 1)
@@ -1762,6 +1772,17 @@ class TradingAgent:
         if ops_state and not ops_state_is_running(ops_state):
             return False
         return False
+
+    def _log_broker_missing(self) -> None:
+        now = time.monotonic()
+        if now - self._broker_missing_last_log < 60:
+            return
+        self._broker_missing_last_log = now
+        if self._broker_missing_at is None:
+            self._broker_missing_at = datetime.utcnow()
+        brokers = ", ".join(self._broker_names or [self._broker_name])
+        reason = self._broker_missing_reason or "broker not initialized"
+        logging.warning("Broker unavailable; trading loop idle. brokers=%s reason=%s", brokers, reason)
 
     def _refresh_symbol_venues(self) -> None:
         market_cfg = self.cfg.get("market", {})
@@ -2292,8 +2313,18 @@ class TradingAgent:
         market_state["short_exposure_pct"] = (short_exposure / equity * 100.0) if equity else 0.0
         market_state["leverage"] = (gross_exposure / equity) if equity else 1.0
 
-    def _get_portfolio_snapshot(self) -> dict:
-        account = self.broker.get_account()
+    def _get_portfolio_snapshot(self) -> dict | None:
+        if self.broker is None:
+            self._broker_missing_reason = "broker not initialized"
+            return None
+        try:
+            account = self.broker.get_account()
+        except Exception as exc:
+            self._broker_missing_reason = f"account snapshot failed: {exc}"
+            return None
+        self._broker_missing_at = None
+        self._broker_missing_reason = None
+        self._broker_missing_last_log = 0.0
         self._account_snapshot = account if isinstance(account, dict) else {}
         equity_val = 0.0
         cash_val = 0.0
