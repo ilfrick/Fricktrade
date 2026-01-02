@@ -666,7 +666,11 @@ class TradingAgent:
         filtered_signals = [signal for signal in signals if signal.get("name") in names]
         action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names)
         order_meta = self._select_order_meta(filtered_signals, names)
-        broker_name = self._resolve_broker_for_symbol(symbol, names, filtered_signals, action_strategy)
+        broker_override = market_state.get("broker_override")
+        if broker_override:
+            broker_name = self._normalize_broker_name(str(broker_override))
+        else:
+            broker_name = self._resolve_broker_for_symbol(symbol, names, filtered_signals, action_strategy)
         market_state["broker"] = broker_name
         if trace:
             trace["action"] = action
@@ -1766,17 +1770,29 @@ class TradingAgent:
                     market_data_provider.prepare(symbols)
                 except Exception as exc:
                     logging.warning("Market data prefetch failed: %s", exc)
-            for sym in symbols:
-                if not self._is_symbol_market_open(sym):
-                    continue
-                market_state = market_data_provider(sym)
-                self._enrich_market_state(market_state, portfolio, sym)
-                market_state["strategy_symbols"] = self._symbols_by_strategy
-                self._update_signal_metrics(sym, market_state)
-                decision_start = time.perf_counter()
-                market_state["_decision_start"] = decision_start
-                self.run_once(sym, market_state)
-                DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
+            routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
+            if routing_mode == "auto_split" and len(self._broker_map) > 1:
+                symbols_by_broker: dict[str, list[str]] = {}
+                for sym in symbols:
+                    broker_name = self._auto_split_broker(sym)
+                    symbols_by_broker.setdefault(broker_name, []).append(sym)
+                symbol_batches = [("auto_split", broker, batch) for broker, batch in symbols_by_broker.items()]
+            else:
+                symbol_batches = [("default", None, symbols)]
+            for _, broker_override, batch in symbol_batches:
+                for sym in batch:
+                    if not self._is_symbol_market_open(sym):
+                        continue
+                    market_state = market_data_provider(sym)
+                    self._enrich_market_state(market_state, portfolio, sym)
+                    if broker_override:
+                        market_state["broker_override"] = broker_override
+                    market_state["strategy_symbols"] = self._symbols_by_strategy
+                    self._update_signal_metrics(sym, market_state)
+                    decision_start = time.perf_counter()
+                    market_state["_decision_start"] = decision_start
+                    self.run_once(sym, market_state)
+                    DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
             time.sleep(interval_seconds)
 
     def _merge_symbols_with_positions(self, symbols: list[str], portfolio: dict) -> list[str]:
