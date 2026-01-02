@@ -278,10 +278,15 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 - `docs/README.md` for the full index
 - Subpages cover: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration
 
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0 (AGPLv3). See `LICENSE`.
+Third-party attributions and license metadata are documented in `THIRD_PARTY_NOTICES.md`.
 
 ## History
 
 Recent changes (newest first):
+- Added AGPLv3 licensing and third-party attribution inventory.
 - Added configurable extended-hours trading window and broker order flags.
 - Added audit/compliance decision logs and latency metrics + Grafana dashboard.
 - Added model registry metadata, drift detection, and auto-rollback to best RL model.

@@ -42,6 +42,7 @@ can reload context quickly. Keep it updated when the setup changes.
 
 ## Recent Tasks
 - Added explainability fields to decision traces and new oversight runbook doc.
+- Added AGPLv3 licensing and third-party attribution inventory.
 - Added configurable extended-hours trading windows and broker extended-hour order flags.
 - Added stress/liquidity haircuts to sizing for real-time risk controls.
 - Added audit/compliance retention, signing, and reason-code enforcement support.
