@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
+
 FROM python:3.11-slim
 
 WORKDIR /app

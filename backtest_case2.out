@@ -1,4 +1,7 @@
-time="2025-12-23T19:04:53+01:00" level=warning msg="/path/to/Autotrader/dev/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
+
+time="2025-12-23T19:04:53+01:00" level=warning msg="./dev/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
  Container autotrader-dev-trader-run-145f3d9684ac Creating 
  Container autotrader-dev-trader-run-145f3d9684ac Created 
 

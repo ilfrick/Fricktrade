@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
+
 # Strategy Models (Production Defaults)
 
 This document describes the production-grade strategy set enabled by default and how each

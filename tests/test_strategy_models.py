@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
+
 from app.strategies.trend_following import TrendFollowingStrategy
 from app.strategies.factor_model import FactorModelStrategy
 from app.strategies.stat_arb_pairs import StatArbPairsStrategy

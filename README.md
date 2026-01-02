@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
+
 # Autotrader (Multi-Market)
 
 Autotrader is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana). It combines multiple strategies, an RL-based orchestrator, broker adapters, risk controls, and monitoring into a Docker-first stack for live trading, backtesting, and continuous learning.
@@ -228,6 +231,11 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## Documentation Index
 - `docs/README.md`
 - Subpages: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration
+
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0 (AGPLv3). See `LICENSE`.
+Third-party attributions and license metadata are documented in `THIRD_PARTY_NOTICES.md`.
 
 
 ## History
