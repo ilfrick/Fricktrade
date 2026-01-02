@@ -73,6 +73,7 @@ class IBKRBroker(Broker):
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         contract = Stock(symbol, "SMART", "EUR")
         action = "BUY" if side.lower() == "buy" else "SELL"
+        extended_hours = bool(kwargs.get("extended_hours", False))
         if str(order_type).lower() == "limit":
             limit_price = kwargs.get("limit_price")
             if limit_price is None:
@@ -80,6 +81,8 @@ class IBKRBroker(Broker):
             order = LimitOrder(action, qty, float(limit_price))
         else:
             order = MarketOrder(action, qty)
+        if extended_hours:
+            order.outsideRth = True
         if self._account_id:
             order.account = self._account_id
         trade = record_broker_call(self._name, "place_order", self.ib.placeOrder, contract, order)

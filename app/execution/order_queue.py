@@ -14,6 +14,7 @@ class OrderRequest:
     qty: float
     order_type: str = "market"
     limit_price: float | None = None
+    extended_hours: bool = False
     earliest_at: datetime = field(default_factory=datetime.utcnow)
     created_at: datetime = field(default_factory=datetime.utcnow)
     order_id: str | None = None
@@ -53,6 +54,7 @@ class OrderQueue:
         qty: float,
         order_type: str = "market",
         limit_price: float | None = None,
+        extended_hours: bool = False,
         earliest_at: datetime | None = None,
         notional: float | None = None,
     ) -> str | None:
@@ -62,6 +64,7 @@ class OrderQueue:
             qty=qty,
             order_type=order_type,
             limit_price=limit_price,
+            extended_hours=extended_hours,
             earliest_at=earliest_at or datetime.utcnow(),
             notional=notional,
         )
@@ -129,6 +132,7 @@ class OrderQueue:
                 request.qty,
                 request.order_type,
                 limit_price=request.limit_price,
+                extended_hours=request.extended_hours,
             )
         except Exception as exc:
             code = "unknown"

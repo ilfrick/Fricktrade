@@ -13,7 +13,7 @@ execution, and metrics updates.
 - Cash-aware symbol filtering enforces price <= buying power; held/open-order symbols are retained.
 - The dynamic symbol cap is limited to the tradeable universe size (plus any held/open-order symbols).
 - Live market data uses `data.provider` (yfinance, alpaca, or brokers).
-- Skips trading when markets are closed.
+- Skips trading when markets are closed (extended hours included when enabled).
 - Runs per-symbol signals, combines them, applies guardrails, sizes orders,
   and submits via `ExecutionEngine`.
 - Adds intraday signal metrics (30m/60m returns, early volume, runup/drawdown) to market state

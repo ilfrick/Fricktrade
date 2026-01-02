@@ -282,6 +282,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## History
 
 Recent changes (newest first):
+- Added configurable extended-hours trading window and broker order flags.
 - Added audit/compliance decision logs and latency metrics + Grafana dashboard.
 - Added model registry metadata, drift detection, and auto-rollback to best RL model.
 - Added VaR/CVaR gating, exposure caps, and volatility-aware kill switch profiles.

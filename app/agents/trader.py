@@ -73,7 +73,7 @@ except Exception:
     score_symbols = None
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.strategies.rl_policy_fees import FeeAwareRLPolicyStrategy
-from app.utils.market import is_market_open, is_venue_open
+from app.utils.market import is_market_open, is_venue_extended, is_venue_open
 from app.utils.restart import should_restart
 from app.agents.orchestrator import RLStrategyOrchestrator
 
@@ -809,6 +809,7 @@ class TradingAgent:
                     qty=order_slice.qty,
                     order_type=order_type,
                     limit_price=limit_price,
+                    extended_hours=bool(market_state.get("market_extended", False)),
                     earliest_at=order_slice.earliest_at,
                     notional=order_slice.qty * last_price,
                 )
@@ -819,6 +820,7 @@ class TradingAgent:
                 qty=qty,
                 order_type=order_type,
                 limit_price=limit_price,
+                extended_hours=bool(market_state.get("market_extended", False)),
                 notional=order_notional,
             )
         order_latency = time.perf_counter() - order_start
@@ -2265,6 +2267,12 @@ class TradingAgent:
         market_state["catalyst"] = self._news_cache.get(symbol, False)
         market_state["open_orders"] = self._open_orders_cache
         market_state["symbol"] = symbol
+        venue = self._symbol_venue(symbol)
+        if venue:
+            market_state["market_venue"] = venue
+            market_state["market_extended"] = is_venue_extended(self.cfg, venue)
+        else:
+            market_state["market_extended"] = False
 
     def _recalculate_exposure(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         equity = float(portfolio.get("equity", 0.0) or 0.0)

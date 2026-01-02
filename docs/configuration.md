@@ -14,6 +14,8 @@ Centralize runtime settings for all subsystems.
   - `market.symbol_venues` (manual symbol -> venue mapping)
   - `market.symbol_venues_auto` (auto-refresh mapping from broker)
   - `market.symbol_sectors` (symbol -> sector mapping for exposure caps)
+  - `market.extended_hours.enabled` (trade during configured extended hours)
+  - `market.venues[].trading_hours.extended_open/extended_close` (extended session window)
 - `data.*` (symbols, dynamic scan, sources)
 - `data.quality.*` (OHLCV validation + data quality reports)
 - `data.adjustments.*` (optional split/dividend adjustment files)
