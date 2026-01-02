@@ -9,6 +9,11 @@ SKIPPED_ORDERS = Counter(
     "Orders skipped by safety checks",
     ["symbol", "side", "reason"],
 )
+SKIPPED_ORDERS_BY_BROKER = Counter(
+    "orders_skipped_by_broker_total",
+    "Orders skipped by safety checks (per broker)",
+    ["broker", "symbol", "side", "reason"],
+)
 ORDER_REJECTS = Counter(
     "order_rejects_total",
     "Orders rejected by broker",

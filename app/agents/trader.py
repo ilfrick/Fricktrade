@@ -54,6 +54,7 @@ from app.monitoring.metrics import (
     BROKER_MARKET_OPEN,
     DECISION_LATENCY,
     ORDER_LATENCY,
+    SKIPPED_ORDERS_BY_BROKER,
 )
 from app.monitoring.audit import AuditLogger, ComplianceLogger
 from app.risk.manager import RiskManager
@@ -226,6 +227,11 @@ class TradingAgent:
                 cfg.get("data", {}),
             )
         self._load_checkpoint()
+
+    def _record_skip(self, symbol: str, action: str, reason: str, broker_name: str | None = None) -> None:
+        SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=reason).inc()
+        if broker_name:
+            SKIPPED_ORDERS_BY_BROKER.labels(broker=broker_name, symbol=symbol, side=action, reason=reason).inc()
 
     def _build_strategy(self, name: str, params: dict):
         if name == "rl_policy":
@@ -595,7 +601,7 @@ class TradingAgent:
             return None
         self._apply_kill_switch_profile(market_state)
         if self.risk.should_circuit_break(self._current_drawdown_pct):
-            SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="circuit_breaker").inc()
+            self._record_skip(symbol, "hold", "circuit_breaker")
             logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
             self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
             return None
@@ -604,7 +610,7 @@ class TradingAgent:
         if trace:
             trace["broker_hint"] = broker_hint
         if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol, broker=broker_hint):
-            SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
+            self._record_skip(symbol, "hold", "open_order", broker_hint)
             logging.info("Skipping %s: open orders pending (strategy guard)", symbol)
             self._emit_decision_trace(trace, "skip", "open_order", "strategy_guard")
             return None
@@ -701,7 +707,7 @@ class TradingAgent:
             if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
                 self._remove_pending_orders(symbol, broker=broker_name)
             else:
-                SKIPPED_ORDERS.labels(symbol=symbol, side="hold", reason="open_order").inc()
+                self._record_skip(symbol, "hold", "open_order", broker_name)
                 logging.info("Skipping %s: open orders pending", symbol)
                 self._emit_decision_trace(trace, "skip", "open_order", "open_orders")
                 return None
@@ -711,13 +717,13 @@ class TradingAgent:
             prices = market_state.get("prices", [])
             last_price = prices[-1] if prices else None
         if last_price is None:
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="no_price").inc()
+            self._record_skip(symbol, action, "no_price", broker_name)
             logging.info("Skipping %s for %s: no price available", action, symbol)
             self._emit_decision_trace(trace, "skip", "no_price", "pricing")
             return None
         min_price = self.cfg.get("trading_limits", {}).get("min_price")
         if min_price is not None and last_price < float(min_price):
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="min_price").inc()
+            self._record_skip(symbol, action, "min_price", broker_name)
             logging.info("Skipping %s for %s: price below min_price", action, symbol)
             self._emit_decision_trace(trace, "skip", "min_price", "limits")
             return None
@@ -735,13 +741,13 @@ class TradingAgent:
             trace["short_exposure_pct"] = market_state.get("short_exposure_pct")
             trace["leverage"] = market_state.get("leverage")
         if self._is_account_blocked(broker_name):
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="account_blocked").inc()
+            self._record_skip(symbol, action, "account_blocked", broker_name)
             logging.info("Skipping %s for %s: account blocked", action, symbol)
             self._emit_decision_trace(trace, "skip", "account_blocked", "account")
             return None
         var_reason = self._var_limit_reason(broker_name)
         if var_reason:
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=var_reason).inc()
+            self._record_skip(symbol, action, var_reason, broker_name)
             logging.info("Skipping %s for %s: %s", action, symbol, var_reason)
             self._emit_decision_trace(trace, "skip", var_reason, "risk")
             return None
@@ -751,12 +757,12 @@ class TradingAgent:
             current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
             can_short = self._can_short(symbol, portfolio)
             if current_qty <= 0 and not can_short:
-                SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="shorting_disabled").inc()
+                self._record_skip(symbol, action, "shorting_disabled", broker_name)
                 logging.info("Skipping %s for %s: shorting disabled", action, symbol)
                 self._emit_decision_trace(trace, "skip", "shorting_disabled", "shorting")
                 return None
         if self._is_action_blocked(symbol, action):
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="limit_block").inc()
+            self._record_skip(symbol, action, "limit_block", broker_name)
             logging.info("Skipping %s for %s: limits block action", action, symbol)
             self._emit_decision_trace(trace, "skip", "limit_block", "limits")
             return None
@@ -768,17 +774,17 @@ class TradingAgent:
             trace["haircuts"] = self._haircut_snapshot(market_state)
         if qty <= 0:
             if skip_reason:
-                SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=skip_reason).inc()
+                self._record_skip(symbol, action, str(skip_reason), broker_name)
                 logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
                 self._emit_decision_trace(trace, "skip", str(skip_reason), "sizing")
             return None
         if self._violates_exposure_caps(symbol, action, qty, last_price, portfolio):
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="exposure_cap").inc()
+            self._record_skip(symbol, action, "exposure_cap", broker_name)
             logging.info("Skipping %s for %s: exposure caps exceeded", action, symbol)
             self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
             return None
         if self._violates_order_limits(symbol, action, qty, last_price):
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_limit").inc()
+            self._record_skip(symbol, action, "order_limit", broker_name)
             logging.info("Skipping %s for %s: order limits", action, symbol)
             self._emit_decision_trace(trace, "skip", "order_limit", "limits")
             return None
@@ -788,7 +794,7 @@ class TradingAgent:
 
         now = datetime.utcnow()
         if self._is_cooldown_active(market_state, now):
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="cooldown").inc()
+            self._record_skip(symbol, action, "cooldown", broker_name)
             logging.info("Skipping %s for %s: cooldown", action, symbol)
             self._emit_decision_trace(trace, "skip", "cooldown", "cooldown")
             return None
@@ -797,7 +803,7 @@ class TradingAgent:
             short_exposure_pct=market_state.get("short_exposure_pct", 0.0),
             leverage=market_state.get("leverage", 1.0),
         ):
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="risk_block").inc()
+            self._record_skip(symbol, action, "risk_block", broker_name)
             logging.info("Skipping %s for %s: risk limits exceeded", action, symbol)
             self._emit_decision_trace(trace, "skip", "risk_block", "risk")
             return None
@@ -806,7 +812,7 @@ class TradingAgent:
         limit_price = order_meta.get("limit_price")
         algo_name = order_meta.get("algo")
         if order_type == "limit" and limit_price is None:
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="limit_price_missing").inc()
+            self._record_skip(symbol, action, "limit_price_missing", broker_name)
             logging.info("Skipping %s for %s: limit price missing", action, symbol)
             self._emit_decision_trace(trace, "skip", "limit_price_missing", "pricing")
             return None
@@ -818,7 +824,7 @@ class TradingAgent:
         order_notional = qty * last_price
         order_queue = self._order_queues.get(broker_name, self._order_queue)
         if order_queue is None:
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_queue_missing").inc()
+            self._record_skip(symbol, action, "order_queue_missing", broker_name)
             logging.warning("Skipping %s for %s: no order queue for broker %s", action, symbol, broker_name)
             self._emit_decision_trace(trace, "skip", "order_queue_missing", "execution")
             return None
@@ -869,7 +875,7 @@ class TradingAgent:
                 },
             )
         elif action in ("buy", "sell"):
-            SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason="order_failed").inc()
+            self._record_skip(symbol, action, "order_failed", broker_name)
             self._emit_decision_trace(trace, "skip", "order_failed", "execution")
         return order_id
 
