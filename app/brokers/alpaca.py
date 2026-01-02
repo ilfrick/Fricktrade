@@ -81,16 +81,18 @@ class AlpacaBroker(Broker):
                     limit_price=float(limit_price),
                     **order_kwargs,
                 )
-            except TypeError:
-                if order_kwargs:
+            except TypeError as exc:
+                if order_kwargs and "extended_hours" in str(exc):
                     logging.warning("Extended-hours flag not supported by Alpaca SDK; retrying without it.")
-                order_req = LimitOrderRequest(
-                    symbol=symbol,
-                    qty=qty,
-                    side=order_side,
-                    time_in_force=TimeInForce.DAY,
-                    limit_price=float(limit_price),
-                )
+                    order_req = LimitOrderRequest(
+                        symbol=symbol,
+                        qty=qty,
+                        side=order_side,
+                        time_in_force=TimeInForce.DAY,
+                        limit_price=float(limit_price),
+                    )
+                else:
+                    raise
         else:
             try:
                 order_req = MarketOrderRequest(
@@ -100,15 +102,17 @@ class AlpacaBroker(Broker):
                     time_in_force=TimeInForce.DAY,
                     **order_kwargs,
                 )
-            except TypeError:
-                if order_kwargs:
+            except TypeError as exc:
+                if order_kwargs and "extended_hours" in str(exc):
                     logging.warning("Extended-hours flag not supported by Alpaca SDK; retrying without it.")
-                order_req = MarketOrderRequest(
-                    symbol=symbol,
-                    qty=qty,
-                    side=order_side,
-                    time_in_force=TimeInForce.DAY,
-                )
+                    order_req = MarketOrderRequest(
+                        symbol=symbol,
+                        qty=qty,
+                        side=order_side,
+                        time_in_force=TimeInForce.DAY,
+                    )
+                else:
+                    raise
         order = record_broker_call(
             self._name,
             "place_order",
