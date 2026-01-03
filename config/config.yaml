@@ -391,7 +391,7 @@ benchmarking:
   plot_dir: /data/reports/benchmark_plots
   pdf_path: /data/reports/benchmark_report.pdf
 data:
-  provider: alpaca
+  provider: brokers
   symbols: []
   interval: 1m
   lookback_days: 7
