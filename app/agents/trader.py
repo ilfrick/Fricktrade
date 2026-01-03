@@ -82,6 +82,7 @@ from app.strategies.rl_policy_fees import FeeAwareRLPolicyStrategy
 from app.utils.market import is_market_open, is_venue_extended, is_venue_open
 from app.utils.restart import should_restart
 from app.agents.orchestrator import RLStrategyOrchestrator
+from app.agents.pipeline import DecisionPipeline
 
 
 class TradingAgent:
@@ -137,6 +138,7 @@ class TradingAgent:
         self._ai_filter_executor = ThreadPoolExecutor(max_workers=1)
         self._ai_filter_future = None
         self._ai_filter_inflight_at: datetime | None = None
+        self._pipeline = DecisionPipeline(self)
         self._broker_missing_at: datetime | None = None
         self._broker_missing_last_log = 0.0
         self._broker_missing_reason: str | None = None
@@ -1812,7 +1814,7 @@ class TradingAgent:
                     self._update_signal_metrics(sym, market_state)
                     decision_start = time.perf_counter()
                     market_state["_decision_start"] = decision_start
-                    self.run_once(sym, market_state)
+                    self._pipeline.run(sym, market_state)
                     DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
             time.sleep(interval_seconds)
 
