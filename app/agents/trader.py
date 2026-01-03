@@ -1210,6 +1210,41 @@ class TradingAgent:
             return [("auto_split", broker, batch) for broker, batch in buckets.items()]
         return [("default", None, symbols)]
 
+    def _update_open_order_queues(self) -> None:
+        if len(self._broker_map) > 1:
+            orders_by_broker: dict[str, list[dict]] = {}
+            for order in self._open_orders_cache:
+                broker_name = order.get("broker") or self._broker_name
+                orders_by_broker.setdefault(str(broker_name), []).append(order)
+            for broker_name, queue in self._order_queues.items():
+                queue.update(orders_by_broker.get(broker_name, []))
+        else:
+            if self._order_queue:
+                self._order_queue.update(self._open_orders_cache)
+
+    def _update_market_open_metrics(self, market_open: bool) -> None:
+        brokers_cfg = self.cfg.get("brokers", {})
+        broker_names = [
+            name
+            for name, cfg in brokers_cfg.items()
+            if not isinstance(cfg, dict) or cfg.get("enabled", True)
+        ]
+        if not broker_names:
+            broker_names = self._broker_names or [self._broker_name]
+        for name in broker_names:
+            BROKER_MARKET_OPEN.labels(broker=name).set(1 if market_open else 0)
+        if market_open != self._last_market_open:
+            state = "open" if market_open else "closed"
+            logging.info("Market is %s; %s trading loop.", state, "starting" if market_open else "waiting")
+            self._last_market_open = market_open
+
+    def _prepare_market_data(self, market_data_provider, symbols: list[str]) -> None:
+        if hasattr(market_data_provider, "prepare"):
+            try:
+                market_data_provider.prepare(symbols)
+            except Exception as exc:
+                logging.warning("Market data prefetch failed: %s", exc)
+
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
         if isinstance(brokers, dict) and broker_name in brokers:
@@ -1744,43 +1779,17 @@ class TradingAgent:
             self._update_active_symbol_metrics(symbols)
             self._refresh_open_orders_cache(symbols)
             self._maybe_force_liquidation(portfolio)
-            if len(self._broker_map) > 1:
-                orders_by_broker: dict[str, list[dict]] = {}
-                for order in self._open_orders_cache:
-                    broker_name = order.get("broker") or self._broker_name
-                    orders_by_broker.setdefault(str(broker_name), []).append(order)
-                for broker_name, queue in self._order_queues.items():
-                    queue.update(orders_by_broker.get(broker_name, []))
-            else:
-                if self._order_queue:
-                    self._order_queue.update(self._open_orders_cache)
+            self._update_open_order_queues()
             self._flush_order_responses()
             if self._ops_state_blocks_run():
                 time.sleep(interval_seconds)
                 continue
             market_open = is_market_open(self.cfg)
-            brokers_cfg = self.cfg.get("brokers", {})
-            broker_names = [
-                name
-                for name, cfg in brokers_cfg.items()
-                if not isinstance(cfg, dict) or cfg.get("enabled", True)
-            ]
-            if not broker_names:
-                broker_names = self._broker_names or [self._broker_name]
-            for name in broker_names:
-                BROKER_MARKET_OPEN.labels(broker=name).set(1 if market_open else 0)
-            if market_open != self._last_market_open:
-                state = "open" if market_open else "closed"
-                logging.info("Market is %s; %s trading loop.", state, "starting" if market_open else "waiting")
-                self._last_market_open = market_open
+            self._update_market_open_metrics(market_open)
             if not market_open:
                 time.sleep(interval_seconds)
                 continue
-            if hasattr(market_data_provider, "prepare"):
-                try:
-                    market_data_provider.prepare(symbols)
-                except Exception as exc:
-                    logging.warning("Market data prefetch failed: %s", exc)
+            self._prepare_market_data(market_data_provider, symbols)
             symbol_batches = self._build_symbol_batches(symbols)
             for _, broker_override, batch in symbol_batches:
                 for sym in batch:

@@ -289,6 +289,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Extracted market-open and order-queue helpers in the trading loop (Phase 4 refactor prep).
 - Extracted active-symbol metrics and batching helpers (Phase 3 refactor prep).
 - Centralized broker routing helpers and added routing tests (Phase 2 refactor prep).
 - Added decision pipeline wrapper to centralize symbol processing (Phase 1 refactor prep).
