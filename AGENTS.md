@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
 
-## Autotrader Agent Guide
+## Fricktrade Agent Guide
 
 This repo contains a Python intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana), with broker adapters, risk controls, backtesting, data download, and metrics/monitoring.
 
@@ -190,7 +190,7 @@ docker compose run --rm api
 - Risk checks are threshold-based and order sizing is cash-aware using broker equity/cash plus exposure caps.
 - Backtest engine loads the first matching CSV in `backtest.data_dir`.
 - API `/config` masks Alpaca keys before returning; `/config/update` accepts YAML updates and `/restart` triggers a graceful container restart.
-- Grafana auto-provisions the "Autotrader Overview" dashboard with trade counts/rates, PnL, and drawdown.
+- Grafana auto-provisions the "Fricktrade Overview" dashboard with trade counts/rates, PnL, and drawdown.
 - Dashboard also shows active symbols, active broker, and account equity/cash/invested from broker account data. Skipped orders are available via `orders_skipped_total` metrics.
 
 ## Extending the Codebase

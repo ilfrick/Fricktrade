@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
 
-# Autotrader (Multi-Market)
+# Fricktrade (Multi-Market)
 
-Autotrader is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana). It combines multiple strategies, an RL-based orchestrator, broker adapters, risk controls, and monitoring into a Docker-first stack for live trading, backtesting, and continuous learning.
+Fricktrade is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana). It combines multiple strategies, an RL-based orchestrator, broker adapters, risk controls, and monitoring into a Docker-first stack for live trading, backtesting, and continuous learning.
 
 ## Goals
 - Trade intraday with configurable strategies and strict risk controls.
@@ -289,6 +289,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Renamed documentation branding to Fricktrade.
 - Set live data provider default to brokers for faster market data.
 - Extracted per-batch symbol execution helper in the trading loop (Phase 6 refactor prep).
 - Extracted cycle maintenance helper in the trading loop (Phase 5 refactor prep).

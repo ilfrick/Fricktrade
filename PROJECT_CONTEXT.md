@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
 
-# Autotrader Project Context
+# Fricktrade Project Context
 
 This file captures the key state and workflows for this repo so a new Codex session
 can reload context quickly. Keep it updated when the setup changes.
@@ -44,6 +44,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Renamed documentation branding to Fricktrade.
 - Set live data provider default to brokers for faster market data.
 - Extracted per-batch symbol execution helper in the trading loop (Phase 6 refactor prep).
 - Extracted cycle maintenance helper in the trading loop (Phase 5 refactor prep).
