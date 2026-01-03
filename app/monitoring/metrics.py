@@ -35,6 +35,7 @@ ACCOUNT_CASH_BY_BROKER = Gauge("account_cash_by_broker", "Account available cash
 ACCOUNT_BUYING_POWER_BY_BROKER = Gauge("account_buying_power_by_broker", "Account buying power", ["broker"])
 ACCOUNT_INVESTED_BY_BROKER = Gauge("account_invested_by_broker", "Account invested value", ["broker"])
 SYMBOL_ACTIVE = Gauge("symbol_active", "Configured trading symbols", ["symbol"])
+SYMBOL_ACTIVE_BY_BROKER = Gauge("symbol_active_by_broker", "Configured trading symbols by broker", ["broker", "symbol"])
 STRATEGY_ACTIVE = Gauge("strategy_active", "Configured trading strategies", ["strategy"])
 ORCHESTRATOR_STRATEGY_ACTIVE = Gauge(
     "orchestrator_strategy_active",

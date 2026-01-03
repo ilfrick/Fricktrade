@@ -40,6 +40,7 @@ from app.monitoring.metrics import (
     SIGNAL_RUNUP_ABS,
     SIGNAL_DRAWDOWN_ABS,
     SYMBOL_ACTIVE,
+    SYMBOL_ACTIVE_BY_BROKER,
     STRATEGY_ACTIVE,
     ORCHESTRATOR_STRATEGY_ACTIVE,
     ORCHESTRATOR_STRATEGY_SELECTED,
@@ -117,6 +118,7 @@ class TradingAgent:
         self._open_orders_at: datetime | None = None
         self._open_orders_labels: set[tuple[str, str]] = set()
         self._active_symbol_labels: set[str] = set()
+        self._active_symbol_labels_by_broker: dict[str, set[str]] = {}
         self._open_orders_labels_by_broker: set[tuple[str, str, str]] = set()
         self._dynamic_symbols_at: datetime | None = None
         self._dynamic_symbols: list[str] = []
@@ -1737,6 +1739,19 @@ class TradingAgent:
             for sym in symbols:
                 SYMBOL_ACTIVE.labels(symbol=sym).set(1)
             self._active_symbol_labels = current_symbols
+            routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
+            if routing_mode == "auto_split" and len(self._broker_map) > 1:
+                symbols_by_broker: dict[str, set[str]] = {}
+                for sym in symbols:
+                    broker_name = self._auto_split_broker(sym)
+                    symbols_by_broker.setdefault(broker_name, set()).add(sym)
+                for broker_name, active_syms in symbols_by_broker.items():
+                    previous = self._active_symbol_labels_by_broker.get(broker_name, set())
+                    for sym in previous - active_syms:
+                        SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(0)
+                    for sym in active_syms:
+                        SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(1)
+                    self._active_symbol_labels_by_broker[broker_name] = set(active_syms)
             self._refresh_open_orders_cache(symbols)
             self._maybe_force_liquidation(portfolio)
             if len(self._broker_map) > 1:
