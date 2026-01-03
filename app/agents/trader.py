@@ -1268,6 +1268,27 @@ class TradingAgent:
         self._maybe_force_liquidation(portfolio)
         return symbols
 
+    def _run_symbol_batch(
+        self,
+        symbols: list[str],
+        portfolio: dict,
+        market_data_provider,
+        broker_override: str | None,
+    ) -> None:
+        for sym in symbols:
+            if not self._is_symbol_market_open(sym):
+                continue
+            market_state = market_data_provider(sym)
+            self._enrich_market_state(market_state, portfolio, sym)
+            if broker_override:
+                market_state["broker_override"] = broker_override
+            market_state["strategy_symbols"] = self._symbols_by_strategy
+            self._update_signal_metrics(sym, market_state)
+            decision_start = time.perf_counter()
+            market_state["_decision_start"] = decision_start
+            self._pipeline.run(sym, market_state)
+            DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
+
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
         if isinstance(brokers, dict) and broker_name in brokers:
@@ -1796,19 +1817,7 @@ class TradingAgent:
             self._prepare_market_data(market_data_provider, symbols)
             symbol_batches = self._build_symbol_batches(symbols)
             for _, broker_override, batch in symbol_batches:
-                for sym in batch:
-                    if not self._is_symbol_market_open(sym):
-                        continue
-                    market_state = market_data_provider(sym)
-                    self._enrich_market_state(market_state, portfolio, sym)
-                    if broker_override:
-                        market_state["broker_override"] = broker_override
-                    market_state["strategy_symbols"] = self._symbols_by_strategy
-                    self._update_signal_metrics(sym, market_state)
-                    decision_start = time.perf_counter()
-                    market_state["_decision_start"] = decision_start
-                    self._pipeline.run(sym, market_state)
-                    DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
+                self._run_symbol_batch(batch, portfolio, market_data_provider, broker_override)
             time.sleep(interval_seconds)
 
     def _merge_symbols_with_positions(self, symbols: list[str], portfolio: dict) -> list[str]:
