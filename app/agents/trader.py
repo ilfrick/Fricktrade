@@ -14,6 +14,7 @@ from app.execution.executor import ExecutionEngine
 from app.execution.order_queue import OrderQueue
 from app.execution.algos import pov_slices, twap_slices, vwap_slices
 from app.execution.impact import estimate_market_impact
+from app.execution import routing as routing_utils
 from app.monitoring.metrics import (
     TRADES,
     SKIPPED_ORDERS,
@@ -101,7 +102,7 @@ class TradingAgent:
         self._broker_map = self._resolve_broker_map()
         self._broker_names = list(self._broker_map.keys())
         self._broker_name = self._resolve_default_broker_name()
-        self._broker_name = self._normalize_broker_name(self._broker_name)
+        self._broker_name = routing_utils.normalize_broker_name(self._broker_name, self._broker_names)
         retry_cfg = cfg.get("execution", {}).get("retry", {})
         self._order_queues = {name: OrderQueue(item, name, retry_cfg) for name, item in self._broker_map.items()}
         self._order_queue = self._order_queues.get(self._broker_name)
@@ -1161,48 +1162,25 @@ class TradingAgent:
         signals: list[dict] | None = None,
         action_strategy: str | None = None,
     ) -> str:
-        if len(self._broker_map) <= 1:
-            return self._broker_name
-        routing = self._routing_cfg or {}
-        symbol_map = routing.get("symbols", {}) or {}
-        if symbol in symbol_map:
-            broker_name = self._normalize_broker_name(str(symbol_map[symbol]))
-            return self._maybe_fallback_broker(broker_name)
-        strategy_map = routing.get("strategies", {}) or {}
-        strategy = action_strategy
-        if not strategy and selected_strategies:
-            strategy = selected_strategies[0]
-        if not strategy and signals:
-            strategy = signals[0].get("name")
-        if strategy and strategy in strategy_map:
-            broker_name = self._normalize_broker_name(str(strategy_map[strategy]))
-            return self._maybe_fallback_broker(broker_name)
-        routing_mode = str(routing.get("mode", "default")).lower()
-        if routing_mode == "auto_split":
-            broker_name = self._auto_split_broker(symbol)
-            return self._maybe_fallback_broker(broker_name)
-        default = routing.get("default")
-        if default:
-            broker_name = self._normalize_broker_name(str(default))
-            return self._maybe_fallback_broker(broker_name)
-        return self._maybe_fallback_broker(self._broker_name)
+        broker_name = routing_utils.resolve_broker_for_symbol(
+            symbol=symbol,
+            broker_names=list(self._broker_map.keys()),
+            routing_cfg=self._routing_cfg,
+            selected_strategies=selected_strategies,
+            signals=signals,
+            action_strategy=action_strategy,
+        )
+        if not broker_name:
+            broker_name = self._broker_name
+        return self._maybe_fallback_broker(broker_name)
 
     def _auto_split_broker(self, symbol: str) -> str:
         broker_names = sorted(self._broker_map.keys())
-        if not broker_names:
-            return self._broker_name
-        digest = hashlib.md5(symbol.encode("utf-8")).hexdigest()
-        idx = int(digest[:8], 16) % len(broker_names)
-        return broker_names[idx]
+        broker_name = routing_utils.auto_split_broker(symbol, broker_names)
+        return broker_name or self._broker_name
 
     def _normalize_broker_name(self, broker_name: str) -> str:
-        if broker_name in self._broker_map:
-            return broker_name
-        base = broker_name.split(":", 1)[0]
-        matches = [name for name in self._broker_map if name == base or name.startswith(f"{base}:")]
-        if matches:
-            return matches[0]
-        return next(iter(self._broker_map.keys()), broker_name)
+        return routing_utils.normalize_broker_name(broker_name, list(self._broker_map.keys()))
 
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
@@ -1744,9 +1722,9 @@ class TradingAgent:
             routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
             if routing_mode == "auto_split" and len(self._broker_map) > 1:
                 symbols_by_broker: dict[str, set[str]] = {}
-                for sym in symbols:
-                    broker_name = self._auto_split_broker(sym)
-                    symbols_by_broker.setdefault(broker_name, set()).add(sym)
+                buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
+                for broker_name, batch in buckets.items():
+                    symbols_by_broker[broker_name] = set(batch)
                 for broker_name, active_syms in symbols_by_broker.items():
                     previous = self._active_symbol_labels_by_broker.get(broker_name, set())
                     for sym in previous - active_syms:
@@ -1795,11 +1773,8 @@ class TradingAgent:
                     logging.warning("Market data prefetch failed: %s", exc)
             routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
             if routing_mode == "auto_split" and len(self._broker_map) > 1:
-                symbols_by_broker: dict[str, list[str]] = {}
-                for sym in symbols:
-                    broker_name = self._auto_split_broker(sym)
-                    symbols_by_broker.setdefault(broker_name, []).append(sym)
-                symbol_batches = [("auto_split", broker, batch) for broker, batch in symbols_by_broker.items()]
+                buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
+                symbol_batches = [("auto_split", broker, batch) for broker, batch in buckets.items()]
             else:
                 symbol_batches = [("default", None, symbols)]
             for _, broker_override, batch in symbol_batches:
