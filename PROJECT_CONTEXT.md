@@ -44,6 +44,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added decision context scaffolding + trace helpers as Phase 0 refactor groundwork.
 - Sanitized Alertmanager SMTP config and removed hardcoded credentials.
 - Added explainability fields to decision traces and new oversight runbook doc.
 - Added SPDX headers to text/config files and scrubbed secrets from tracked env files.
