@@ -289,6 +289,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Added decision pipeline wrapper to centralize symbol processing (Phase 1 refactor prep).
 - Added decision context scaffolding and trace helpers (Phase 0 refactor prep).
 - Sanitized Alertmanager SMTP config to remove hardcoded credentials.
 - Added SPDX headers to all text/config files and scrubbed secrets from tracked env files.
