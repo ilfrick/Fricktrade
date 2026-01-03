@@ -44,6 +44,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Extracted cycle maintenance helper in the trading loop (Phase 5 refactor prep).
 - Extracted market-open and order-queue helpers in the trading loop (Phase 4 refactor prep).
 - Extracted active-symbol metrics and batching helpers (Phase 3 refactor prep).
 - Centralized broker routing helpers and added routing tests (Phase 2 refactor prep).

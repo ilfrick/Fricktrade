@@ -1245,6 +1245,29 @@ class TradingAgent:
             except Exception as exc:
                 logging.warning("Market data prefetch failed: %s", exc)
 
+    def _run_cycle_maintenance(self, symbols: list[str], portfolio: dict) -> list[str]:
+        for name in self._strategy_names:
+            STRATEGY_ACTIVE.labels(strategy=name).set(0 if name in self._disabled_strategies else 1)
+        for broker_name in self._broker_names:
+            BROKER_ACTIVE.labels(broker=broker_name).set(1)
+        self._update_account_metrics()
+        self._update_position_metrics(portfolio)
+        self._update_performance_from_positions(portfolio)
+        self._maybe_report_performance()
+        self._refresh_news_cache(symbols)
+        self._log_news_cache()
+        self._refresh_dynamic_symbols(portfolio)
+        self._refresh_symbol_venues()
+        self._maybe_checkpoint()
+        self._log_ai_filter_heartbeat()
+        self._maybe_reload_active_model()
+        symbols = self._resolve_active_symbols()
+        symbols = self._merge_symbols_with_positions(symbols, portfolio)
+        self._update_active_symbol_metrics(symbols)
+        self._refresh_open_orders_cache(symbols)
+        self._maybe_force_liquidation(portfolio)
+        return symbols
+
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
         if isinstance(brokers, dict) and broker_name in brokers:
@@ -1759,26 +1782,7 @@ class TradingAgent:
                 time.sleep(interval_seconds)
                 continue
             symbols = self._resolve_active_symbols()
-            for name in self._strategy_names:
-                STRATEGY_ACTIVE.labels(strategy=name).set(0 if name in self._disabled_strategies else 1)
-            for broker_name in self._broker_names:
-                BROKER_ACTIVE.labels(broker=broker_name).set(1)
-            self._update_account_metrics()
-            self._update_position_metrics(portfolio)
-            self._update_performance_from_positions(portfolio)
-            self._maybe_report_performance()
-            self._refresh_news_cache(symbols)
-            self._log_news_cache()
-            self._refresh_dynamic_symbols(portfolio)
-            self._refresh_symbol_venues()
-            self._maybe_checkpoint()
-            self._log_ai_filter_heartbeat()
-            self._maybe_reload_active_model()
-            symbols = self._resolve_active_symbols()
-            symbols = self._merge_symbols_with_positions(symbols, portfolio)
-            self._update_active_symbol_metrics(symbols)
-            self._refresh_open_orders_cache(symbols)
-            self._maybe_force_liquidation(portfolio)
+            symbols = self._run_cycle_maintenance(symbols, portfolio)
             self._update_open_order_queues()
             self._flush_order_responses()
             if self._ops_state_blocks_run():
