@@ -289,6 +289,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Extracted active-symbol metrics and batching helpers (Phase 3 refactor prep).
 - Centralized broker routing helpers and added routing tests (Phase 2 refactor prep).
 - Added decision pipeline wrapper to centralize symbol processing (Phase 1 refactor prep).
 - Added decision context scaffolding and trace helpers (Phase 0 refactor prep).

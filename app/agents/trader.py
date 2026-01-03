@@ -1182,6 +1182,34 @@ class TradingAgent:
     def _normalize_broker_name(self, broker_name: str) -> str:
         return routing_utils.normalize_broker_name(broker_name, list(self._broker_map.keys()))
 
+    def _update_active_symbol_metrics(self, symbols: list[str]) -> None:
+        current_symbols = set(symbols)
+        for sym in self._active_symbol_labels - current_symbols:
+            SYMBOL_ACTIVE.labels(symbol=sym).set(0)
+        for sym in symbols:
+            SYMBOL_ACTIVE.labels(symbol=sym).set(1)
+        self._active_symbol_labels = current_symbols
+        routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
+        if routing_mode == "auto_split" and len(self._broker_map) > 1:
+            symbols_by_broker: dict[str, set[str]] = {}
+            buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
+            for broker_name, batch in buckets.items():
+                symbols_by_broker[broker_name] = set(batch)
+            for broker_name, active_syms in symbols_by_broker.items():
+                previous = self._active_symbol_labels_by_broker.get(broker_name, set())
+                for sym in previous - active_syms:
+                    SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(0)
+                for sym in active_syms:
+                    SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(1)
+                self._active_symbol_labels_by_broker[broker_name] = set(active_syms)
+
+    def _build_symbol_batches(self, symbols: list[str]) -> list[tuple[str, str | None, list[str]]]:
+        routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
+        if routing_mode == "auto_split" and len(self._broker_map) > 1:
+            buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
+            return [("auto_split", broker, batch) for broker, batch in buckets.items()]
+        return [("default", None, symbols)]
+
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
         if isinstance(brokers, dict) and broker_name in brokers:
@@ -1713,25 +1741,7 @@ class TradingAgent:
             self._maybe_reload_active_model()
             symbols = self._resolve_active_symbols()
             symbols = self._merge_symbols_with_positions(symbols, portfolio)
-            current_symbols = set(symbols)
-            for sym in self._active_symbol_labels - current_symbols:
-                SYMBOL_ACTIVE.labels(symbol=sym).set(0)
-            for sym in symbols:
-                SYMBOL_ACTIVE.labels(symbol=sym).set(1)
-            self._active_symbol_labels = current_symbols
-            routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
-            if routing_mode == "auto_split" and len(self._broker_map) > 1:
-                symbols_by_broker: dict[str, set[str]] = {}
-                buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
-                for broker_name, batch in buckets.items():
-                    symbols_by_broker[broker_name] = set(batch)
-                for broker_name, active_syms in symbols_by_broker.items():
-                    previous = self._active_symbol_labels_by_broker.get(broker_name, set())
-                    for sym in previous - active_syms:
-                        SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(0)
-                    for sym in active_syms:
-                        SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(1)
-                    self._active_symbol_labels_by_broker[broker_name] = set(active_syms)
+            self._update_active_symbol_metrics(symbols)
             self._refresh_open_orders_cache(symbols)
             self._maybe_force_liquidation(portfolio)
             if len(self._broker_map) > 1:
@@ -1771,12 +1781,7 @@ class TradingAgent:
                     market_data_provider.prepare(symbols)
                 except Exception as exc:
                     logging.warning("Market data prefetch failed: %s", exc)
-            routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
-            if routing_mode == "auto_split" and len(self._broker_map) > 1:
-                buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
-                symbol_batches = [("auto_split", broker, batch) for broker, batch in buckets.items()]
-            else:
-                symbol_batches = [("default", None, symbols)]
+            symbol_batches = self._build_symbol_batches(symbols)
             for _, broker_override, batch in symbol_batches:
                 for sym in batch:
                     if not self._is_symbol_market_open(sym):

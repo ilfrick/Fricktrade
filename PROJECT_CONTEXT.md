@@ -44,6 +44,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Extracted active-symbol metrics and batching helpers (Phase 3 refactor prep).
 - Centralized broker routing helpers and added routing tests (Phase 2 refactor prep).
 - Added decision pipeline wrapper as Phase 1 refactor groundwork.
 - Added decision context scaffolding + trace helpers as Phase 0 refactor groundwork.
