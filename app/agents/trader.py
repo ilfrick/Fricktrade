@@ -1278,16 +1278,31 @@ class TradingAgent:
         for sym in symbols:
             if not self._is_symbol_market_open(sym):
                 continue
-            market_state = market_data_provider(sym)
-            self._enrich_market_state(market_state, portfolio, sym)
-            if broker_override:
-                market_state["broker_override"] = broker_override
-            market_state["strategy_symbols"] = self._symbols_by_strategy
-            self._update_signal_metrics(sym, market_state)
-            decision_start = time.perf_counter()
-            market_state["_decision_start"] = decision_start
-            self._pipeline.run(sym, market_state)
-            DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
+            market_state: dict = {"symbol": sym}
+            try:
+                market_state = market_data_provider(sym)
+                self._enrich_market_state(market_state, portfolio, sym)
+                if broker_override:
+                    market_state["broker_override"] = broker_override
+                market_state["strategy_symbols"] = self._symbols_by_strategy
+                self._update_signal_metrics(sym, market_state)
+                decision_start = time.perf_counter()
+                market_state["_decision_start"] = decision_start
+                self._pipeline.run(sym, market_state)
+                DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
+            except Exception as exc:
+                broker_name = broker_override or self._broker_name
+                self._record_skip(sym, "hold", "symbol_error", broker_name)
+                logging.warning("Skipping %s: symbol processing error: %s", sym, exc)
+                trace = self._init_decision_trace(sym, market_state)
+                if trace:
+                    self._emit_decision_trace(
+                        trace,
+                        "skip",
+                        "symbol_error",
+                        "symbol_loop",
+                        {"error": str(exc)},
+                    )
 
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")

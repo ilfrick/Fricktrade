@@ -44,6 +44,8 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Hardened secret masking/merge for data sources and isolated per-symbol loop errors.
+- Added trading loop modularization roadmap in docs.
 - Renamed documentation branding to Fricktrade.
 - Set live data provider default to brokers for faster market data.
 - Extracted per-batch symbol execution helper in the trading loop (Phase 6 refactor prep).

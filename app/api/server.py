@@ -527,10 +527,16 @@ def _mask_secrets(cfg: dict) -> None:
     except Exception:
         pass
     try:
-        cfg["data"]["sources"][2]["api_key"] = "***"
+        sources = cfg.get("data", {}).get("sources", []) or []
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            if "api_key" in source:
+                source["api_key"] = "***"
+            if "api_secret" in source:
+                source["api_secret"] = "***"
     except Exception:
         pass
-
 
 def _merge_secrets(target: dict, source: dict) -> None:
     for path in (
@@ -538,7 +544,6 @@ def _merge_secrets(target: dict, source: dict) -> None:
         ("brokers", "alpaca", "api_secret"),
         ("news", "api_key"),
         ("news", "api_secret"),
-        ("data", "sources", 2, "api_key"),
     ):
         try:
             current = source
@@ -563,6 +568,30 @@ def _merge_secrets(target: dict, source: dict) -> None:
             for key in ("api_key", "api_secret"):
                 if acct.get(key) == "***":
                     acct[key] = current_acct.get(key, "")
+    except Exception:
+        pass
+    try:
+        current_sources = source.get("data", {}).get("sources", []) or []
+        new_sources = target.get("data", {}).get("sources", []) or []
+        current_by_provider = {
+            str(item.get("provider")): item
+            for item in current_sources
+            if isinstance(item, dict) and item.get("provider")
+        }
+        for idx, item in enumerate(new_sources):
+            if not isinstance(item, dict):
+                continue
+            provider = item.get("provider")
+            current_item = None
+            if provider:
+                current_item = current_by_provider.get(str(provider))
+            elif idx < len(current_sources) and isinstance(current_sources[idx], dict):
+                current_item = current_sources[idx]
+            if not current_item:
+                continue
+            for key in ("api_key", "api_secret"):
+                if item.get(key) == "***":
+                    item[key] = current_item.get(key, "")
     except Exception:
         pass
 

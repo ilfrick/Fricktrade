@@ -32,6 +32,13 @@ execution, and metrics updates.
 - Market hours gating: `app/utils/market.py`.
 - Metrics: `app/monitoring/metrics.py`.
 
+## Modularization Roadmap
+- Split the loop into explicit services: universe selection, market data, decision pipeline, risk engine, execution, and observability.
+- Replace dict-heavy contracts with typed payloads (TypedDict or dataclasses) shared across services.
+- Introduce a single cycle context object that carries symbols, portfolio snapshot, and feature state.
+- Move per-symbol error handling into a dedicated guardrail that emits structured skip events.
+- Keep the loop as orchestration glue: schedule services, apply ops-state gating, and sleep.
+
 ## Configuration
 `config/config.yaml`:
 - `strategy.*`

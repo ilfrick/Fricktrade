@@ -289,6 +289,8 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Hardened secret masking/merge for data sources and isolated per-symbol loop errors.
+- Added trading loop modularization roadmap in docs.
 - Renamed documentation branding to Fricktrade.
 - Set live data provider default to brokers for faster market data.
 - Extracted per-batch symbol execution helper in the trading loop (Phase 6 refactor prep).
