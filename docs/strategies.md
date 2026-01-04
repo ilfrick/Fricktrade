@@ -20,6 +20,7 @@ market state and influence actions via the signal bias guard.
 
 ## Orchestration
 - RL orchestrator consumes all strategy signals and chooses which strategy to apply.
+- The orchestrator feature set includes `cash_pct` and `buying_power_pct` to reflect account capacity.
 - Modes: `direct` (single strategy), `select` (top-k), or `weight` (weighted blend).
 - Combine mode: `priority` or `vote` (see `strategy.combine`).
 

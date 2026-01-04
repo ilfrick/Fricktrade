@@ -25,6 +25,7 @@ Centralize runtime settings for all subsystems.
 - `news.*`
 - `strategy.*`
 - `orchestrator.*` (including `orchestrator.mode` and `orchestrator.rl.*`)
+- Orchestrator features include `cash_pct` and `buying_power_pct` (both scaled by equity).
 - `risk.*`
 - `trading_limits.*`
 - `execution.*`
