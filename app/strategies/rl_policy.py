@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from pathlib import Path
 from stable_baselines3 import PPO
 
-from app.learning.features import build_observation
+from app.learning.features import build_observation, observation_size
 from app.strategies.base import Strategy
 
 if TYPE_CHECKING:
@@ -42,7 +42,18 @@ class RLPolicyStrategy(Strategy):
         path = Path(model_path)
         if not path.exists():
             raise FileNotFoundError(f"RL model not found at {model_path}")
-        self.model = PPO.load(str(path), device=self.device, custom_objects=_sb3_custom_objects())
+        model = PPO.load(str(path), device=self.device, custom_objects=_sb3_custom_objects())
+        expected = observation_size(self.window_size, self.feature_config)
+        actual = 0
+        try:
+            shape = getattr(model.observation_space, "shape", None)
+            if shape:
+                actual = int(shape[0] or 0)
+        except Exception:
+            actual = 0
+        if actual and expected and actual != expected:
+            raise ValueError(f"RL model observation size mismatch: {actual} != {expected}")
+        self.model = model
         logging.info("Loaded RL model from %s", model_path)
 
     def _update_state(self, market_state: dict) -> None:

@@ -289,6 +289,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Added RL model shape guard to force retraining on observation changes.
 - Added buying_power_pct to RL observation and drift feature paths.
 - Added buying_power_pct to RL observation features.
 - Documented orchestrator cash/buying power features in configuration and strategies docs.

@@ -61,9 +61,14 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
         train_sets.append(train_df)
     vec_env = DummyVecEnv(envs)
 
+    model = None
     if resume and Path(model_path).exists():
-        model = PPO.load(model_path, env=vec_env, device=device, custom_objects=_sb3_custom_objects())
-    else:
+        try:
+            model = PPO.load(model_path, env=vec_env, device=device, custom_objects=_sb3_custom_objects())
+        except ValueError as exc:
+            logging.warning("RL model shape mismatch; rebuilding model: %s", exc)
+            model = None
+    if model is None:
         model = PPO("MlpPolicy", vec_env, verbose=1, device=device)
     logging.info("Starting RL training for %d timesteps", timesteps)
     model.learn(total_timesteps=timesteps)

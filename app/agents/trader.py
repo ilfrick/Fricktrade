@@ -254,7 +254,7 @@ class TradingAgent:
                         drift_monitor=self._drift_monitor,
                         include_features=self._include_feature_snapshots,
                     )
-                except FileNotFoundError as exc:
+                except (FileNotFoundError, ValueError) as exc:
                     logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
             return None
         if name == "rl_policy_fees":
@@ -278,7 +278,7 @@ class TradingAgent:
                         fee_guard=fee_guard,
                         risk_cfg=risk_cfg,
                     )
-                except FileNotFoundError as exc:
+                except (FileNotFoundError, ValueError) as exc:
                     logging.warning("RL model unavailable, skipping rl_policy_fees: %s", exc)
             return None
         if name == "pattern_trading":

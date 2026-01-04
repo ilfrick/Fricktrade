@@ -11,6 +11,7 @@ Train and evaluate RL policies, and support online updates.
 - Online updates: `app/learning/online_update.py`.
 - Evaluation: `app/learning/evaluate.py`.
 - Features: `app/learning/features.py`.
+- Changing feature shapes (e.g., adding `buying_power_pct`) requires retraining; old checkpoints will be rejected.
 - Registry: `app/learning/registry.py`.
 - Drift monitoring: `app/learning/drift.py`.
 
