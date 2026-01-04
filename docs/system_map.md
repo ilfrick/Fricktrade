@@ -22,7 +22,7 @@ flowchart LR
     end
     subgraph Data[Data & Symbols]
         Scanner[Dynamic Scanner]
-        AIFilter[AI Symbol Filter (PPO)]
+        AIFilter[AI Symbol Filter PPO]
         News[News Catalysts]
         MarketData[Market Data Providers]
     end
