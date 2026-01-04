@@ -12,6 +12,11 @@ flowchart LR
 ```
 
 Start here if you are new:
+
+Guides:
+- `system_map.md`
+- `operator_guide.md`
+- `developer_guide.md`
 - `getting-started.md`
 - `configuration.md`
 - `testing.md`

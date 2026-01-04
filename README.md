@@ -289,6 +289,8 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Added Mermaid architecture diagram to the system map.
+- Added system map, operator guide, and developer guide to rebuild project ownership.
 - Switched AI symbol filter to PPO with online updates and PPO-specific config.
 - Aligned documentation with current codebase details, endpoints, and branding.
 - Forced fresh RL policy training by disabling resume/use_best_model after the observation update.
