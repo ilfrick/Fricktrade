@@ -13,7 +13,7 @@ from app.utils.config import load_config
 from app.utils.restart import restart_flag_path
 
 
-app = FastAPI(title="Autotrader API")
+app = FastAPI(title="Fricktrade API")
 CONFIG_PATH = Path("/app/config/config.yaml")
 
 
@@ -625,7 +625,7 @@ def _render_ui() -> str:
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Autotrader Config</title>
+  <title>Fricktrade Config</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap');
     body { font-family: "Space Grotesk", ui-sans-serif, system-ui; margin: 0; background: #0f172a; color: #e2e8f0; }
@@ -649,7 +649,7 @@ def _render_ui() -> str:
   </style>
 </head>
 <body>
-  <header><h2>Autotrader Configuration</h2></header>
+  <header><h2>Fricktrade Configuration</h2></header>
   <main>
     <section class="panel">
       <textarea id="config"></textarea>

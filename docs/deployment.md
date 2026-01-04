@@ -16,7 +16,7 @@ docker compose up -d --build
 ## Live vs Dev
 - Use a separate project name for dev:
 ```bash
-docker compose -p autotrader-dev up -d --build
+docker compose -p fricktrade-dev up -d --build
 ```
 - Keep dev credentials empty for no live trading.
 

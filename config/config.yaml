@@ -289,7 +289,7 @@ learning:
   enabled: true
   model_path: /app/models/ppo_policy.zip
   best_model_path: /app/models/ppo_policy_best.zip
-  use_best_model: true
+  use_best_model: false
   device: auto
   window_size: 50
   reward_time_penalty_per_step: 0.15
@@ -346,7 +346,7 @@ learning:
     commission_pct: 0.05
     slippage_bps: 2
     eval_split: 0.2
-    resume: true
+    resume: false
     report_path: /app/models/training_report.json
     best_report_path: /app/models/training_report_best.json
     report_plot_dir: /app/models/reports

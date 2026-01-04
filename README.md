@@ -53,7 +53,7 @@ flowchart LR
         Orders[Open order tracking<br/>cancel/skip]
     end
     subgraph Features["Feature Feeds"]
-        AIFeatures[AI filter features<br/>filtered to active orders]
+        AIFeatures[AI filter features<br/>latest window stats]
     end
     subgraph Training["Training & Pretrain"]
         RLTrain[RL training + online updates]
@@ -154,7 +154,7 @@ flowchart LR
 - Optional TWAP/VWAP/POV slicing for larger orders
 
 ### Data & Scanning
-- Live data from yfinance in trade mode
+- Live data from `data.provider` (brokers/alpaca/yfinance); yfinance is fallback when broker providers are unavailable.
 - Historical bars from Alpaca for training/backtesting/ingestion
 - Dynamic scanner and AI filter for symbol selection
 - News catalyst support (Alpaca news)
@@ -168,7 +168,7 @@ flowchart LR
 ### Monitoring & API
 - Prometheus metrics (`app/monitoring/metrics.py`)
 - Grafana dashboards for orders, positions, PnL, account status, and latency
-- FastAPI `/health`, `/config`, `/config/update`, `/restart`, `/ui`
+- FastAPI `/health`, `/config`, `/config/raw`, `/config/schema`, `/config/update`, `/restart`, `/`, `/ui`
 - Audit and compliance logs (JSONL/CSV) for decision traces
 
 ### Resilience & Storage
@@ -242,9 +242,9 @@ docker compose up -d --build
 ```
 
 4) Verify:
-- API health: `http://localhost:18083/health`
-- Config UI: `http://localhost:18083/ui`
-- Grafana: `http://localhost:3003`
+- API health: `http://localhost:18081/health`
+- Config UI: `http://localhost:18081/ui`
+- Grafana: `http://localhost:3002`
 - Healthwatch metrics: `http://localhost:9105/metrics` (internal in Docker; use Prometheus to view)
 
 Services:
@@ -289,6 +289,8 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Aligned documentation with current codebase details, endpoints, and branding.
+- Forced fresh RL policy training by disabling resume/use_best_model after the observation update.
 - Replaced orchestrator model with policy-gradient RL and added entropy/baseline controls.
 - Added RL model shape guard to force retraining on observation changes.
 - Added buying_power_pct to RL observation and drift feature paths.

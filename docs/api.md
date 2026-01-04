@@ -14,8 +14,10 @@ Expose health/config endpoints and the web UI.
 - `/health`
 - `/config`
 - `/config/raw`
+- `/config/schema`
 - `/config/update`
 - `/restart`
+- `/`
 - `/ui`
 
 ## Run

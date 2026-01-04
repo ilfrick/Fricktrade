@@ -23,7 +23,7 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.quality.*` (OHLCV validation + per-symbol quality report)
 - `data.adjustments.*` (optional split/dividend adjustment files)
 - `data.dynamic_symbols.*`
-- `data.dynamic_symbols.universe` (`brokers_active` merges enabled broker universes with positions/orders)
+- `data.dynamic_symbols.universe` (`brokers_active` uses Alpaca active universe today and merges positions/orders)
 - `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap)
 - `data.dynamic_symbols.cash_aware` and `data.dynamic_symbols.cash_cap_mode`
   (caps candidates to <= buying power; when buying power <= 0 or cap < price_min, only positions/open orders remain)

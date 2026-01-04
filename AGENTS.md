@@ -54,7 +54,7 @@ Web UI:
 docker compose run --rm trader python3 -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
 ```
 
-- Pretrain ML orchestrator:
+- Pretrain RL orchestrator:
 
 ```bash
 docker compose run --rm trader python3 -m app.main pretrain-orchestrator --config /app/config/config.yaml
@@ -150,12 +150,11 @@ docker compose run --rm api
 - Additional strategies include `trend_following`, `factor_model`, `stat_arb_pairs`, and `market_maker` under `strategy.params.*`.
 - Execution algos (TWAP/VWAP/POV) are configured under `execution.algos`.
 - Volatility targeting is configured under `risk.vol_targeting`.
-- AI strategy orchestration uses `orchestrator.*` to score strategies per symbol and select the top candidates each cycle. ML mode (`orchestrator.ml.enabled`) trains per bar with replay buffer + best-model checkpoints; default model is LSTM with `orchestrator.ml.seq_len`.
+- AI strategy orchestration uses `orchestrator.*` with an RL policy-gradient model to score strategies per symbol and select the top candidates each cycle (LSTM or MLP configured under `orchestrator.rl.*`).
 - Fee-aware RL is available as `rl_policy_fees`, using broker-specific fee config under `brokers.<name>.fees` plus guardrails in `strategy.fee_aware`.
 - Strategy performance reporting + kill switch are configured under `strategy.performance.*` (rolling win rate/drawdown checks).
-- Orchestrator pretraining runs out-of-band by default (`orchestrator.ml.pretrain.in_trader: false`); use `python -m app.main pretrain-orchestrator` in Docker to warm-start the model.
-- Orchestrator learning persists per-strategy bias updates under `orchestrator.learning.state_path`, and checkpoints the best biases to `orchestrator.learning.best_state_path` for default loading.
-- Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
+- Orchestrator pretraining runs out-of-band by default (`orchestrator.rl.pretrain.in_trader: false`); use `python -m app.main pretrain-orchestrator` in Docker to warm-start the model.
+- - Training writes a JSON report at `learning.training.report_path` and charts in `learning.training.report_plot_dir`.
 - Models and reports are stored in `./models` via the Docker volume.
 - `learning.training.resume` controls whether training resumes from an existing model or starts fresh.
 - `learning.use_best_model` selects the best model copy (from `learning.best_model_path`) if available.
@@ -170,8 +169,8 @@ docker compose run --rm api
 - Data directory is `/data` inside containers (mapped to `./data` on host).
 - `data.interval` and `data.lookback_days` are clamped for yfinance intraday limits.
 - `data.session_gain_mode` controls session gain calculation (`gap` or `session`).
-- Dynamic symbol scanning is configured under `data.dynamic_symbols` (Alpaca snapshot-based scanner), enabled by default, refreshes every 5 minutes, supports cash-aware filtering with `cash_aware` (see `cash_cap_mode`), and can relax filters via `data.dynamic_symbols.fallback`.
-- `data.dynamic_symbols.universe: brokers_active` seeds the scanner/AI filter from enabled broker universes plus open positions and orders.
+- Dynamic symbol scanning is configured under `data.dynamic_symbols` (Alpaca snapshot-based scanner), enabled by default, refreshes every 1 minute by default, supports cash-aware filtering with `cash_aware` (see `cash_cap_mode`), and can relax filters via `data.dynamic_symbols.fallback`.
+- `data.dynamic_symbols.universe: brokers_active` seeds the scanner/AI filter from the Alpaca active universe today plus open positions and orders.
 - `news.provider: brokers` aggregates catalysts across enabled brokers (Alpaca-backed today).
 - Alerts are defined in `prometheus/alerts.yml` and a dedicated Grafana dashboard is provisioned for alerting/health.
 - Alertmanager handles email notifications via `alertmanager/alertmanager.yml`.
@@ -184,11 +183,11 @@ docker compose run --rm api
 
 ## Behavior Details
 
-- Trading loop pulls prices from yfinance in `app/main.py` for live trade mode, iterating over every symbol in `data.symbols` each cycle.
+- Trading loop pulls live data via `data.provider` (brokers/alpaca/yfinance) and iterates over the active symbol set (static list or dynamic scanner/AI filter).
 - Trading is paused when all configured markets are closed.
 - Strategy emits `buy`, `sell`, `exit`, or `hold`; `exit` closes the position.
 - Risk checks are threshold-based and order sizing is cash-aware using broker equity/cash plus exposure caps.
-- Backtest engine loads the first matching CSV in `backtest.data_dir`.
+- Agent-aligned backtest loads per-symbol CSVs from `backtest.data_dir` (legacy SMA engine uses the first matching CSV).
 - API `/config` masks Alpaca keys before returning; `/config/update` accepts YAML updates and `/restart` triggers a graceful container restart.
 - Grafana auto-provisions the "Fricktrade Overview" dashboard with trade counts/rates, PnL, and drawdown.
 - Dashboard also shows active symbols, active broker, and account equity/cash/invested from broker account data. Skipped orders are available via `orders_skipped_total` metrics.

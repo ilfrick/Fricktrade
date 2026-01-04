@@ -25,8 +25,6 @@ Bootstrap confidence intervals and Monte Carlo stress runs are controlled via
 
 ## Scenarios (default)
 - `baseline`: current config.
-- `stress_costs_moderate`: higher slippage/commission.
-- `stress_costs_high`: aggressive slippage/commission.
 - `no_news`: disable news catalysts.
 - `no_signal_bias_guard`: disable signal bias guard.
 - `no_ai_filter`: disable AI filter scoring.

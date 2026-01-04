@@ -10,7 +10,7 @@ Expose Prometheus metrics and Grafana dashboards.
 - Metrics: `app/monitoring/metrics.py`.
 - Prometheus config: `prometheus/prometheus.yml`.
 - Grafana dashboards: `grafana/provisioning/dashboards/*.json`.
-- Latency dashboard: `grafana/provisioning/dashboards/autotrader_latency.json`.
+- Latency dashboard: `grafana/provisioning/dashboards/fricktrade_latency.json`.
 - Audit/compliance exports: `app/monitoring/audit.py`.
 
 ## Key Metrics
