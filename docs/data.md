@@ -11,7 +11,7 @@ Acquire bars, scan symbols, and support AI filtering.
 - Alpaca ingestion: `app/data/ingestion.py`.
 - Scanner (snapshots): `app/data/scanner.py`.
 - News catalysts: `app/data/news.py`.
-- AI symbol filter: `app/data/ai_filter.py`.
+- AI symbol filter (PPO): `app/data/ai_filter.py`.
 
 ## Configuration
 `config/config.yaml`:

@@ -427,13 +427,24 @@ data:
       lookback_days: 2
       window: 20
       retrain_hours: 6
-      model_path: /data/ai_symbol_filter.pt
+      model_type: ppo
+      model_path: /data/ai_symbol_filter.zip
       train_max_symbols: 300
       max_samples_per_symbol: 200
+      rl:
+        timesteps: 20000
+        learning_rate: 0.0003
+        batch_size: 64
+        n_steps: 64
+        gamma: 0.99
+        ent_coef: 0.01
+        clip_range: 0.2
+        gae_lambda: 0.95
       online:
         enabled: true
         learning_rate: 0.001
         steps: 10
+        timesteps: 256
         max_symbols: 50000
       news:
         enabled: true

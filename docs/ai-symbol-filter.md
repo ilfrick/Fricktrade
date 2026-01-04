@@ -8,7 +8,7 @@ Scores a large universe of symbols and returns an ordered list for trading.
 
 ## Implementation
 - Entry point: `app/data/ai_filter.py` via `TradingAgent._refresh_dynamic_symbols`.
-- Loads a linear model from `model_path` if fresh; retrains if missing or stale.
+- Loads a PPO policy (stable-baselines3) from `model_path` if fresh; retrains if missing or stale. Metadata is stored in a `.meta.json` sidecar.
 - Builds features from the latest rolling window of returns and volumes.
 - Adds a news catalyst flag per symbol to the feature vector.
 - Scores each symbol and sorts by descending score.
@@ -21,7 +21,7 @@ Scores a large universe of symbols and returns an ordered list for trading.
 - Feature vector: mean return, std return, momentum sum, last return,
   volume z-score, catalyst flag, plus intraday signal metrics
   (30m/60m returns, early volume %, runup/drawdown %, and absolute moves).
-When signal features are added or removed, retrain the model to avoid shape mismatches.
+When signal features are added or removed, retrain the PPO model to avoid shape mismatches.
 - Keep `lookback_days` low for live runs to reduce scoring latency (current default: 2).
 
 ## Configuration
@@ -31,7 +31,9 @@ When signal features are added or removed, retrain the model to avoid shape mism
 - `data.dynamic_symbols.ai_filter.lookback_days`
 - `data.dynamic_symbols.ai_filter.window`
 - `data.dynamic_symbols.ai_filter.retrain_hours`
+- `data.dynamic_symbols.ai_filter.model_type` (default: `ppo`)
 - `data.dynamic_symbols.ai_filter.model_path`
+- `data.dynamic_symbols.ai_filter.rl.*` (PPO hyperparameters)
 - `data.dynamic_symbols.ai_filter.train_max_symbols`
 - `data.dynamic_symbols.ai_filter.max_samples_per_symbol`
 - `data.dynamic_symbols.ai_filter.objective`
@@ -43,7 +45,8 @@ When signal features are added or removed, retrain the model to avoid shape mism
 Online updates:
 - `data.dynamic_symbols.ai_filter.online.enabled`
 - `data.dynamic_symbols.ai_filter.online.learning_rate`
-- `data.dynamic_symbols.ai_filter.online.steps`
+- `data.dynamic_symbols.ai_filter.online.steps` (legacy alias for timesteps)
+- `data.dynamic_symbols.ai_filter.online.timesteps`
 - `data.dynamic_symbols.ai_filter.online.max_symbols`
 
 News features:

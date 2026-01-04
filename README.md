@@ -156,7 +156,7 @@ flowchart LR
 ### Data & Scanning
 - Live data from `data.provider` (brokers/alpaca/yfinance); yfinance is fallback when broker providers are unavailable.
 - Historical bars from Alpaca for training/backtesting/ingestion
-- Dynamic scanner and AI filter for symbol selection
+- Dynamic scanner and PPO-based AI filter for symbol selection
 - News catalyst support (Alpaca news)
 
 ### Learning
@@ -289,6 +289,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Switched AI symbol filter to PPO with online updates and PPO-specific config.
 - Aligned documentation with current codebase details, endpoints, and branding.
 - Forced fresh RL policy training by disabling resume/use_best_model after the observation update.
 - Replaced orchestrator model with policy-gradient RL and added entropy/baseline controls.

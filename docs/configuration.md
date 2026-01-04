@@ -47,7 +47,8 @@ Centralize runtime settings for all subsystems.
 - Strategy selection: `strategy.name` or `strategy.names`.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
 - Live market data provider: `data.provider` (yfinance, alpaca, or brokers).
-- AI filter: `data.dynamic_symbols.ai_filter.enabled`.
+- AI filter: `data.dynamic_symbols.ai_filter.enabled` (PPO-based by default).
+- AI filter model: `data.dynamic_symbols.ai_filter.model_type` and `data.dynamic_symbols.ai_filter.rl.*`.
 - Data quality validation: `data.quality.enabled`.
 - Data adjustments: `data.adjustments.enabled`.
 - Broker universe: `data.dynamic_symbols.universe: brokers_active` (Alpaca active universe today).

@@ -8,12 +8,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
+import json
 import logging
 import math
 
+import gymnasium as gym
 import numpy as np
 import pandas as pd
 import torch
+from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import DummyVecEnv
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.enums import DataFeed
@@ -30,12 +34,22 @@ class AISymbolFilterConfig:
     window: int
     retrain_hours: int
     model_path: str
+    model_type: str
     train_max_symbols: int
     max_samples_per_symbol: int
     online_enabled: bool
     online_learning_rate: float
     online_steps: int
+    online_timesteps: int
     online_max_symbols: int
+    rl_timesteps: int
+    rl_learning_rate: float
+    rl_batch_size: int
+    rl_n_steps: int
+    rl_gamma: float
+    rl_ent_coef: float
+    rl_clip_range: float
+    rl_gae_lambda: float
     news_enabled: bool
     news_lookback_hours: int
     news_keywords: list[str]
@@ -59,22 +73,38 @@ def score_symbols(
 ) -> tuple[list[str], dict[str, float], dict[str, dict[str, float]]]:
     symbols = [s for s in symbols if s]
     if not symbols or not api_key or not api_secret:
-        return [], {}
+        return [], {}, {}
     config = _read_config(cfg)
-    model_path = Path(config.model_path)
-    model, stats = _load_model(model_path, config.retrain_hours)
+    model_path = _normalize_model_path(config.model_path, config.model_type)
+    if config.model_type == "ppo":
+        model, stats = _load_ppo_model(model_path, config.retrain_hours)
+    else:
+        model, stats = _load_linear_model(model_path, config.retrain_hours)
     if model is None or stats is None:
-        model, stats = _train_model(symbols, api_key, api_secret, config, brokers_cfg or {})
+        if config.model_type == "ppo":
+            model, stats = _train_ppo_model(symbols, api_key, api_secret, config, brokers_cfg or {})
+        else:
+            model, stats = _train_linear_model(symbols, api_key, api_secret, config, brokers_cfg or {})
         if model is not None and stats is not None:
-            _save_model(model_path, model, stats)
+            if config.model_type == "ppo":
+                _save_ppo_model(model_path, model, stats)
+            else:
+                _save_linear_model(model_path, model, stats)
 
     if model is None or stats is None:
         return symbols, {s: 0.0 for s in symbols}
 
     catalyst_map = _fetch_news_catalysts(symbols, api_key, api_secret, config, brokers_cfg or {})
     if config.online_enabled:
-        if _online_update_model(symbols, api_key, api_secret, config, model, stats, catalyst_map):
-            _save_model(model_path, model, stats)
+        if config.model_type == "ppo":
+            updated = _online_update_ppo_model(symbols, api_key, api_secret, config, model, stats, catalyst_map)
+        else:
+            updated = _online_update_linear_model(symbols, api_key, api_secret, config, model, stats, catalyst_map)
+        if updated:
+            if config.model_type == "ppo":
+                _save_ppo_model(model_path, model, stats)
+            else:
+                _save_linear_model(model_path, model, stats)
 
     bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
     scores = {}
@@ -84,7 +114,10 @@ def score_symbols(
         if features is None:
             scores[symbol] = 0.0
             continue
-        score = _predict(model, stats, features)
+        if config.model_type == "ppo":
+            score = _predict_ppo(model, stats, features)
+        else:
+            score = _predict_linear(model, stats, features)
         scores[symbol] = float(score)
         if frame is not None and not frame.empty:
             try:
@@ -114,13 +147,24 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     lookback_days = int(cfg.get("lookback_days", 20))
     window = int(cfg.get("window", 20))
     retrain_hours = int(cfg.get("retrain_hours", 6))
-    model_path = str(cfg.get("model_path", "/data/ai_symbol_filter.pt"))
+    model_path = str(cfg.get("model_path", "/data/ai_symbol_filter.zip"))
+    model_type = str(cfg.get("model_type", "ppo")).lower()
     train_max_symbols = int(cfg.get("train_max_symbols", 300))
     max_samples_per_symbol = int(cfg.get("max_samples_per_symbol", 200))
+    rl_cfg = cfg.get("rl", {}) or {}
+    rl_timesteps = int(rl_cfg.get("timesteps", 20000))
+    rl_learning_rate = float(rl_cfg.get("learning_rate", 0.0003))
+    rl_batch_size = int(rl_cfg.get("batch_size", 64))
+    rl_n_steps = int(rl_cfg.get("n_steps", 256))
+    rl_gamma = float(rl_cfg.get("gamma", 0.99))
+    rl_ent_coef = float(rl_cfg.get("ent_coef", 0.01))
+    rl_clip_range = float(rl_cfg.get("clip_range", 0.2))
+    rl_gae_lambda = float(rl_cfg.get("gae_lambda", 0.95))
     online_cfg = cfg.get("online", {}) or {}
     online_enabled = bool(online_cfg.get("enabled", False))
     online_learning_rate = float(online_cfg.get("learning_rate", 0.001))
     online_steps = int(online_cfg.get("steps", 5))
+    online_timesteps = int(online_cfg.get("timesteps", online_steps))
     online_max_symbols = int(online_cfg.get("max_symbols", 200))
     news_cfg = cfg.get("news", {}) or {}
     news_enabled = bool(news_cfg.get("enabled", False))
@@ -141,12 +185,22 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         window=window,
         retrain_hours=retrain_hours,
         model_path=model_path,
+        model_type=model_type,
         train_max_symbols=train_max_symbols,
         max_samples_per_symbol=max_samples_per_symbol,
         online_enabled=online_enabled,
         online_learning_rate=online_learning_rate,
         online_steps=online_steps,
+        online_timesteps=online_timesteps,
         online_max_symbols=online_max_symbols,
+        rl_timesteps=rl_timesteps,
+        rl_learning_rate=rl_learning_rate,
+        rl_batch_size=rl_batch_size,
+        rl_n_steps=rl_n_steps,
+        rl_gamma=rl_gamma,
+        rl_ent_coef=rl_ent_coef,
+        rl_clip_range=rl_clip_range,
+        rl_gae_lambda=rl_gae_lambda,
         news_enabled=news_enabled,
         news_lookback_hours=news_lookback_hours,
         news_keywords=news_keywords,
@@ -162,7 +216,19 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     )
 
 
-def _load_model(model_path: Path, retrain_hours: int):
+def _normalize_model_path(model_path: str, model_type: str) -> Path:
+    path = Path(model_path)
+    if model_type == "ppo" and path.suffix == ".pt":
+        return path.with_suffix(".zip")
+    return path
+
+
+def _meta_path(model_path: Path) -> Path:
+    suffix = model_path.suffix if model_path.suffix else ".zip"
+    return model_path.with_suffix(f"{suffix}.meta.json")
+
+
+def _load_linear_model(model_path: Path, retrain_hours: int):
     if not model_path.exists():
         return None, None
     try:
@@ -189,7 +255,7 @@ def _load_model(model_path: Path, retrain_hours: int):
     return model, stats
 
 
-def _save_model(model_path: Path, model, stats: dict):
+def _save_linear_model(model_path: Path, model, stats: dict):
     state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
     payload = {
         "input_dim": model.in_features,
@@ -203,7 +269,7 @@ def _save_model(model_path: Path, model, stats: dict):
     torch.save(payload, model_path)
 
 
-def _train_model(
+def _train_linear_model(
     symbols: list[str],
     api_key: str,
     api_secret: str,
@@ -240,7 +306,7 @@ def _train_model(
     return model, stats
 
 
-def _online_update_model(
+def _online_update_linear_model(
     symbols: list[str],
     api_key: str,
     api_secret: str,
@@ -287,6 +353,164 @@ def _online_update_model(
     model.eval()
     if last_loss is not None:
         logging.info("AI filter online update complete; loss=%.6f samples=%d", last_loss, len(labels))
+    return True
+
+
+class _SymbolFilterEnv(gym.Env):
+    metadata = {"render_modes": []}
+
+    def __init__(self, features: np.ndarray, rewards: np.ndarray, shuffle: bool = True):
+        super().__init__()
+        self._features = np.asarray(features, dtype=np.float32)
+        self._rewards = np.asarray(rewards, dtype=np.float32)
+        self._shuffle = shuffle
+        self._order = np.arange(len(self._features))
+        self._idx = 0
+        self.action_space = gym.spaces.Discrete(2)
+        self.observation_space = gym.spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(self._features.shape[1],),
+            dtype=np.float32,
+        )
+
+    def reset(self, seed: int | None = None, options: dict | None = None):
+        super().reset(seed=seed)
+        if self._shuffle and len(self._order) > 1:
+            np.random.shuffle(self._order)
+        self._idx = 0
+        obs = self._features[self._order[self._idx]]
+        return obs, {}
+
+    def step(self, action: int):
+        reward = float(self._rewards[self._order[self._idx]]) if int(action) == 1 else 0.0
+        self._idx += 1
+        done = self._idx >= len(self._order)
+        if done:
+            obs = self._features[self._order[-1]]
+        else:
+            obs = self._features[self._order[self._idx]]
+        return obs, reward, done, False, {}
+
+
+def _build_env(features: np.ndarray, rewards: np.ndarray) -> DummyVecEnv:
+    return DummyVecEnv([lambda: _SymbolFilterEnv(features, rewards, shuffle=True)])
+
+
+def _load_ppo_model(model_path: Path, retrain_hours: int):
+    if not model_path.exists():
+        return None, None
+    meta_path = _meta_path(model_path)
+    if not meta_path.exists():
+        return None, None
+    try:
+        meta = json.loads(meta_path.read_text())
+    except Exception as exc:
+        logging.warning("AI filter metadata load failed: %s", exc)
+        return None, None
+    trained_at = meta.get("trained_at")
+    if trained_at:
+        trained_dt = datetime.fromisoformat(trained_at)
+        if datetime.utcnow() - trained_dt > timedelta(hours=retrain_hours):
+            return None, None
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logging.info("AI filter load device: %s", device)
+    try:
+        model = PPO.load(str(model_path), device=device)
+    except Exception as exc:
+        logging.warning("AI filter PPO load failed: %s", exc)
+        return None, None
+    return model, meta
+
+
+def _save_ppo_model(model_path: Path, model: PPO, stats: dict):
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    model.save(str(model_path))
+    meta = {
+        "mean": stats.get("mean"),
+        "std": stats.get("std"),
+        "objective": stats.get("objective"),
+        "trained_at": datetime.utcnow().isoformat(),
+        "model_type": "ppo",
+    }
+    _meta_path(model_path).write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+
+def _train_ppo_model(
+    symbols: list[str],
+    api_key: str,
+    api_secret: str,
+    cfg: AISymbolFilterConfig,
+    brokers_cfg: dict,
+):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logging.info("AI filter train device: %s", device)
+    train_symbols = symbols[: cfg.train_max_symbols]
+    bars = _fetch_bars(train_symbols, api_key, api_secret, cfg, limit_symbols=cfg.train_max_symbols)
+    catalyst_map = _fetch_news_catalysts(train_symbols, api_key, api_secret, cfg, brokers_cfg or {})
+    features, labels = _build_training_data(bars, cfg, catalyst_map)
+    if features.size == 0:
+        logging.warning("AI filter training skipped: no data")
+        return None, None
+    mean = features.mean(axis=0)
+    std = features.std(axis=0)
+    std = np.where(std == 0, 1.0, std)
+    features = (features - mean) / std
+    env = _build_env(features, labels)
+    timesteps = max(int(cfg.rl_timesteps), int(cfg.rl_n_steps))
+    model = PPO(
+        "MlpPolicy",
+        env,
+        learning_rate=cfg.rl_learning_rate,
+        n_steps=max(16, int(cfg.rl_n_steps)),
+        batch_size=max(16, int(cfg.rl_batch_size)),
+        gamma=cfg.rl_gamma,
+        ent_coef=cfg.rl_ent_coef,
+        clip_range=cfg.rl_clip_range,
+        gae_lambda=cfg.rl_gae_lambda,
+        verbose=0,
+        device=device,
+    )
+    model.learn(total_timesteps=timesteps)
+    stats = {"mean": mean.tolist(), "std": std.tolist(), "objective": cfg.objective}
+    return model, stats
+
+
+def _online_update_ppo_model(
+    symbols: list[str],
+    api_key: str,
+    api_secret: str,
+    cfg: AISymbolFilterConfig,
+    model: PPO,
+    stats: dict,
+    catalyst_map: dict[str, bool],
+) -> bool:
+    update_symbols = symbols[: cfg.online_max_symbols]
+    if not update_symbols:
+        return False
+    bars = _fetch_bars(update_symbols, api_key, api_secret, cfg, limit_symbols=cfg.online_max_symbols)
+    features, labels = _build_training_data(bars, cfg, catalyst_map)
+    if features.size == 0:
+        logging.warning("AI filter online update skipped: no data")
+        return False
+    mean = np.array(stats.get("mean") or [], dtype=float)
+    std = np.array(stats.get("std") or [], dtype=float)
+    if mean.size and std.size:
+        std = np.where(std == 0, 1.0, std)
+        features = (features - mean) / std
+    else:
+        mean = features.mean(axis=0)
+        std = features.std(axis=0)
+        std = np.where(std == 0, 1.0, std)
+        features = (features - mean) / std
+        stats["mean"] = mean.tolist()
+        stats["std"] = std.tolist()
+    stats.setdefault("objective", cfg.objective)
+    env = _build_env(features, labels)
+    model.set_env(env)
+    timesteps = max(int(cfg.online_timesteps), int(cfg.rl_n_steps))
+    model.learn(total_timesteps=timesteps, reset_num_timesteps=False)
+    logging.info("AI filter online update complete; timesteps=%d samples=%d", timesteps, len(labels))
     return True
 
 
@@ -462,7 +686,7 @@ def _target_value(
     return float(next_return)
 
 
-def _predict(model, stats: dict, features: np.ndarray) -> float:
+def _predict_linear(model, stats: dict, features: np.ndarray) -> float:
     mean = np.array(stats.get("mean", []), dtype=float)
     std = np.array(stats.get("std", []), dtype=float)
     if mean.size and std.size:
@@ -473,6 +697,24 @@ def _predict(model, stats: dict, features: np.ndarray) -> float:
     if math.isnan(score) or math.isinf(score):
         return 0.0
     return float(score)
+
+
+def _predict_ppo(model: PPO, stats: dict, features: np.ndarray) -> float:
+    mean = np.array(stats.get("mean", []), dtype=float)
+    std = np.array(stats.get("std", []), dtype=float)
+    if mean.size and std.size:
+        features = (features - mean) / std
+    obs = np.array(features, dtype=np.float32).reshape(1, -1)
+    obs_tensor, _ = model.policy.obs_to_tensor(obs)
+    dist = model.policy.get_distribution(obs_tensor)
+    probs = dist.distribution.probs.detach().cpu().numpy()
+    if probs.ndim == 2 and probs.shape[1] >= 2:
+        score = float(probs[0][1])
+    else:
+        score = float(probs.squeeze()[()])
+    if math.isnan(score) or math.isinf(score):
+        return 0.0
+    return score
 
 
 def _map_timeframe(interval: str) -> TimeFrame:
@@ -516,47 +758,3 @@ def _fetch_news_catalysts(
         "retries": cfg.news_retries,
     }
     return fetch_catalyst_symbols_for_config(symbols, news_cfg, brokers_cfg)
-
-
-def build_feature_vector_from_series(
-    prices: list[float],
-    volumes: list[float] | None,
-    window: int,
-    catalyst: bool,
-    interval: str = "5m",
-) -> np.ndarray | None:
-    if prices is None or len(prices) < window + 1:
-        return None
-    if any(price <= 0 for price in prices):
-        return None
-    volumes = volumes or []
-    if len(volumes) < len(prices):
-        pad_val = float(volumes[-1]) if volumes else 0.0
-        volumes = list(volumes) + [pad_val] * (len(prices) - len(volumes))
-    close = np.array(prices, dtype=float)
-    volume = np.array(volumes, dtype=float)
-    returns = np.diff(close) / close[:-1]
-    if len(returns) < window:
-        return None
-    window_ret = returns[-window:]
-    window_vol = volume[-window:]
-    window_prices = close[-(window + 1) :]
-    window_vol_prices = volume[-(window + 1) :]
-    return _feature_vector(window_ret, window_vol, catalyst, window_prices, window_vol_prices, interval)
-
-
-def latest_features_for_symbol(
-    symbol: str,
-    api_key: str,
-    api_secret: str,
-    cfg: dict,
-    catalyst: bool,
-) -> np.ndarray | None:
-    if not symbol or not api_key or not api_secret:
-        return None
-    config = _read_config(cfg)
-    bars = _fetch_bars([symbol], api_key, api_secret, config, limit_symbols=1)
-    frame = bars.get(symbol)
-    if frame is None or frame.empty:
-        return None
-    return _latest_features(frame, config.window, catalyst, config.interval)

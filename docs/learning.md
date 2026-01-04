@@ -7,6 +7,8 @@
 Train and evaluate RL policies, and support online updates.
 
 ## Implementation
+
+Additional ML: the AI symbol filter uses PPO (stable-baselines3) with online updates in `app/data/ai_filter.py`.
 - Training: `app/learning/train_rl.py`.
 - Online updates: `app/learning/online_update.py`.
 - Evaluation: `app/learning/evaluate.py`.

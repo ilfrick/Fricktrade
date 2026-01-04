@@ -36,7 +36,7 @@ can reload context quickly. Keep it updated when the setup changes.
 
 ## Dev AI Filter (Dynamic Symbols)
 - Replaced heuristic scanner with AI filter (`app/data/ai_filter.py`) that scores the full Alpaca US universe.
-- AI filter trains on Alpaca historical bars (IEX feed) and stores model at `/data/ai_symbol_filter.pt`.
+- AI filter trains on Alpaca historical bars (IEX feed) using PPO and stores the model at `/data/ai_symbol_filter.zip`.
 - `config/config.yaml` uses `data.dynamic_symbols.ai_filter.*` and `data.symbols: []` (no default symbols).
 
 ## Dev Backtest Data
@@ -44,6 +44,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Switched AI symbol filter to PPO with online updates and PPO-specific config.
 - Aligned documentation with current codebase details, endpoints, and branding.
 - Forced fresh RL policy training by disabling resume/use_best_model after the observation update.
 - Replaced orchestrator model with policy-gradient RL and added entropy/baseline controls.

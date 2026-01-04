@@ -304,7 +304,7 @@ data:
       lookback_days: 30
       window: 20
       retrain_hours: 6
-      model_path: /data/ai_symbol_filter.pt
+      model_path: /data/ai_symbol_filter.zip
       train_max_symbols: 300
       max_samples_per_symbol: 200
       timeout_seconds: 15
