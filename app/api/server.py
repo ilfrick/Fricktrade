@@ -145,6 +145,8 @@ _DESCRIPTIONS = {
     "orchestrator.rl.epsilon": "RL orchestrator exploration rate.",
     "orchestrator.rl.min_price_move_pct": "Minimum price move to train the RL orchestrator.",
     "orchestrator.rl.reward_scale": "Reward scale for RL orchestrator.",
+    "orchestrator.rl.entropy_coef": "Entropy coefficient for RL policy exploration.",
+    "orchestrator.rl.baseline_alpha": "EMA alpha for RL reward baseline.",
     "orchestrator.rl.max_grad_norm": "Gradient clipping for RL orchestrator.",
     "orchestrator.rl.save_interval_seconds": "Checkpoint interval for RL orchestrator.",
     "orchestrator.rl.score_ema_alpha": "EMA alpha for RL orchestrator performance score.",

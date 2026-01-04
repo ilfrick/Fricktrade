@@ -70,6 +70,8 @@ class RLOrchestratorConfig:
     epsilon: float = 0.05
     min_price_move_pct: float = 0.02
     reward_scale: float = 1.0
+    entropy_coef: float = 0.01
+    baseline_alpha: float = 0.1
     max_grad_norm: float = 1.0
     save_interval_seconds: int = 300
     score_ema_alpha: float = 0.1
@@ -120,6 +122,8 @@ class StrategyOrchestrator:
         self._last_saved_at: float | None = None
         self._score_ema: float | None = None
         self._best_score: float | None = None
+        self._reward_ema: float | None = None
+        self._last_selection: dict[str, str] = {}
         self._load_state()
 
     def select(
@@ -306,6 +310,8 @@ class RLStrategyOrchestrator:
             epsilon=float(rl_cfg.get("epsilon", 0.05)),
             min_price_move_pct=float(rl_cfg.get("min_price_move_pct", 0.02)),
             reward_scale=float(rl_cfg.get("reward_scale", 1.0)),
+            entropy_coef=float(rl_cfg.get("entropy_coef", 0.01)),
+            baseline_alpha=float(rl_cfg.get("baseline_alpha", 0.1)),
             max_grad_norm=float(rl_cfg.get("max_grad_norm", 1.0)),
             save_interval_seconds=int(rl_cfg.get("save_interval_seconds", 300)),
             score_ema_alpha=float(rl_cfg.get("score_ema_alpha", 0.1)),
@@ -336,12 +342,14 @@ class RLStrategyOrchestrator:
         self._strategy_names: list[str] = []
         self._ai_filter_cfg = cfg.get("data", {}).get("dynamic_symbols", {}).get("ai_filter", {})
         self._alpaca_cfg = get_alpaca_account_cfg(cfg)
-        self._buffer: deque[tuple[torch.Tensor, torch.Tensor]] = deque(maxlen=self.cfg.buffer_size)
+        self._buffer: deque[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = deque(maxlen=self.cfg.buffer_size)
         self._last_state: dict[str, dict[str, object]] = {}
         self._feature_history: dict[str, deque[list[float]]] = {}
         self._last_saved_at: float | None = None
         self._score_ema: float | None = None
         self._best_score: float | None = None
+        self._reward_ema: float | None = None
+        self._last_selection: dict[str, str] = {}
         self._order_feedback: dict[str, dict[str, float]] = {}
 
     def is_enabled(self) -> bool:
@@ -381,34 +389,39 @@ class RLStrategyOrchestrator:
         self._ensure_model(strategy_names)
         features = self._state_features(symbol, market_state, signals)
         sequence = self._update_sequence(symbol, features)
-        scores = self._predict(sequence)
+        probs = self._predict(sequence)
         if random.random() < self.cfg.epsilon:
             shuffled = strategy_names[:]
             random.shuffle(shuffled)
             selected = shuffled[: max(1, min(len(shuffled), self._top_k))]
+            self._last_selection[symbol] = selected[0]
             return selected, {name: 1.0 for name in selected}
 
-        ranked = sorted(strategy_names, key=lambda n: scores.get(n, 0.0), reverse=True)
+        ranked = sorted(strategy_names, key=lambda n: probs.get(n, 0.0), reverse=True)
         if not ranked:
             return strategy_names, {name: 1.0 for name in strategy_names}
         if len(ranked) == 1:
+            self._last_selection[symbol] = ranked[0]
             return ranked, {ranked[0]: 1.0}
 
-        selected = [name for name in ranked if scores.get(name, 0.0) >= self._min_score]
+        selected = [name for name in ranked if probs.get(name, 0.0) >= self._min_score]
         if not selected:
             selected = ranked
         top_k = max(1, min(len(selected), self._top_k))
         selected = selected[:top_k]
         if self._mode == "direct":
-            selected = [name for name in ranked if scores.get(name, 0.0) >= self._min_score]
+            selected = [name for name in ranked if probs.get(name, 0.0) >= self._min_score]
             if not selected:
                 selected = [ranked[0]]
+            self._last_selection[symbol] = selected[0]
             return [selected[0]], {selected[0]: 1.0}
         if self._mode == "weight":
-            weights = {name: max(scores.get(name, 0.0), 0.0) for name in selected}
+            weights = {name: max(probs.get(name, 0.0), 0.0) for name in selected}
             if not any(weight > 0 for weight in weights.values()):
                 weights = {name: 1.0 for name in selected}
+            self._last_selection[symbol] = selected[0]
             return selected, weights
+        self._last_selection[symbol] = selected[0]
         return selected, {name: 1.0 for name in selected}
 
     def record(self, symbol: str, signals: list[dict], market_state: dict) -> None:
@@ -420,9 +433,17 @@ class RLStrategyOrchestrator:
         last_price = _last_price(market_state)
         if last_price is None:
             return
+        selected = self._last_selection.get(symbol)
+        if not selected or selected not in actions:
+            return
         features = self._state_features(symbol, market_state, signals)
         sequence = self._update_sequence(symbol, features)
-        self._last_state[symbol] = {"features": sequence, "actions": actions, "price": last_price}
+        self._last_state[symbol] = {
+            "features": sequence,
+            "action": str(actions.get(selected, "hold")),
+            "action_idx": self._strategy_names.index(selected),
+            "price": last_price,
+        }
 
     def update(self, symbol: str, market_state: dict) -> None:
         if not self.cfg.enabled:
@@ -440,18 +461,24 @@ class RLStrategyOrchestrator:
         if abs(move_pct) < self.cfg.min_price_move_pct:
             self._last_state.pop(symbol, None)
             return
-        rewards = {}
-        for name, action in state.get("actions", {}).items():
-            if action == "buy":
-                reward = move_pct - self.cfg.time_penalty_per_bar
-            elif action == "sell":
-                reward = -move_pct - self.cfg.time_penalty_per_bar
-            else:
-                reward = -self.cfg.time_penalty_per_bar
-            rewards[name] = reward * self.cfg.reward_scale
-        self._enqueue(state.get("features"), rewards)
+        action = state.get("action")
+        if not action:
+            self._last_state.pop(symbol, None)
+            return
+        if action == "buy":
+            reward = move_pct - self.cfg.time_penalty_per_bar
+        elif action == "sell":
+            reward = -move_pct - self.cfg.time_penalty_per_bar
+        else:
+            reward = -self.cfg.time_penalty_per_bar
+        reward *= self.cfg.reward_scale
+        action_idx = state.get("action_idx")
+        if action_idx is None:
+            self._last_state.pop(symbol, None)
+            return
+        self._enqueue(state.get("features"), int(action_idx), float(reward))
         self._train()
-        self._update_score(rewards)
+        self._update_score(float(reward))
         self._maybe_save()
         self._maybe_save_best()
         self._last_state.pop(symbol, None)
@@ -497,17 +524,18 @@ class RLStrategyOrchestrator:
             vec = vec.unsqueeze(0)
         self._model.eval()
         with torch.no_grad():
-            scores = self._model(vec).squeeze(0).cpu().tolist()
-        return {name: float(score) for name, score in zip(self._strategy_names, scores)}
+            logits = self._model(vec).squeeze(0)
+            probs = torch.softmax(logits, dim=-1).cpu().tolist()
+        return {name: float(prob) for name, prob in zip(self._strategy_names, probs)}
 
-    def _enqueue(self, features: list[float] | list[list[float]] | None, rewards: dict[str, float]) -> None:
-        if features is None or not rewards:
+    def _enqueue(self, features: list[float] | list[list[float]] | None, action_idx: int, reward: float) -> None:
+        if features is None:
             return
         features = self._normalize_features(features)
-        target = [rewards.get(name, 0.0) for name in self._strategy_names]
         x = torch.tensor(features, dtype=torch.float32)
-        y = torch.tensor(target, dtype=torch.float32)
-        self._buffer.append((x, y))
+        action = torch.tensor(int(action_idx), dtype=torch.long)
+        reward_tensor = torch.tensor(float(reward), dtype=torch.float32)
+        self._buffer.append((x, action, reward_tensor))
 
     def _train(self) -> None:
         if not self._model or not self._optimizer:
@@ -518,24 +546,35 @@ class RLStrategyOrchestrator:
         for _ in range(max(1, self.cfg.update_steps_per_bar)):
             batch = random.sample(list(self._buffer), self.cfg.batch_size)
             x = torch.stack([item[0] for item in batch]).to(self._device)
-            y = torch.stack([item[1] for item in batch]).to(self._device)
-            pred = self._model(x)
-            loss = torch.nn.functional.mse_loss(pred, y)
+            actions = torch.stack([item[1] for item in batch]).to(self._device)
+            rewards = torch.stack([item[2] for item in batch]).to(self._device)
+            if self.cfg.model_type == "lstm":
+                x = x.unsqueeze(0) if x.dim() == 2 else x
+            logits = self._model(x)
+            dist = torch.distributions.Categorical(logits=logits)
+            log_probs = dist.log_prob(actions)
+            entropy = dist.entropy()
+            reward_mean = float(rewards.mean().item())
+            if self._reward_ema is None:
+                self._reward_ema = reward_mean
+            else:
+                alpha = max(0.0, min(self.cfg.baseline_alpha, 1.0))
+                self._reward_ema = (1.0 - alpha) * self._reward_ema + alpha * reward_mean
+            baseline = torch.tensor(self._reward_ema or 0.0, device=self._device)
+            advantages = rewards - baseline
+            loss = -(log_probs * advantages).mean() - self.cfg.entropy_coef * entropy.mean()
             self._optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self._model.parameters(), self.cfg.max_grad_norm)
+            if self.cfg.max_grad_norm:
+                torch.nn.utils.clip_grad_norm_(self._model.parameters(), self.cfg.max_grad_norm)
             self._optimizer.step()
 
-    def _update_score(self, rewards: dict[str, float]) -> None:
-        values = [v for v in rewards.values() if v is not None]
-        if not values:
-            return
-        avg_reward = sum(values) / len(values)
+    def _update_score(self, reward: float) -> None:
         alpha = self.cfg.score_ema_alpha
         if self._score_ema is None:
-            self._score_ema = avg_reward
+            self._score_ema = reward
         else:
-            self._score_ema = alpha * avg_reward + (1.0 - alpha) * self._score_ema
+            self._score_ema = alpha * reward + (1.0 - alpha) * self._score_ema
 
     def _maybe_save(self) -> None:
         now = time.time()
@@ -674,8 +713,12 @@ class RLStrategyOrchestrator:
                             rewards[name] = -move_pct - self.cfg.time_penalty_per_bar
                         else:
                             rewards[name] = -self.cfg.time_penalty_per_bar
+                    best_name = max(rewards, key=rewards.get) if rewards else None
+                    if not best_name:
+                        continue
+                    reward = rewards[best_name] * self.cfg.reward_scale
                     train_features = sequence if self.cfg.model_type == "lstm" else features
-                    self._enqueue(train_features, rewards)
+                    self._enqueue(train_features, self._strategy_names.index(best_name), float(reward))
                     samples += 1
                     if samples >= self.cfg.pretrain_max_samples:
                         break
