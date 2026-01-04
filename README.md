@@ -289,6 +289,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Added buying power features to the RL orchestrator input set.
 - Hardened secret masking/merge for data sources and isolated per-symbol loop errors.
 - Added trading loop modularization roadmap in docs.
 - Renamed documentation branding to Fricktrade.

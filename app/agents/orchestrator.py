@@ -777,6 +777,20 @@ class _LSTMModel(nn.Module):
         last = output[:, -1, :]
         return self.head(last)
 
+def _portfolio_features(portfolio: dict | None) -> dict[str, float]:
+    if not isinstance(portfolio, dict):
+        return {"cash_pct": 0.0, "buying_power_pct": 0.0}
+    equity = float(portfolio.get("equity") or portfolio.get("last_equity") or 0.0)
+    cash = float(portfolio.get("cash") or 0.0)
+    buying_power = float(portfolio.get("buying_power") or 0.0)
+    if equity <= 0:
+        return {"cash_pct": 0.0, "buying_power_pct": 0.0}
+    return {
+        "cash_pct": cash / equity,
+        "buying_power_pct": buying_power / equity,
+    }
+
+
 def _extract_features(market_state: dict) -> dict[str, float]:
     prices = market_state.get("prices") or []
     returns = []
@@ -794,6 +808,7 @@ def _extract_features(market_state: dict) -> dict[str, float]:
         if first:
             trend = (last - first) / first * 100.0
     volatility = pstdev(returns) if len(returns) > 1 else 0.0
+    portfolio_features = _portfolio_features(market_state.get("portfolio"))
 
     return {
         "momentum": momentum,
@@ -811,6 +826,8 @@ def _extract_features(market_state: dict) -> dict[str, float]:
         "signal_abs_move": float(market_state.get("signal_abs_move", 0.0) or 0.0),
         "signal_runup_abs": float(market_state.get("signal_runup_abs", 0.0) or 0.0),
         "signal_drawdown_abs": float(market_state.get("signal_drawdown_abs", 0.0) or 0.0),
+        "cash_pct": float(portfolio_features.get("cash_pct", 0.0) or 0.0),
+        "buying_power_pct": float(portfolio_features.get("buying_power_pct", 0.0) or 0.0),
     }
 
 
@@ -830,6 +847,8 @@ _FEATURE_NAMES = [
     "signal_abs_move",
     "signal_runup_abs",
     "signal_drawdown_abs",
+    "cash_pct",
+    "buying_power_pct",
 ]
 
 

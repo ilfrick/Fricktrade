@@ -44,6 +44,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added buying power features to the RL orchestrator input set.
 - Hardened secret masking/merge for data sources and isolated per-symbol loop errors.
 - Added trading loop modularization roadmap in docs.
 - Renamed documentation branding to Fricktrade.

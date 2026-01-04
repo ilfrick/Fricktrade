@@ -27,7 +27,7 @@ execution, and metrics updates.
 
 ## Key Components
 - Strategy selection: `strategy.name` or `strategy.names`.
-- Orchestrator: `app/agents/orchestrator.py` (RL-based selection).
+- Orchestrator: `app/agents/orchestrator.py` (RL-based selection, includes cash/buying power features).
 - Open-order guard: `execution.open_orders`.
 - Market hours gating: `app/utils/market.py`.
 - Metrics: `app/monitoring/metrics.py`.
