@@ -44,6 +44,8 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added buying_power_pct to RL observation and drift feature paths.
+- Added buying_power_pct to RL observation features.
 - Documented orchestrator cash/buying power features in configuration and strategies docs.
 - Added buying power features to the RL orchestrator input set.
 - Hardened secret masking/merge for data sources and isolated per-symbol loop errors.

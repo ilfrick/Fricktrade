@@ -64,12 +64,16 @@ class RLPolicyStrategy(Strategy):
 
         closes = list(self.prices)
         volumes = list(self.volumes)
+        portfolio = market_state.get("portfolio", {}) if isinstance(market_state, dict) else {}
+        cash_pct = float(portfolio.get("cash_pct", 1.0) or 1.0)
+        buying_power_pct = float(portfolio.get("buying_power_pct", cash_pct) or cash_pct)
         obs = build_observation(
             closes=closes,
             volumes=volumes,
             window_size=self.window_size,
             position=self.position,
-            cash_pct=1.0,
+            cash_pct=cash_pct,
+            buying_power_pct=buying_power_pct,
             feature_config=self.feature_config,
         )
         if self._drift_monitor:

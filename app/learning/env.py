@@ -72,6 +72,7 @@ class TradingEnv(gym.Env):
             self.window_size,
             float(self.position),
             float(cash_pct),
+            float(cash_pct),
             feature_config=self.feature_config,
         )
 

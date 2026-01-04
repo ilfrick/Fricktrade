@@ -41,6 +41,7 @@ def compute_feature_stats(
                 window_size=window_size,
                 position=0.0,
                 cash_pct=1.0,
+                buying_power_pct=1.0,
                 feature_config=feature_config,
             )
             vec = np.asarray(obs, dtype=float).reshape(-1)

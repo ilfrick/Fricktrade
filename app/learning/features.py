@@ -40,7 +40,7 @@ def _rsi(values: np.ndarray, period: int) -> float:
 
 
 def observation_size(window_size: int, feature_config: dict | None = None) -> int:
-    base = window_size * 2 + 2
+    base = window_size * 2 + 3
     if not feature_config:
         return base
     include_returns = feature_config.get("include_returns", True)
@@ -63,6 +63,7 @@ def build_observation(
     window_size: int,
     position: float,
     cash_pct: float,
+    buying_power_pct: float,
     feature_config: dict | None = None,
 ) -> np.ndarray:
     if not closes:
@@ -91,7 +92,7 @@ def build_observation(
     features = [
         norm_closes.astype(np.float32, copy=False),
         norm_volumes.astype(np.float32, copy=False),
-        np.array([position, cash_pct], dtype=np.float32),
+        np.array([position, cash_pct, buying_power_pct], dtype=np.float32),
     ]
 
     if feature_config:
