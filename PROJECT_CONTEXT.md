@@ -21,6 +21,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Ports are fixed in compose; to run dev alongside live, use a separate project name:
 - Example: `docker compose -p autotrader-dev ...` in `./dev`
 - Docker socket access may require approval in this environment.
+- Ollama is published on the host at `0.0.0.0:11434` (from `ollama` service).
 
 ## Usual Entry Points
 - CLI: `app/main.py`
