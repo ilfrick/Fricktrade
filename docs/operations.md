@@ -20,6 +20,7 @@
 - `healthwatch.market_shutdown.keep_services` controls which services stay up when markets are closed.
 - `tests-when-closed` is kept running during market shutdown to execute its closed-market suite.
 - Healthwatch writes the ops state file (`healthwatch.market_shutdown.state_path`) for other services to consume.
+- Alertmanager SMTP and recipient settings are sourced from `.env` and must not be committed.
 
 ## Models and Artifacts
 - RL models: `/app/models` and `/data` (Docker volume).

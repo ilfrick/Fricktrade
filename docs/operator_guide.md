@@ -37,3 +37,7 @@
 ## Logs and Audit
 - Trader logs: `docker compose logs -f trader`.
 - Audit/compliance logs: `monitoring.audit.*` and `monitoring.compliance.*`.
+
+## Daily Reporting Email
+- Daily report email uses Alertmanager SMTP settings from `.env` (do not commit secrets).
+- Required keys are listed in `.env.example`.

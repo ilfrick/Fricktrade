@@ -202,6 +202,8 @@ bars for the top performers. The report includes numeric indicators, signal hint
 correlation for each top mover.
 The email body is also saved locally under `/data/reports/daily_top_movers/<YYYY-MM-DD>/_email/` as
 `.txt` and `.html`.
+Alertmanager SMTP and recipient settings are configured via `.env` and rendered into a local-only
+Alertmanager config file (do not commit secrets). See `.env.example` for the required keys.
 If a symbol has no trades and no skip metrics, the report will infer a reason such as
 `not_in_active_universe`, `open_order_pending`, `held_position_no_trade`, or `no_signal_or_filtered`.
 The metrics line now includes absolute move values (open->close, runup, drawdown) alongside %.

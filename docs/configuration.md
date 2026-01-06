@@ -95,6 +95,7 @@ Centralize runtime settings for all subsystems.
 - Daily top movers signals/news: `reports.daily_top_movers.signal_thresholds.*` and `reports.daily_top_movers.news.*`.
 - Daily top movers email overrides: `reports.daily_top_movers.email.smtp_require_tls`.
 - Email body is saved under `/data/reports/daily_top_movers/<YYYY-MM-DD>/_email/` as `.txt` and `.html`.
+- Alertmanager SMTP/recipient settings are read from `.env` and rendered into a local config file (do not commit secrets): `ALERTMANAGER_SMTP_SMARTHOST`, `ALERTMANAGER_SMTP_FROM`, `ALERTMANAGER_SMTP_USERNAME`, `ALERTMANAGER_SMTP_PASSWORD`, `ALERTMANAGER_SMTP_REQUIRE_TLS`, `ALERTMANAGER_SMTP_HELLO`, `ALERTMANAGER_EMAIL_TO`.
 - When no trades or skip metrics are recorded, the report infers a reason via Prometheus gauges
   (active symbol, open orders, positions).
 - Metrics now include representative absolute moves (open->close, runup, drawdown) along with %.
