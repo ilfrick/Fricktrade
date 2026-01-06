@@ -10,6 +10,11 @@ Centralize runtime settings for all subsystems.
 - Main file: `config/config.yaml`.
 - Supports `${ENV_VAR}` interpolation.
 
+## Sources and Precedence
+- Defaults live in code; `config/config.yaml` is the primary user-edited source of truth.
+- `.env` only affects values referenced via `${ENV_VAR}` (plus services that explicitly read `.env`, e.g. Alertmanager SMTP rendering).
+- API `/config/update` writes YAML updates into `config/config.yaml`; there is no implicit merge with `.env`.
+
 ## Key Sections
 - `app.*` (logging, intervals)
 - `market.*` (venues, hours, symbol venue mapping)

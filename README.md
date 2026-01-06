@@ -177,6 +177,8 @@ flowchart LR
 
 ## Configuration Overview
 All configuration lives in `config/config.yaml`.
+`.env` values are only used when referenced via `${ENV_VAR}` interpolation or by services that read
+`.env` directly (for example, Alertmanager SMTP rendering).
 
 Key sections:
 - `market.*`: venue gating, hours, symbol venue mapping
