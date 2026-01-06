@@ -51,6 +51,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Updated healthwatch market shutdown project name to `fricktrade`.
 - Switched Alertmanager SMTP settings to environment-variable configuration.
 - Added local Alertmanager config renderer for SMTP secrets.
+- Set `market.open_mode` to `all` so shutdown requires all venues closed.
 - Added Mermaid architecture diagram to the system map.
 - Added system map, operator guide, and developer guide to rebuild project ownership.
 - Switched AI symbol filter to PPO with online updates and PPO-specific config.
