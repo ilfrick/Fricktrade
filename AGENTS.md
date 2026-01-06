@@ -174,6 +174,7 @@ docker compose run --rm api
 - `news.provider: brokers` aggregates catalysts across enabled brokers (Alpaca-backed today).
 - Alerts are defined in `prometheus/alerts.yml` and a dedicated Grafana dashboard is provisioned for alerting/health.
 - Alertmanager handles email notifications via a locally rendered config (`alertmanager/alertmanager.generated.yml`) based on `.env` values; the template is `alertmanager/alertmanager.yml`.
+- Live profiling scripts live under `scripts/profile_live.sh` (inside container) and `scripts/run_live_profile.sh` (host runner).
 - Healthwatch can optionally stop/start services around market hours via `healthwatch.market_shutdown.*`.
 - Manual kill switches live under `kill_switch.*` (force sleep or force liquidation with interlock).
 - Daily top movers report is configured under `reports.daily_top_movers.*` (email + training exports, signal thresholds, news correlation, feed selection, and decision traces).

@@ -293,6 +293,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Added live profiling scripts for the trading loop.
 - Documented configuration precedence and `.env` usage.
 - Added local Alertmanager SMTP config rendering and `.env` keys.
 - Set market open gating to require all venues open (`open_mode: all`).
