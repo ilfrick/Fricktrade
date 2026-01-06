@@ -25,6 +25,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Healthwatch market shutdown targets the `fricktrade` compose project name (config).
 - Alertmanager SMTP settings are provided via environment variables with config expansion.
 - Alertmanager uses `alertmanager/alertmanager.generated.yml` rendered from `alertmanager/alertmanager.yml` via `scripts/render_alertmanager_config.py` (keep generated file local).
+- Live profiling scripts: `scripts/profile_live.sh` (container) and `scripts/run_live_profile.sh` (host runner); outputs under `/data/profiles`.
 
 ## Usual Entry Points
 - CLI: `app/main.py`
@@ -52,6 +53,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Switched Alertmanager SMTP settings to environment-variable configuration.
 - Added local Alertmanager config renderer for SMTP secrets.
 - Set `market.open_mode` to `all` so shutdown requires all venues closed.
+- Scheduled live-loop profiling job (90 minutes at next market open) via `scripts/run_live_profile.sh`.
 - Added Mermaid architecture diagram to the system map.
 - Added system map, operator guide, and developer guide to rebuild project ownership.
 - Switched AI symbol filter to PPO with online updates and PPO-specific config.
