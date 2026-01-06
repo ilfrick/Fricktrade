@@ -293,6 +293,10 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Documented configuration precedence and `.env` usage.
+- Added local Alertmanager SMTP config rendering and `.env` keys.
+- Set market open gating to require all venues open (`open_mode: all`).
+- Published Ollama on host port `11434`.
 - Added Mermaid architecture diagram to the system map.
 - Added system map, operator guide, and developer guide to rebuild project ownership.
 - Switched AI symbol filter to PPO with online updates and PPO-specific config.
