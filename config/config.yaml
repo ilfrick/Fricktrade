@@ -528,7 +528,7 @@ healthwatch:
     alertmanager: http://alertmanager:9093/-/healthy
   market_shutdown:
     enabled: true
-    project_name: autotrader
+    project_name: fricktrade
     check_interval_seconds: 60
     start_before_minutes: 15
     heartbeat_minutes: 15
