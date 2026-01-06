@@ -12,3 +12,4 @@ dev/
 tmplogs.txt
 ollama/
 testenv/
+alertmanager/alertmanager.generated.yml

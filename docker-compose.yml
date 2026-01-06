@@ -147,7 +147,7 @@ services:
       - .env
     volumes:
       - ./config:/app/config
-      - ./alertmanager/alertmanager.yml:/app/alertmanager/alertmanager.yml
+      - ./alertmanager/alertmanager.generated.yml:/app/alertmanager/alertmanager.yml
       - ./data:/data
     command: ["python", "-m", "app.reporting.daily_top_movers", "--config", "/app/config/config.yaml"]
     labels:
@@ -168,7 +168,7 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.27.0
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - ./alertmanager/alertmanager.generated.yml:/etc/alertmanager/alertmanager.yml
     ports:
       - "0.0.0.0:9094:9093"
     labels:

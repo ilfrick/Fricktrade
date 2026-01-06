@@ -2,12 +2,12 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 global:
-  smtp_smarthost: "smtp.example.com:587"
-  smtp_from: "alerts@example.com"
-  smtp_auth_username: "alerts"
+  smtp_smarthost: "${ALERTMANAGER_SMTP_SMARTHOST}"
+  smtp_from: "${ALERTMANAGER_SMTP_FROM}"
+  smtp_auth_username: "${ALERTMANAGER_SMTP_USERNAME}"
   smtp_auth_password: "${ALERTMANAGER_SMTP_PASSWORD}"
-  smtp_require_tls: true
-  smtp_hello: "smtp.example.com"
+  smtp_require_tls: ${ALERTMANAGER_SMTP_REQUIRE_TLS}
+  smtp_hello: "${ALERTMANAGER_SMTP_HELLO}"
 
 route:
   receiver: "email-notifications"
@@ -19,4 +19,4 @@ route:
 receivers:
   - name: "email-notifications"
     email_configs:
-      - to: "admin@example.com"
+      - to: "${ALERTMANAGER_EMAIL_TO}"
