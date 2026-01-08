@@ -14,7 +14,16 @@ mkdir -p "${LOG_DIR}"
   cd "${ROOT_DIR}"
   docker compose stop trader || true
   docker compose stop healthwatch || true
-  docker compose run --rm trader bash -lc "/app/scripts/profile_live.sh"
+  docker compose build trader
+  docker run --rm \
+    --gpus all \
+    --cap-add SYS_PTRACE \
+    --security-opt seccomp=unconfined \
+    --env-file "${ROOT_DIR}/.env" \
+    -v "${ROOT_DIR}/config:/app/config" \
+    -v "${ROOT_DIR}/data:/data" \
+    -v "${ROOT_DIR}/models:/app/models" \
+    fricktrade-trader bash -lc "/app/scripts/profile_live.sh"
   docker compose up -d healthwatch trader
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Profiling run complete"
 } >> "${LOG_FILE}" 2>&1
