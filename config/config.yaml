@@ -1,6 +1,3 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
-
 app:
   name: autotrader
   env: prod
@@ -25,7 +22,7 @@ market:
       NASDAQ: Nasdaq
       ARCA: NYSE
       AMEX: NYSE
-  open_mode: all
+  open_mode: any
   extended_hours:
     enabled: true
   holiday_update:
@@ -74,7 +71,7 @@ market:
     trading_hours:
       open: 09:30
       close: '16:00'
-      extended_open: '04:00'
+      extended_open: 04:00
       extended_close: '20:00'
     holidays:
     - '2026-01-01'
@@ -95,9 +92,19 @@ market:
     trading_hours:
       open: 09:30
       close: '16:00'
-      extended_open: '04:00'
+      extended_open: 04:00
       extended_close: '20:00'
-    holidays: []
+    holidays:
+    - '2026-01-01'
+    - '2026-01-19'
+    - '2026-02-16'
+    - '2026-04-03'
+    - '2026-05-25'
+    - '2026-06-19'
+    - '2026-07-03'
+    - '2026-09-07'
+    - '2026-11-26'
+    - '2026-12-25'
 brokers:
   alpaca:
     enabled: true
@@ -386,9 +393,15 @@ benchmarking:
   mc:
     enabled: true
     runs: 10
-    slippage_bps_range: [2, 10]
-    spread_bps_range: [0, 8]
-    commission_pct_range: [0.02, 0.2]
+    slippage_bps_range:
+    - 2
+    - 10
+    spread_bps_range:
+    - 0
+    - 8
+    commission_pct_range:
+    - 0.02
+    - 0.2
   output_path: /data/reports/benchmark_report.json
   plot_dir: /data/reports/benchmark_plots
   pdf_path: /data/reports/benchmark_report.pdf
@@ -666,7 +679,9 @@ execution:
     max_attempts: 2
     backoff_seconds: 10
     max_notional: 5000
-    reasons: [unknown, insufficient_funds]
+    reasons:
+    - unknown
+    - insufficient_funds
   brokers:
     enabled: true
     routing:

@@ -621,6 +621,51 @@ def _latest_features(frame: pd.DataFrame, window: int, catalyst: bool, interval:
     return _feature_vector(window_ret, window_vol, catalyst, window_prices, window_vol_prices, interval)
 
 
+def build_feature_vector_from_series(
+    prices: Iterable[float],
+    volumes: Iterable[float],
+    window: int,
+    catalyst: bool,
+    interval: str,
+) -> np.ndarray | None:
+    close = np.array(list(prices), dtype=float)
+    if close.size < 2:
+        return None
+    volume = np.array(list(volumes), dtype=float)
+    returns = np.diff(close) / close[:-1]
+    if len(returns) < window:
+        return None
+    window_ret = returns[-window:]
+    if volume.size >= window:
+        window_vol = volume[-window:]
+    else:
+        window_vol = np.zeros(window, dtype=float)
+        if volume.size:
+            window_vol[-volume.size :] = volume
+    window_prices = close[-(window + 1) :]
+    if volume.size >= window + 1:
+        window_vol_prices = volume[-(window + 1) :]
+    else:
+        window_vol_prices = volume
+    return _feature_vector(window_ret, window_vol, catalyst, window_prices, window_vol_prices, interval)
+
+
+def latest_features_for_symbol(
+    symbol: str,
+    api_key: str,
+    api_secret: str,
+    cfg: dict | AISymbolFilterConfig,
+    catalyst: bool,
+) -> np.ndarray | None:
+    if not symbol or not api_key or not api_secret:
+        return None
+    config = cfg if isinstance(cfg, AISymbolFilterConfig) else _read_config(cfg)
+    bars = _fetch_bars([symbol], api_key, api_secret, config, limit_symbols=None)
+    if not bars or symbol not in bars:
+        return None
+    return _latest_features(bars.get(symbol), config.window, catalyst, config.interval)
+
+
 def _feature_vector(
     returns: np.ndarray,
     volume: np.ndarray,
