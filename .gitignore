@@ -13,3 +13,4 @@ tmplogs.txt
 ollama/
 testenv/
 alertmanager/alertmanager.generated.yml
+scripts/.fuse_hidden*
