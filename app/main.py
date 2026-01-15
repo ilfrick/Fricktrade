@@ -125,6 +125,13 @@ def _market_state_from_df(data: pd.DataFrame, lookback_days: int, interval: str,
                 "volume": "Volume",
             }
         )
+    if not data.empty:
+        data = data.copy()
+        for col in ("Open", "High", "Low", "Close"):
+            if col in data.columns:
+                data[col] = data[col].ffill().bfill()
+        if "Volume" in data.columns:
+            data["Volume"] = data["Volume"].fillna(0.0)
     if "Close" not in data.columns:
         return _empty_market_state()
     close = data["Close"]
@@ -400,6 +407,17 @@ class YFinanceMarketDataProvider:
                     "volume": "Volume",
                 }
             )
+        frame = frame.copy()
+        for col in ("Open", "High", "Low", "Close"):
+            if col in frame.columns:
+                frame[col] = frame[col].ffill().bfill()
+        if "Volume" in frame.columns:
+            frame["Volume"] = frame["Volume"].fillna(0.0)
+        if any(
+            col in frame.columns and frame[col].isna().any()
+            for col in ("Open", "High", "Low", "Close")
+        ):
+            return None
         return _market_state_from_df(frame, self._lookback, self._interval, self._session_gain_mode)
 
 
