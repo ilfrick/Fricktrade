@@ -436,7 +436,7 @@ data:
     retries: 2
     ai_filter:
       enabled: true
-      provider: yfinance
+      provider: alpaca
       coverage_filter: true
       interval: 1m
       lookback_days: 2
