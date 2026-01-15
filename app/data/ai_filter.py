@@ -24,6 +24,7 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from app.data.news import fetch_catalyst_symbols_for_config
+from app.data.market_cache import MarketCache, interval_to_seconds
 from app.data.yfinance_utils import fetch_yfinance_bars
 from app.utils.signal_features import compute_signal_metrics_from_window
 
@@ -64,6 +65,10 @@ class AISymbolFilterConfig:
     time_penalty_per_bar: float
     feed: str
     provider: str
+    market_cache_enabled: bool
+    market_cache_redis_url: str
+    market_cache_file_dir: str
+    market_cache_cache_only: bool
 
 
 def score_symbols(
@@ -182,6 +187,11 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     time_penalty_per_bar = float(cfg.get("time_penalty_per_bar", 0.0))
     feed = str(cfg.get("feed", "iex"))
     provider = str(cfg.get("provider", "alpaca"))
+    cache_cfg = cfg.get("market_cache", {}) if isinstance(cfg, dict) else {}
+    market_cache_enabled = bool(cache_cfg.get("enabled", False))
+    market_cache_redis_url = str(cache_cfg.get("redis_url", "redis://redis:6379/0"))
+    market_cache_file_dir = str(cache_cfg.get("file_dir", "/data/market_cache"))
+    market_cache_cache_only = bool(cache_cfg.get("cache_only", True))
     return AISymbolFilterConfig(
         interval=interval,
         lookback_days=lookback_days,
@@ -217,6 +227,10 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         time_penalty_per_bar=time_penalty_per_bar,
         feed=feed,
         provider=provider,
+        market_cache_enabled=market_cache_enabled,
+        market_cache_redis_url=market_cache_redis_url,
+        market_cache_file_dir=market_cache_file_dir,
+        market_cache_cache_only=market_cache_cache_only,
     )
 
 
@@ -567,16 +581,31 @@ def _fetch_bars_yfinance(
     limit_symbols: int | None,
 ) -> dict[str, pd.DataFrame]:
     symbols = symbols[:limit_symbols] if limit_symbols else symbols
-    bars_by_symbol = fetch_yfinance_bars(
-        symbols,
-        cfg.lookback_days,
-        cfg.interval,
-        batch_size=100,
-        lowercase=True,
-        drop_zero_volume=False,
-    )
+    max_age = interval_to_seconds(cfg.interval)
+    if cfg.market_cache_enabled:
+        cache = MarketCache(cfg.market_cache_redis_url, cfg.market_cache_file_dir)
+        cached = cache.get_bars(symbols, cfg.interval, max_age_seconds=max_age, lowercase=True)
+        if cfg.market_cache_cache_only:
+            required = {"close", "volume"}
+            return {symbol: frame for symbol, frame in cached.items() if required.issubset(frame.columns)}
+        missing = [symbol for symbol in symbols if symbol not in cached]
+    else:
+        cached = {}
+        missing = symbols
+    if missing:
+        fetched = fetch_yfinance_bars(
+            missing,
+            cfg.lookback_days,
+            cfg.interval,
+            batch_size=100,
+            lowercase=True,
+            drop_zero_volume=False,
+        )
+        if cfg.market_cache_enabled and fetched:
+            cache.set_bars(fetched, cfg.interval, ttl_seconds=max_age)
+        cached.update(fetched)
     required = {"close", "volume"}
-    return {symbol: frame for symbol, frame in bars_by_symbol.items() if required.issubset(frame.columns)}
+    return {symbol: frame for symbol, frame in cached.items() if required.issubset(frame.columns)}
 
 
 def _fetch_with_retries(client: StockHistoricalDataClient, request: StockBarsRequest, timeout: int, retries: int):

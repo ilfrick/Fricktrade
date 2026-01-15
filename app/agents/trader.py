@@ -69,6 +69,7 @@ from app.strategies.market_maker import MarketMakerStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols_for_config
 from app.data.scanner import ScanFilters, filter_universe_by_price, load_symbol_venues, load_universe, scan_symbols
+from app.data.market_cache import build_market_cache, build_market_cache_config, interval_to_seconds
 from app.learning.drift import DriftMonitor
 from app.learning.registry import load_active_model, load_latest_feature_stats
 from app.brokers.config_utils import get_alpaca_account_cfg
@@ -140,6 +141,8 @@ class TradingAgent:
         self._ai_filter_executor = ThreadPoolExecutor(max_workers=1)
         self._ai_filter_future = None
         self._ai_filter_inflight_at: datetime | None = None
+        self._market_cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
+        self._market_cache = build_market_cache(cfg.get("market_cache", {}))
         self._pipeline = DecisionPipeline(self)
         self._broker_missing_at: datetime | None = None
         self._broker_missing_last_log = 0.0
@@ -2087,7 +2090,28 @@ class TradingAgent:
 
         self._symbols_by_strategy = {}
         ai_cfg = dyn_cfg.get("ai_filter", {})
+        if (
+            ai_cfg.get("enabled", False)
+            and self._market_cache_cfg.enabled
+            and self._market_cache_cfg.filtered_symbols_enabled
+            and ai_cfg.get("use_cached_symbols", False)
+            and self._market_cache is not None
+        ):
+            cache_interval = str(ai_cfg.get("interval", self.cfg.get("data", {}).get("interval", "1m")))
+            max_age = interval_to_seconds(cache_interval)
+            cached_symbols = self._market_cache.get_filtered_symbols(cache_interval, max_age_seconds=max_age)
+            if cached_symbols:
+                ordered = self._merge_with_positions(cached_symbols, portfolio, max_symbols)
+                self._symbols_by_strategy["__global__"] = ordered
+                for name in self._strategy_names:
+                    self._symbols_by_strategy[name] = ordered
+                self._symbols = ordered
+                self._dynamic_symbols = list(ordered)
+                self._dynamic_symbols_at = now
+                return
         if ai_cfg.get("enabled", False) and score_symbols is not None:
+            ai_cfg_payload = dict(ai_cfg)
+            ai_cfg_payload["market_cache"] = self.cfg.get("market_cache", {})
             if self._ai_filter_future is None:
                 logging.info("AI filter run starting; universe=%d", len(universe))
                 self._ai_filter_future = self._ai_filter_executor.submit(
@@ -2095,7 +2119,7 @@ class TradingAgent:
                     universe,
                     api_key,
                     api_secret,
-                    ai_cfg,
+                    ai_cfg_payload,
                     self.cfg.get("brokers", {}),
                 )
                 self._ai_filter_inflight_at = now
@@ -2145,6 +2169,11 @@ class TradingAgent:
             self._symbols = ordered
             self._dynamic_symbols = list(ordered)
             self._dynamic_symbols_at = now
+            if self._market_cache_cfg.enabled and self._market_cache_cfg.filtered_symbols_enabled:
+                cache_interval = str(ai_cfg.get("interval", self.cfg.get("data", {}).get("interval", "1m")))
+                ttl_seconds = interval_to_seconds(cache_interval)
+                if self._market_cache is not None:
+                    self._market_cache.set_filtered_symbols(ordered, cache_interval, ttl_seconds=ttl_seconds)
             return
         if ai_cfg.get("enabled", False) and score_symbols is None:
             logging.warning("AI filter enabled but module unavailable; falling back to scanner filters.")

@@ -4,6 +4,15 @@
 version: "3.9"
 
 services:
+  redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "0.0.0.0:6379:6379"
+    labels:
+      - "autoheal=true"
+    restart: unless-stopped
+
   ollama:
     image: ollama/ollama:latest
     volumes:
@@ -40,6 +49,22 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
+
+  market-cache:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config
+      - ./data:/data
+    command: ["python", "-m", "app.data.market_cache_service", "--config", "/app/config/config.yaml"]
+    depends_on:
+      - redis
+    labels:
+      - "autoheal=true"
     restart: unless-stopped
 
   api:

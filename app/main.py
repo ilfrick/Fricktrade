@@ -23,6 +23,7 @@ from app.backtest.agent_engine import run_agent_backtest
 from app.data.downloader import download_yfinance
 from app.data.ingestion import ingest_from_config
 from app.data.yfinance_utils import fetch_yfinance_bars
+from app.data.market_cache import build_market_cache, build_market_cache_config
 from app.learning.train_rl import train_from_config
 from app.learning.pretrain_orchestrator import run_pretrain
 from app.learning.evaluate import evaluate_from_config
@@ -59,9 +60,23 @@ def _empty_market_state() -> dict:
     }
 
 
-def _market_state_from_yf(symbol: str, lookback: int, interval: str, session_gain_mode: str):
-    bars = fetch_yfinance_bars([symbol], lookback, interval, batch_size=1, lowercase=False)
-    data = bars.get(symbol)
+def _market_state_from_yf(
+    symbol: str,
+    lookback: int,
+    interval: str,
+    session_gain_mode: str,
+    cache=None,
+    cache_only: bool = False,
+):
+    data = None
+    if cache is not None:
+        cached = cache.get_bars([symbol], interval, max_age_seconds=_interval_seconds(interval), lowercase=False)
+        data = cached.get(symbol)
+        if cache_only and (data is None or data.empty):
+            return _empty_market_state()
+    if data is None or data.empty:
+        bars = fetch_yfinance_bars([symbol], lookback, interval, batch_size=1, lowercase=False)
+        data = bars.get(symbol)
     if data is None or data.empty:
         return _empty_market_state()
     return _market_state_from_df(data, lookback, interval, session_gain_mode)
@@ -330,11 +345,21 @@ class IBKRMarketDataProvider:
 
 
 class YFinanceMarketDataProvider:
-    def __init__(self, lookback_days: int, interval: str, session_gain_mode: str, chunk_size: int = 100):
+    def __init__(
+        self,
+        lookback_days: int,
+        interval: str,
+        session_gain_mode: str,
+        chunk_size: int = 100,
+        cache=None,
+        cache_only: bool = False,
+    ):
         self._lookback = lookback_days
         self._interval = interval
         self._session_gain_mode = session_gain_mode
         self._chunk_size = chunk_size
+        self._market_cache = cache
+        self._cache_only = cache_only
         self._cache: dict[str, dict] = {}
         self._cache_at: datetime | None = None
 
@@ -356,15 +381,41 @@ class YFinanceMarketDataProvider:
 
     def _fetch_chunk(self, symbols: list[str]) -> dict[str, dict]:
         cache: dict[str, dict] = {}
-        bars = fetch_yfinance_bars(
-            symbols,
-            self._lookback,
-            self._interval,
-            batch_size=len(symbols) if symbols else 1,
-            lowercase=False,
-        )
-        for symbol, frame in bars.items():
-            cache[symbol] = _market_state_from_df(frame, self._lookback, self._interval, self._session_gain_mode)
+        missing = symbols
+        if self._market_cache is not None:
+            cached = self._market_cache.get_bars(
+                symbols,
+                self._interval,
+                max_age_seconds=_interval_seconds(self._interval),
+                lowercase=False,
+            )
+            for symbol, frame in cached.items():
+                cache[symbol] = _market_state_from_df(
+                    frame,
+                    self._lookback,
+                    self._interval,
+                    self._session_gain_mode,
+                )
+            missing = [symbol for symbol in symbols if symbol not in cached]
+            if self._cache_only:
+                return cache
+        if missing:
+            bars = fetch_yfinance_bars(
+                missing,
+                self._lookback,
+                self._interval,
+                batch_size=len(missing) if missing else 1,
+                lowercase=False,
+            )
+            for symbol, frame in bars.items():
+                cache[symbol] = _market_state_from_df(
+                    frame,
+                    self._lookback,
+                    self._interval,
+                    self._session_gain_mode,
+                )
+            if self._market_cache is not None and bars:
+                self._market_cache.set_bars(bars, self._interval, ttl_seconds=_interval_seconds(self._interval))
         return cache
 
     def _state_from_frame(self, frame: pd.DataFrame) -> dict | None:
@@ -613,6 +664,8 @@ def main():
         broker = _build_broker(cfg)
         agent = TradingAgent(broker, cfg)
         symbols = cfg["data"]["symbols"]
+        cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
+        market_cache = build_market_cache(cfg.get("market_cache", {}))
         provider = str(cfg.get("data", {}).get("provider", "yfinance")).lower()
         if provider == "alpaca":
             alpaca_cfg = _primary_alpaca_cfg(cfg)
@@ -638,6 +691,8 @@ def main():
                     cfg["data"]["lookback_days"],
                     cfg["data"]["interval"],
                     cfg["data"].get("session_gain_mode", "gap"),
+                    cache=market_cache,
+                    cache_only=cache_cfg.cache_only,
                 )
         elif provider == "brokers":
             providers: dict[str, object] = {}
@@ -698,18 +753,24 @@ def main():
                     cfg["data"]["lookback_days"],
                     cfg["data"]["interval"],
                     cfg["data"].get("session_gain_mode", "gap"),
+                    cache=market_cache,
+                    cache_only=cache_cfg.cache_only,
                 )
         elif provider == "yfinance":
             market_data_provider = YFinanceMarketDataProvider(
                 cfg["data"]["lookback_days"],
                 cfg["data"]["interval"],
                 cfg["data"].get("session_gain_mode", "gap"),
+                cache=market_cache,
+                cache_only=cache_cfg.cache_only,
             )
         else:
             market_data_provider = YFinanceMarketDataProvider(
                 cfg["data"]["lookback_days"],
                 cfg["data"]["interval"],
                 cfg["data"].get("session_gain_mode", "gap"),
+                cache=market_cache,
+                cache_only=cache_cfg.cache_only,
             )
         agent.loop(symbols, market_data_provider, 60)
         return
