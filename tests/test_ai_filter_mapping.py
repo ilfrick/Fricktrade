@@ -2,6 +2,9 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 import pandas as pd
+import pytest
+
+pytest.importorskip("gymnasium")
 
 from app.data import ai_filter
 
@@ -74,4 +77,5 @@ def _cfg() -> ai_filter.AISymbolFilterConfig:
         objective="return",
         time_penalty_per_bar=0.0,
         feed="iex",
+        provider="alpaca",
     )

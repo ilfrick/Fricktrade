@@ -3,6 +3,10 @@
 
 from datetime import datetime
 
+import pytest
+
+pytest.importorskip("prometheus_client")
+
 import pandas as pd
 
 from app.backtest.agent_engine import _SymbolState

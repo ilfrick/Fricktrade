@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
+import pytest
+
+pytest.importorskip("prometheus_client")
+
 from app.agents.trader import _group_exposure, _realized_volatility_pct, _var_cvar_from_history
 
 

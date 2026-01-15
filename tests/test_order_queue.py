@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("prometheus_client")
+
 from app.execution.order_queue import OrderQueue
 
 

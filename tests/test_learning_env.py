@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
+
+pytest.importorskip("gymnasium")
 
 from app.learning.env import TradingEnv
 

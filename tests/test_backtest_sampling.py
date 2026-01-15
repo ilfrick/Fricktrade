@@ -4,6 +4,10 @@
 from __future__ import annotations
 
 import json
+
+import pytest
+
+pytest.importorskip("prometheus_client")
 from datetime import datetime
 from pathlib import Path
 
