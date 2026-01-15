@@ -12,10 +12,13 @@ Acquire bars, scan symbols, and support AI filtering.
 - Scanner (snapshots): `app/data/scanner.py`.
 - News catalysts: `app/data/news.py`.
 - AI symbol filter (PPO): `app/data/ai_filter.py`.
+- Market cache: `app/data/market_cache.py` + `app/data/market_cache_service.py`.
 
 ## Configuration
 `config/config.yaml`:
 - `data.provider` (yfinance/alpaca/brokers; yfinance uses batched caching).
+- `market_cache.*` (Redis + file cache for live yfinance bars; optional cache-only reads)
+  - `market_cache.cache_only: true` disables direct yfinance calls in the trader/AI filter
 - `data.interval`
 - `data.lookback_days`
 - `data.symbols`
@@ -27,6 +30,7 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.dynamic_symbols.universe` (`brokers_active` uses Alpaca active universe today and merges positions/orders)
 - `data.dynamic_symbols.ai_filter.provider` (alpaca or yfinance bars for AI scoring)
 - `data.dynamic_symbols.ai_filter.coverage_filter` (drop symbols without bars)
+- `data.dynamic_symbols.ai_filter.use_cached_symbols` (prefer cached filtered symbols when available)
 - `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap)
 - `data.dynamic_symbols.cash_aware` and `data.dynamic_symbols.cash_cap_mode`
   (caps candidates to <= buying power; when buying power <= 0 or cap < price_min, only positions/open orders remain)

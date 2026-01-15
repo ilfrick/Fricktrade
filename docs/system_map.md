@@ -24,7 +24,12 @@ flowchart LR
         Scanner[Dynamic Scanner]
         AIFilter[AI Symbol Filter PPO]
         News[News Catalysts]
-        MarketData[Market Data Providers<br/>yfinance batch / alpaca / brokers]
+        MarketData[Market Data Providers<br/>yfinance / alpaca / brokers]
+    end
+    subgraph Cache[Market Cache]
+        MarketCache[Market Cache Service]
+        Redis[(Redis)]
+        FileCache[/File Cache/]
     end
     subgraph Learning[Learning]
         RLTrain[PPO Training]
@@ -54,8 +59,13 @@ flowchart LR
     Trader --> Strategies --> Orchestrator --> Risk --> Exec --> Queue --> Routing --> Brokers
     Scanner --> Trader
     AIFilter --> Trader
+    AIFilter --> MarketCache
     News --> Strategies
-    MarketData --> Trader
+    MarketData --> MarketCache
+    MarketCache --> Trader
+    MarketCache --> AIFilter
+    MarketCache --> Redis
+    MarketCache --> FileCache
     RLTrain --> Registry --> Trader
     RLOnline --> Registry
     Drift --> Trader
@@ -70,7 +80,7 @@ flowchart LR
 
 ## Entrypoints
 - `app/main.py`: CLI entrypoint for `trade`, `backtest`, `download`, `ingest`, `api`, `train`, `online-train`, `evaluate`, `pretrain-orchestrator`.
-- `docker-compose.yml`: service orchestration (trader, api, learner, tests-when-closed, healthwatch, etc).
+- `docker-compose.yml`: service orchestration (trader, market-cache, redis, api, learner, tests-when-closed, healthwatch, etc).
 
 ## Trading Loop (Core Runtime)
 - `app/agents/trader.py`: main loop orchestration; symbol refresh, market gating, strategy execution,
@@ -103,6 +113,8 @@ flowchart LR
 - `app/data/scanner.py`: symbol universe and price filter (Alpaca snapshots).
 - `app/data/ai_filter.py`: PPO-based symbol scorer with online updates; provider selects alpaca or yfinance bars.
 - `app/data/news.py`: broker-backed news/catalyst fetch.
+- `app/data/market_cache.py`: Redis + file cache client for live yfinance bars and filtered symbols.
+- `app/data/market_cache_service.py`: cache service that refreshes bars on the interval cadence.
 
 ## Learning (Trading Policy)
 - `app/learning/train_rl.py`: offline PPO training.

@@ -51,11 +51,13 @@ Centralize runtime settings for all subsystems.
 ## Common Toggles
 - Strategy selection: `strategy.name` or `strategy.names`.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
-- Live market data provider: `data.provider` (yfinance, alpaca, or brokers). yfinance uses batched caching.
+- Live market data provider: `data.provider` (yfinance, alpaca, or brokers). yfinance uses the market-cache service.
+- Market cache: `market_cache.*` (Redis + file fallback, cache-only reads, batch size).
 - AI filter: `data.dynamic_symbols.ai_filter.enabled` (PPO-based by default).
 - AI filter model: `data.dynamic_symbols.ai_filter.model_type` and `data.dynamic_symbols.ai_filter.rl.*`.
 - AI filter provider: `data.dynamic_symbols.ai_filter.provider` (alpaca or yfinance).
 - AI filter coverage filter: `data.dynamic_symbols.ai_filter.coverage_filter` (drop symbols without bars).
+- AI filter cached symbols: `data.dynamic_symbols.ai_filter.use_cached_symbols`.
 - Data quality validation: `data.quality.enabled`.
 - Data adjustments: `data.adjustments.enabled`.
 - Broker universe: `data.dynamic_symbols.universe: brokers_active` (Alpaca active universe today).

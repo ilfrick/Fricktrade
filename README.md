@@ -26,7 +26,7 @@ Fricktrade is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Bo
 ```mermaid
 flowchart LR
     subgraph Data["Market Data, Ingestion & Scanning"]
-        YF[yfinance live data<br/>batched cache]
+        YF[yfinance live data]
         AlpacaBars[Alpaca historical bars]
         AlpacaAssets[Alpaca assets/universe]
         BrokerUniverse[Broker universes<br/>enabled brokers - Alpaca today]
@@ -34,6 +34,11 @@ flowchart LR
         Scan[Dynamic symbol scanner]
         AIFilter[AI symbol filter<br/>online updates + news]
         News[News catalyst fetcher<br/>broker-backed - Alpaca today]
+    end
+    subgraph Cache["Market Cache"]
+        MarketCache[Market Cache Service]
+        Redis[(Redis)]
+        FileCache[/File Cache/]
     end
     subgraph Models["Model Store"]
         ModelStore[/data + /app/models/]
@@ -81,8 +86,11 @@ flowchart LR
         Healthwatch[Healthwatch Scheduler]
     end
 
-    YF --> Trader
-    YF --> AIFilter
+    YF --> MarketCache
+    MarketCache --> Redis
+    MarketCache --> FileCache
+    MarketCache --> Trader
+    MarketCache --> AIFilter
     AlpacaBars --> RLTrain
     AlpacaBars --> AgentBT
     AlpacaBars --> AIFilterTrain
@@ -92,6 +100,7 @@ flowchart LR
     BrokerUniverse --> AIFilter
     Scan --> Trader
     AIFilter --> Trader
+    AIFilter --> MarketCache
     AIFilter --> AIFeatures --> Orchestrator
     News --> Strat
     News --> AIFilter
@@ -155,9 +164,10 @@ flowchart LR
 - Optional TWAP/VWAP/POV slicing for larger orders
 
 ### Data & Scanning
-- Live data from `data.provider` (yfinance, alpaca, or brokers). yfinance uses a batched cache for live runs.
+- Live data from `data.provider` (yfinance, alpaca, or brokers). yfinance runs through the market-cache service (Redis + file fallback), with optional cache-only reads.
 - Historical bars from Alpaca for training/backtesting/ingestion
 - Dynamic scanner and PPO-based AI filter for symbol selection
+- The AI filter can publish cached symbol lists so the trader reads from cache when available.
 - News catalyst support (Alpaca news)
 
 ### Learning
@@ -185,6 +195,7 @@ Key sections:
 - `market.*`: venue gating, hours, symbol venue mapping
 - `brokers.*`: broker credentials and adapters (supports `brokers.<name>.accounts[]` or env auto-detect for multi-account routing)
 - `data.*`: symbols, dynamic scan, sources, AI filter
+- `market_cache.*`: Redis + file cache settings for live yfinance bars and filtered symbol lists
 - `news.*`: catalyst fetch config (optional `news.llm.*` for Ollama gating; default base_url `http://ollama:11434`)
 - `strategy.*`: strategy selection and params
 - `orchestrator.*`: RL orchestrator settings

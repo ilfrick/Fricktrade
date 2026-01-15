@@ -7,6 +7,7 @@
 - `http://localhost:18081/health`
 - Grafana dashboards for orders, PnL, positions, and broker status.
 - Trader logs for market-open gating and AI filter status.
+- Market-cache logs for yfinance fetch cadence and cache refresh.
 
 ## Checkpointing and Resilience
 - Checkpoint settings: `checkpointing.*` in `config/config.yaml`.
@@ -29,6 +30,7 @@
 
 ## Logs
 - Use `docker compose logs -f trader`.
+- Use `docker compose logs -f market-cache` for yfinance cache refresh status.
 - Watch AI filter heartbeat and order queue messages.
 - Audit/compliance logs rotate based on `monitoring.*.retention_days`.
 

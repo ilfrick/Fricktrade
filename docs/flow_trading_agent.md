@@ -16,7 +16,7 @@ flowchart TD
     E --> F{Market Open?}
     F -- No --> G[Sleep Interval]
     G --> A
-    F -- Yes --> H[Per-Symbol Market Data (yfinance batch)]
+    F -- Yes --> H[Per-Symbol Market Data (market-cache)]
     H --> I[Generate Strategy Signals + Features]
     I --> J[Drift Monitor + Auto Rollback]
     J --> K[Orchestrator Direct Strategy Selection]
@@ -61,9 +61,10 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[Universe Broker Active] --> B[AI Filter Score]
-    Bars[Bars Provider (yfinance/alpaca)] --> B
+    Bars[Market Cache (Redis + file)] --> B
     B --> C[Coverage Filter]
     C --> D[Cap to max_symbols]
     D --> E[Merge Positions + Open Orders]
     E --> F[Active Symbol List]
+    F --> Bars
 ```

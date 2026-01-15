@@ -68,7 +68,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Hardened secret masking/merge for data sources and isolated per-symbol loop errors.
 - Added trading loop modularization roadmap in docs.
 - Renamed documentation branding to Fricktrade.
-- Set live data provider to yfinance with batched caching for live runs.
+- Set live data provider to yfinance with a dedicated market-cache service (Redis + file fallback).
 - Extracted per-batch symbol execution helper in the trading loop (Phase 6 refactor prep).
 - Extracted cycle maintenance helper in the trading loop (Phase 5 refactor prep).
 - Extracted market-open and order-queue helpers in the trading loop (Phase 4 refactor prep).
