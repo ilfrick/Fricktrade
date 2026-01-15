@@ -406,7 +406,7 @@ benchmarking:
   plot_dir: /data/reports/benchmark_plots
   pdf_path: /data/reports/benchmark_report.pdf
 data:
-  provider: brokers
+  provider: yfinance
   symbols: []
   interval: 1m
   lookback_days: 7
@@ -436,6 +436,7 @@ data:
     retries: 2
     ai_filter:
       enabled: true
+      provider: yfinance
       interval: 1m
       lookback_days: 2
       window: 20

@@ -15,6 +15,7 @@ import math
 import gymnasium as gym
 import numpy as np
 import pandas as pd
+import yfinance as yf
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -62,6 +63,7 @@ class AISymbolFilterConfig:
     objective: str
     time_penalty_per_bar: float
     feed: str
+    provider: str
 
 
 def score_symbols(
@@ -179,6 +181,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     objective = str(cfg.get("objective", "return"))
     time_penalty_per_bar = float(cfg.get("time_penalty_per_bar", 0.0))
     feed = str(cfg.get("feed", "iex"))
+    provider = str(cfg.get("provider", "alpaca"))
     return AISymbolFilterConfig(
         interval=interval,
         lookback_days=lookback_days,
@@ -213,6 +216,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         objective=objective,
         time_penalty_per_bar=time_penalty_per_bar,
         feed=feed,
+        provider=provider,
     )
 
 
@@ -521,6 +525,8 @@ def _fetch_bars(
     cfg: AISymbolFilterConfig,
     limit_symbols: int | None,
 ) -> dict[str, pd.DataFrame]:
+    if cfg.provider.lower() == "yfinance":
+        return _fetch_bars_yfinance(symbols, cfg, limit_symbols)
     client = StockHistoricalDataClient(api_key, api_secret)
     symbols = symbols[:limit_symbols] if limit_symbols else symbols
     end = datetime.utcnow()
@@ -552,6 +558,46 @@ def _fetch_bars(
                     bars_by_symbol[str(symbol)] = frame.drop(columns=["symbol"]).sort_index()
             else:
                 logging.warning("AI filter bars missing symbol index for %d symbols; skipping chunk.", len(chunk))
+    return bars_by_symbol
+
+
+def _fetch_bars_yfinance(
+    symbols: list[str],
+    cfg: AISymbolFilterConfig,
+    limit_symbols: int | None,
+) -> dict[str, pd.DataFrame]:
+    symbols = symbols[:limit_symbols] if limit_symbols else symbols
+    bars_by_symbol: dict[str, pd.DataFrame] = {}
+    for symbol in symbols:
+        try:
+            data = yf.download(
+                tickers=symbol,
+                period=f"{cfg.lookback_days}d",
+                interval=cfg.interval,
+                auto_adjust=True,
+                progress=False,
+            )
+        except Exception as exc:
+            logging.warning("AI filter yfinance fetch failed for %s: %s", symbol, exc)
+            continue
+        if data is None or data.empty:
+            continue
+        if getattr(data.columns, "nlevels", 1) > 1:
+            data = data.copy()
+            data.columns = data.columns.get_level_values(0)
+        data = data.rename(
+            columns={
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Volume": "volume",
+            }
+        )
+        required = {"close", "volume"}
+        if not required.issubset(set(data.columns)):
+            continue
+        bars_by_symbol[symbol] = data.sort_index()
     return bars_by_symbol
 
 
