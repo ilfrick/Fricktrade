@@ -188,6 +188,8 @@ docker compose run --rm api
 - Trading is paused when all configured markets are closed.
 - Strategy emits `buy`, `sell`, `exit`, or `hold`; `exit` closes the position.
 - Risk checks are threshold-based and order sizing is cash-aware using broker equity/cash plus exposure caps.
+- RL feature vectors now include risk parameters (limits, vol/VAR haircuts, kill switches) and the latest per-symbol risk decision (allow/block + reason + action); changing risk feature shape requires retraining affected RL models.
+- RL feature set now includes risk parameters (position/leverage limits, vol/var haircuts, kill switches) and the latest per-symbol risk decision (action, allow/block, reason) so models see the risk posture.
 - Agent-aligned backtest loads per-symbol CSVs from `backtest.data_dir` (legacy SMA engine uses the first matching CSV).
 - API `/config` masks Alpaca keys before returning; `/config/update` accepts YAML updates and `/restart` triggers a graceful container restart.
 - Grafana auto-provisions the "Fricktrade Overview" dashboard with trade counts/rates, PnL, and drawdown.

@@ -24,6 +24,7 @@ try:
 except Exception:
     ai_filter_module = None
 
+from app.learning.features import risk_feature_vector, risk_feature_size
 from app.brokers.config_utils import get_alpaca_account_cfg
 
 
@@ -342,6 +343,7 @@ class RLStrategyOrchestrator:
         self._strategy_names: list[str] = []
         self._ai_filter_cfg = cfg.get("data", {}).get("dynamic_symbols", {}).get("ai_filter", {})
         self._alpaca_cfg = get_alpaca_account_cfg(cfg)
+        self._risk_cfg = cfg.get("risk", {})
         self._buffer: deque[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = deque(maxlen=self.cfg.buffer_size)
         self._last_state: dict[str, dict[str, object]] = {}
         self._feature_history: dict[str, deque[list[float]]] = {}
@@ -493,7 +495,12 @@ class RLStrategyOrchestrator:
         if self._model is not None:
             return
         self._strategy_names = strategy_names
-        self._input_dim = len(_feature_vector({})) + _ai_feature_dim() + len(strategy_names) * 2 + _order_feature_dim()
+        self._input_dim = (
+            len(_feature_vector({}, self._risk_cfg))
+            + _ai_feature_dim()
+            + len(strategy_names) * 2
+            + _order_feature_dim()
+        )
         self._output_dim = len(strategy_names)
         if self.cfg.model_type == "lstm":
             self._model = _LSTMModel(
@@ -741,7 +748,7 @@ class RLStrategyOrchestrator:
         return sequence
 
     def _state_features(self, symbol: str, market_state: dict, signals: list[dict] | None) -> list[float]:
-        base = _feature_vector(market_state)
+        base = _feature_vector(market_state, self._risk_cfg)
         actions = signals or []
         ai_features = self._ai_features(symbol, market_state, actions)
         signal_features = _signal_feature_vector(self._strategy_names, actions)
@@ -895,9 +902,11 @@ _FEATURE_NAMES = [
 ]
 
 
-def _feature_vector(market_state: dict) -> list[float]:
+def _feature_vector(market_state: dict, risk_cfg: dict | None = None) -> list[float]:
     features = _extract_features(market_state) if market_state else {}
-    return [float(features.get(name, 0.0) or 0.0) for name in _FEATURE_NAMES]
+    vec = [float(features.get(name, 0.0) or 0.0) for name in _FEATURE_NAMES]
+    risk_vec = risk_feature_vector(risk_cfg or {}, market_state.get("risk_outcome") if market_state else None, True)
+    return vec + risk_vec
 
 
 def _ai_feature_dim() -> int:

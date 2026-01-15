@@ -13,6 +13,7 @@ Additional ML: the AI symbol filter uses PPO (stable-baselines3) with online upd
 - Online updates: `app/learning/online_update.py`.
 - Evaluation: `app/learning/evaluate.py`.
 - Features: `app/learning/features.py`.
+- Risk-aware features: RL observations now include risk config parameters (limits, vol/VAR haircuts, kill switches) and the last per-symbol risk decision (allow/block, reason, action). Changes to risk feature shape require retraining.
 - Changing feature shapes (e.g., adding `buying_power_pct`) requires retraining; old checkpoints will be rejected.
 - Registry: `app/learning/registry.py`.
 - Drift monitoring: `app/learning/drift.py`.

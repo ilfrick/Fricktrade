@@ -26,6 +26,7 @@ class FeeAwareRLPolicyStrategy(RLPolicyStrategy):
             feature_config=feature_config,
             drift_monitor=drift_monitor,
             include_features=include_features,
+            risk_cfg=risk_cfg,
         )
         self.broker_fees = broker_fees or {}
         self.fee_guard = fee_guard or {}

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from pathlib import Path
 from stable_baselines3 import PPO
 
-from app.learning.features import build_observation, observation_size
+from app.learning.features import build_observation, observation_size, risk_feature_vector
 from app.strategies.base import Strategy
 
 if TYPE_CHECKING:
@@ -25,11 +25,13 @@ class RLPolicyStrategy(Strategy):
         feature_config: dict | None = None,
         drift_monitor: "DriftMonitor | None" = None,
         include_features: bool = False,
+        risk_cfg: dict | None = None,
     ):
         self.window_size = window_size
         self.device = _resolve_device(device)
         self.model_path = model_path
         self.feature_config = feature_config or {}
+        self._risk_cfg = risk_cfg or {}
         self._drift_monitor = drift_monitor
         self._include_features = include_features
         self.model = None
@@ -78,6 +80,8 @@ class RLPolicyStrategy(Strategy):
         portfolio = market_state.get("portfolio", {}) if isinstance(market_state, dict) else {}
         cash_pct = float(portfolio.get("cash_pct", 1.0) or 1.0)
         buying_power_pct = float(portfolio.get("buying_power_pct", cash_pct) or cash_pct)
+        risk_outcome = market_state.get("risk_outcome") if isinstance(market_state, dict) else None
+        risk_features = risk_feature_vector(self._risk_cfg, risk_outcome, include_decision=True)
         obs = build_observation(
             closes=closes,
             volumes=volumes,
@@ -86,6 +90,7 @@ class RLPolicyStrategy(Strategy):
             cash_pct=cash_pct,
             buying_power_pct=buying_power_pct,
             feature_config=self.feature_config,
+            risk_features=risk_features,
         )
         if self._drift_monitor:
             self._drift_monitor.update_features(obs)

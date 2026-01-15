@@ -30,3 +30,12 @@
 - System map: `docs/system_map.md`.
 - Operator guide: `docs/operator_guide.md`.
 - Subsystems: `docs/` index in `docs/README.md`.
+
+## Subsystem Structure (paths)
+- Agents: `app/agents/trader.py` (loop) and `app/agents/orchestrator.py` (strategy selection).
+- Strategies: `app/strategies/` (rule-based + RL) wired in `strategy.params.*`.
+- Risk: `app/risk/manager.py`, `app/risk/haircut.py` (caps, VaR/CVaR, haircuts, kill switches).
+- Data: `app/data/` (scanner, AI symbol filter, news) and `app/utils/market.py` (market hours).
+- Execution: `app/execution/` (order sizing/algos/queues, broker routing).
+- Learning: `app/learning/` (env, features, training, drift, registry).
+- Monitoring/API: `app/api/`, `app/monitoring/metrics.py`, `docs/monitoring.md`.
