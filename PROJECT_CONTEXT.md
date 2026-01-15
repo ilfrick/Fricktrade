@@ -41,7 +41,7 @@ can reload context quickly. Keep it updated when the setup changes.
 
 ## Dev AI Filter (Dynamic Symbols)
 - Replaced heuristic scanner with AI filter (`app/data/ai_filter.py`) that scores the full Alpaca US universe.
-- AI filter trains on Alpaca historical bars (IEX feed) using PPO and stores the model at `/data/ai_symbol_filter.zip`.
+- AI filter trains on bars from the configured provider (now yfinance) and stores the model at `/data/ai_symbol_filter.zip`.
 - `config/config.yaml` uses `data.dynamic_symbols.ai_filter.*` and `data.symbols: []` (no default symbols).
 
 ## Dev Backtest Data
@@ -68,7 +68,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Hardened secret masking/merge for data sources and isolated per-symbol loop errors.
 - Added trading loop modularization roadmap in docs.
 - Renamed documentation branding to Fricktrade.
-- Set live data provider default to brokers for faster market data.
+- Set live data provider to yfinance with batched caching for live runs.
 - Extracted per-batch symbol execution helper in the trading loop (Phase 6 refactor prep).
 - Extracted cycle maintenance helper in the trading loop (Phase 5 refactor prep).
 - Extracted market-open and order-queue helpers in the trading loop (Phase 4 refactor prep).
@@ -126,7 +126,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Added optional Ollama-based LLM gate for news catalysts (disabled by default).
 - Fixed live lookback slicing to use bars-per-day for intraday intervals.
 - Added multi-broker live market data provider routing for Alpaca/IBKR.
-- Switched live market data provider to Alpaca (batch bars) to avoid yfinance serial downloads.
+- Switched live market data provider to batched yfinance and added AI filter coverage filtering.
 - Added orchestrator strategy selection counter and Grafana table.
 - Updated PnL to use broker last_equity when available.
 - Fixed PnL/drawdown metrics to track equity vs start/peak.

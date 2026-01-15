@@ -15,6 +15,7 @@ Acquire bars, scan symbols, and support AI filtering.
 
 ## Configuration
 `config/config.yaml`:
+- `data.provider` (yfinance/alpaca/brokers; yfinance uses batched caching).
 - `data.interval`
 - `data.lookback_days`
 - `data.symbols`
@@ -24,6 +25,8 @@ Acquire bars, scan symbols, and support AI filtering.
 - `data.adjustments.*` (optional split/dividend adjustment files)
 - `data.dynamic_symbols.*`
 - `data.dynamic_symbols.universe` (`brokers_active` uses Alpaca active universe today and merges positions/orders)
+- `data.dynamic_symbols.ai_filter.provider` (alpaca or yfinance bars for AI scoring)
+- `data.dynamic_symbols.ai_filter.coverage_filter` (drop symbols without bars)
 - `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap)
 - `data.dynamic_symbols.cash_aware` and `data.dynamic_symbols.cash_cap_mode`
   (caps candidates to <= buying power; when buying power <= 0 or cap < price_min, only positions/open orders remain)

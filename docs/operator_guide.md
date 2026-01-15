@@ -25,7 +25,7 @@
 - Manual kill switches: `kill_switch.*`.
 
 ## Data and Symbols
-- Live data provider: `data.provider` (brokers/alpaca/yfinance).
+- Live data provider: `data.provider` (yfinance/alpaca/brokers). yfinance uses batched caching.
 - Dynamic symbols: `data.dynamic_symbols.*`.
 - AI symbol filter: `data.dynamic_symbols.ai_filter.*` (PPO-based).
 

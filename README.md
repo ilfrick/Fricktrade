@@ -26,7 +26,7 @@ Fricktrade is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Bo
 ```mermaid
 flowchart LR
     subgraph Data["Market Data, Ingestion & Scanning"]
-        YF[yfinance live data]
+        YF[yfinance live data<br/>batched cache]
         AlpacaBars[Alpaca historical bars]
         AlpacaAssets[Alpaca assets/universe]
         BrokerUniverse[Broker universes<br/>enabled brokers - Alpaca today]
@@ -82,6 +82,7 @@ flowchart LR
     end
 
     YF --> Trader
+    YF --> AIFilter
     AlpacaBars --> RLTrain
     AlpacaBars --> AgentBT
     AlpacaBars --> AIFilterTrain
@@ -154,7 +155,7 @@ flowchart LR
 - Optional TWAP/VWAP/POV slicing for larger orders
 
 ### Data & Scanning
-- Live data from `data.provider` (brokers/alpaca/yfinance); yfinance is fallback when broker providers are unavailable.
+- Live data from `data.provider` (yfinance, alpaca, or brokers). yfinance uses a batched cache for live runs.
 - Historical bars from Alpaca for training/backtesting/ingestion
 - Dynamic scanner and PPO-based AI filter for symbol selection
 - News catalyst support (Alpaca news)
@@ -293,6 +294,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Switched live market data and AI filter bars to batched yfinance with coverage filtering.
 - Added live profiling scripts for the trading loop.
 - Documented configuration precedence and `.env` usage.
 - Added local Alertmanager SMTP config rendering and `.env` keys.

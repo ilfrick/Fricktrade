@@ -24,7 +24,7 @@ flowchart LR
         Scanner[Dynamic Scanner]
         AIFilter[AI Symbol Filter PPO]
         News[News Catalysts]
-        MarketData[Market Data Providers]
+        MarketData[Market Data Providers<br/>yfinance batch / alpaca / brokers]
     end
     subgraph Learning[Learning]
         RLTrain[PPO Training]
@@ -100,8 +100,8 @@ flowchart LR
 ## Data and Market State
 - `app/data/downloader.py`: yfinance historical download.
 - `app/data/ingestion.py`: ingestion from yfinance/alpaca/stooq/alphavantage.
-- `app/data/scanner.py`: symbol universe and price filter.
-- `app/data/ai_filter.py`: PPO-based symbol scorer with online updates.
+- `app/data/scanner.py`: symbol universe and price filter (Alpaca snapshots).
+- `app/data/ai_filter.py`: PPO-based symbol scorer with online updates; provider selects alpaca or yfinance bars.
 - `app/data/news.py`: broker-backed news/catalyst fetch.
 
 ## Learning (Trading Policy)

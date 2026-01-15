@@ -12,6 +12,7 @@ Scores a large universe of symbols and returns an ordered list for trading.
 - Builds features from the latest rolling window of returns and volumes.
 - Adds a news catalyst flag per symbol to the feature vector.
 - Scores each symbol and sorts by descending score.
+- Fetches bars from the configured provider (`alpaca` or `yfinance`).
 - Optionally performs lightweight online updates on the latest bars.
 - While a refresh is in-flight, the trading loop keeps using the last valid symbol list.
 - On startup, the trader seeds the symbol list from the last saved checkpoint while the filter runs.
@@ -38,6 +39,8 @@ When signal features are added or removed, retrain the PPO model to avoid shape 
 - `data.dynamic_symbols.ai_filter.max_samples_per_symbol`
 - `data.dynamic_symbols.ai_filter.objective`
 - `data.dynamic_symbols.ai_filter.time_penalty_per_bar`
+- `data.dynamic_symbols.ai_filter.provider` (`alpaca` or `yfinance`)
+- `data.dynamic_symbols.ai_filter.coverage_filter` (drop symbols with no bars before scoring)
 - `data.dynamic_symbols.ai_filter.feed`
 - `data.dynamic_symbols.ai_filter.timeout_seconds`
 - `data.dynamic_symbols.ai_filter.retries`
