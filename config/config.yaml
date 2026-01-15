@@ -409,7 +409,7 @@ data:
   provider: yfinance
   symbols: []
   interval: 5m
-  lookback_days: 2
+  lookback_days: 7
   session_gain_mode: gap
   quality:
     enabled: true
