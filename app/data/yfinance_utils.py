@@ -16,7 +16,7 @@ def fetch_yfinance_bars(
     *,
     batch_size: int = 100,
     lowercase: bool = False,
-    drop_zero_volume: bool = True,
+    drop_zero_volume: bool = False,
 ) -> dict[str, pd.DataFrame]:
     symbols = [s for s in symbols if s]
     if not symbols:

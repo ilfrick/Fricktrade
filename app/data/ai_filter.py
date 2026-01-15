@@ -573,7 +573,7 @@ def _fetch_bars_yfinance(
         cfg.interval,
         batch_size=100,
         lowercase=True,
-        drop_zero_volume=True,
+        drop_zero_volume=False,
     )
     required = {"close", "volume"}
     return {symbol: frame for symbol, frame in bars_by_symbol.items() if required.issubset(frame.columns)}

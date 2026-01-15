@@ -5,17 +5,19 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from app.learning.data import load_csv_data
 from app.learning.drift import compute_feature_stats
 from app.learning.env import TradingEnv
 from app.learning.evaluate import evaluate_model
-from app.learning.registry import register_model, set_active_model
+from app.learning.registry import build_active_record, register_model, set_active_model
 
 
 def train_from_config(cfg: dict, resume: bool | None = None) -> str:
@@ -70,8 +72,20 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
             model = None
     if model is None:
         model = PPO("MlpPolicy", vec_env, verbose=1, device=device)
+    checkpoint_interval = int(training_cfg.get("checkpoint_interval_steps", 0))
+    publish_in_progress = bool(training_cfg.get("publish_in_progress", False))
+    callback = None
+    if checkpoint_interval > 0:
+        registry_cfg = learning_cfg.get("registry", {}) or {}
+        active_path = str(registry_cfg.get("active_path", "/app/models/model_active.json"))
+        callback = _InProgressCheckpointCallback(
+            model_path=model_path,
+            active_path=active_path,
+            save_freq=checkpoint_interval,
+            publish_active=publish_in_progress,
+        )
     logging.info("Starting RL training for %d timesteps", timesteps)
-    model.learn(total_timesteps=timesteps)
+    model.learn(total_timesteps=timesteps, callback=callback)
 
     output_path = Path(model_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -135,6 +149,29 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
             if publish_mode == "latest" or (publish_mode == "best" and is_best):
                 set_active_model(active_path, record, reason=publish_mode)
     return str(output_path)
+
+
+class _InProgressCheckpointCallback(BaseCallback):
+    def __init__(self, model_path: str, active_path: str, save_freq: int, publish_active: bool):
+        super().__init__()
+        self._model_path = model_path
+        self._active_path = active_path
+        self._save_freq = max(int(save_freq), 1)
+        self._publish_active = publish_active
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps and self.num_timesteps % self._save_freq == 0:
+            self._save_checkpoint()
+        return True
+
+    def _save_checkpoint(self) -> None:
+        tmp_path = f"{self._model_path}.tmp"
+        self.model.save(tmp_path)
+        tmp_file = tmp_path if tmp_path.endswith(".zip") else f"{tmp_path}.zip"
+        os.replace(tmp_file, self._model_path)
+        if self._publish_active:
+            record = build_active_record(self._model_path)
+            set_active_model(self._active_path, record, reason="checkpoint")
 
 
 def _resolve_device(device: str) -> str:

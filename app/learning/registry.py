@@ -78,6 +78,20 @@ def set_active_model(active_path: str, record: dict[str, Any], reason: str) -> N
         logging.warning("Failed to update active model pointer at %s", active_path)
 
 
+def build_active_record(model_path: str, best_model_path: str | None = None) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "ts": datetime.utcnow().isoformat(),
+        "model_path": model_path,
+        "model_sha256": _hash_file(model_path),
+        "model_bytes": _file_size(model_path),
+    }
+    if best_model_path:
+        record["best_model_path"] = best_model_path
+        record["best_model_sha256"] = _hash_file(best_model_path)
+        record["best_model_bytes"] = _file_size(best_model_path)
+    return record
+
+
 def load_active_model(active_path: str) -> dict[str, Any] | None:
     path = Path(active_path)
     if not path.exists():
