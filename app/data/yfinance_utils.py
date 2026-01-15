@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import pandas as pd
 import yfinance as yf
@@ -17,6 +18,7 @@ def fetch_yfinance_bars(
     batch_size: int = 100,
     lowercase: bool = False,
     drop_zero_volume: bool = False,
+    delay_seconds: float = 0.0,
 ) -> dict[str, pd.DataFrame]:
     symbols = [s for s in symbols if s]
     if not symbols:
@@ -49,6 +51,8 @@ def fetch_yfinance_bars(
             cleaned = _clean_yfinance_frame(data, lowercase=lowercase, drop_zero_volume=drop_zero_volume)
             if cleaned is not None:
                 bars_by_symbol[chunk[0]] = cleaned
+        if delay_seconds > 0 and idx + batch_size < len(symbols):
+            time.sleep(delay_seconds)
     return bars_by_symbol
 
 

@@ -63,6 +63,7 @@ def main() -> None:
                 batch_size=batch_size,
                 lowercase=False,
                 drop_zero_volume=False,
+                delay_seconds=5.0,
             )
             cache.set_bars(bars, interval, ttl_seconds=interval_seconds)
             last_run[interval] = now
