@@ -437,6 +437,7 @@ data:
     ai_filter:
       enabled: true
       provider: yfinance
+      coverage_filter: true
       interval: 1m
       lookback_days: 2
       window: 20

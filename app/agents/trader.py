@@ -110,6 +110,7 @@ class TradingAgent:
         self._started_at = datetime.utcnow()
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
+        self._risk_outcomes: dict[str, dict] = {}
         self._news_executor = ThreadPoolExecutor(max_workers=1)
         self._news_future = None
         self._news_inflight_at: datetime | None = None
@@ -238,6 +239,14 @@ class TradingAgent:
         if broker_name:
             SKIPPED_ORDERS_BY_BROKER.labels(broker=broker_name, symbol=symbol, side=action, reason=reason).inc()
 
+    def _record_risk_outcome(self, symbol: str, action: str, allowed: bool, reason: str) -> None:
+        self._risk_outcomes[symbol] = {
+            "action": action,
+            "allowed": allowed,
+            "reason": reason,
+            "at": datetime.utcnow().isoformat(),
+        }
+
     def _build_strategy(self, name: str, params: dict):
         if name == "rl_policy":
             if self.learning_cfg.get("enabled"):
@@ -253,6 +262,7 @@ class TradingAgent:
                         feature_config=feature_config,
                         drift_monitor=self._drift_monitor,
                         include_features=self._include_feature_snapshots,
+                        risk_cfg=self.cfg.get("risk", {}),
                     )
                 except (FileNotFoundError, ValueError) as exc:
                     logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
@@ -746,12 +756,14 @@ class TradingAgent:
             trace["short_exposure_pct"] = market_state.get("short_exposure_pct")
             trace["leverage"] = market_state.get("leverage")
         if self._is_account_blocked(broker_name):
+            self._record_risk_outcome(symbol, action, False, "account_blocked")
             self._record_skip(symbol, action, "account_blocked", broker_name)
             logging.info("Skipping %s for %s: account blocked", action, symbol)
             self._emit_decision_trace(trace, "skip", "account_blocked", "account")
             return None
         var_reason = self._var_limit_reason(broker_name)
         if var_reason:
+            self._record_risk_outcome(symbol, action, False, var_reason)
             self._record_skip(symbol, action, var_reason, broker_name)
             logging.info("Skipping %s for %s: %s", action, symbol, var_reason)
             self._emit_decision_trace(trace, "skip", var_reason, "risk")
@@ -762,11 +774,13 @@ class TradingAgent:
             current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
             can_short = self._can_short(symbol, portfolio)
             if current_qty <= 0 and not can_short:
+                self._record_risk_outcome(symbol, action, False, "shorting_disabled")
                 self._record_skip(symbol, action, "shorting_disabled", broker_name)
                 logging.info("Skipping %s for %s: shorting disabled", action, symbol)
                 self._emit_decision_trace(trace, "skip", "shorting_disabled", "shorting")
                 return None
         if self._is_action_blocked(symbol, action):
+            self._record_risk_outcome(symbol, action, False, "limit_block")
             self._record_skip(symbol, action, "limit_block", broker_name)
             logging.info("Skipping %s for %s: limits block action", action, symbol)
             self._emit_decision_trace(trace, "skip", "limit_block", "limits")
@@ -779,16 +793,19 @@ class TradingAgent:
             trace["haircuts"] = self._haircut_snapshot(market_state)
         if qty <= 0:
             if skip_reason:
+                self._record_risk_outcome(symbol, action, False, str(skip_reason))
                 self._record_skip(symbol, action, str(skip_reason), broker_name)
                 logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
                 self._emit_decision_trace(trace, "skip", str(skip_reason), "sizing")
             return None
         if self._violates_exposure_caps(symbol, action, qty, last_price, portfolio):
+            self._record_risk_outcome(symbol, action, False, "exposure_cap")
             self._record_skip(symbol, action, "exposure_cap", broker_name)
             logging.info("Skipping %s for %s: exposure caps exceeded", action, symbol)
             self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
             return None
         if self._violates_order_limits(symbol, action, qty, last_price):
+            self._record_risk_outcome(symbol, action, False, "order_limit")
             self._record_skip(symbol, action, "order_limit", broker_name)
             logging.info("Skipping %s for %s: order limits", action, symbol)
             self._emit_decision_trace(trace, "skip", "order_limit", "limits")
@@ -799,6 +816,7 @@ class TradingAgent:
 
         now = datetime.utcnow()
         if self._is_cooldown_active(market_state, now):
+            self._record_risk_outcome(symbol, action, False, "cooldown")
             self._record_skip(symbol, action, "cooldown", broker_name)
             logging.info("Skipping %s for %s: cooldown", action, symbol)
             self._emit_decision_trace(trace, "skip", "cooldown", "cooldown")
@@ -808,10 +826,12 @@ class TradingAgent:
             short_exposure_pct=market_state.get("short_exposure_pct", 0.0),
             leverage=market_state.get("leverage", 1.0),
         ):
+            self._record_risk_outcome(symbol, action, False, "risk_block")
             self._record_skip(symbol, action, "risk_block", broker_name)
             logging.info("Skipping %s for %s: risk limits exceeded", action, symbol)
             self._emit_decision_trace(trace, "skip", "risk_block", "risk")
             return None
+        self._record_risk_outcome(symbol, action, True, "ok")
 
         order_type = str(order_meta.get("order_type") or "market").lower()
         limit_price = order_meta.get("limit_price")
@@ -1282,6 +1302,7 @@ class TradingAgent:
             try:
                 market_state = market_data_provider(sym)
                 self._enrich_market_state(market_state, portfolio, sym)
+                market_state["risk_outcome"] = self._risk_outcomes.get(sym, {})
                 if broker_override:
                     market_state["broker_override"] = broker_override
                 market_state["strategy_symbols"] = self._symbols_by_strategy
@@ -2109,6 +2130,14 @@ class TradingAgent:
                         self._update_signal_metrics_from_values(sym, vals)
             if not ordered:
                 ordered = list(universe)
+            if ai_cfg.get("coverage_filter", False) and signal_map:
+                covered = {sym for sym, vals in signal_map.items() if vals}
+                if covered:
+                    before = len(ordered)
+                    ordered = [sym for sym in ordered if sym in covered]
+                    removed = before - len(ordered)
+                    if removed > 0:
+                        logging.info("AI filter coverage removed %d symbols without bars.", removed)
             ordered = self._merge_with_positions(ordered, portfolio, max_symbols)
             self._symbols_by_strategy["__global__"] = ordered
             for name in self._strategy_names:

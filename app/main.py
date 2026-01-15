@@ -330,6 +330,79 @@ class IBKRMarketDataProvider:
         return self._cache.get(symbol, _empty_market_state())
 
 
+class YFinanceMarketDataProvider:
+    def __init__(self, lookback_days: int, interval: str, session_gain_mode: str, chunk_size: int = 100):
+        self._lookback = lookback_days
+        self._interval = interval
+        self._session_gain_mode = session_gain_mode
+        self._chunk_size = chunk_size
+        self._cache: dict[str, dict] = {}
+        self._cache_at: datetime | None = None
+
+    def prepare(self, symbols: list[str]) -> None:
+        if not symbols:
+            return
+        now = datetime.now(timezone.utc)
+        refresh_seconds = _interval_seconds(self._interval)
+        if self._cache_at and (now - self._cache_at).total_seconds() < refresh_seconds:
+            return
+        cache: dict[str, dict] = {}
+        for chunk in _chunked(symbols, self._chunk_size):
+            cache.update(self._fetch_chunk(chunk))
+        self._cache = cache
+        self._cache_at = now
+
+    def __call__(self, symbol: str) -> dict:
+        return self._cache.get(symbol, _empty_market_state())
+
+    def _fetch_chunk(self, symbols: list[str]) -> dict[str, dict]:
+        cache: dict[str, dict] = {}
+        try:
+            data = yf.download(
+                tickers=" ".join(symbols),
+                period=f"{self._lookback}d",
+                interval=self._interval,
+                auto_adjust=True,
+                progress=False,
+            )
+        except Exception as exc:
+            logging.warning("yfinance download failed for %d symbols: %s", len(symbols), exc)
+            return cache
+        if data is None or data.empty:
+            return cache
+        if getattr(data.columns, "nlevels", 1) > 1:
+            for symbol in symbols:
+                if symbol not in data.columns.get_level_values(1):
+                    continue
+                frame = data.xs(symbol, level=1, axis=1)
+                state = self._state_from_frame(frame)
+                if state is not None:
+                    cache[symbol] = state
+            return cache
+        if len(symbols) == 1:
+            state = self._state_from_frame(data)
+            if state is not None:
+                cache[symbols[0]] = state
+        return cache
+
+    def _state_from_frame(self, frame: pd.DataFrame) -> dict | None:
+        if frame is None or frame.empty:
+            return None
+        if "Close" not in frame.columns and "close" not in frame.columns:
+            return None
+        if "close" in frame.columns:
+            frame = frame.rename(
+                columns={
+                    "open": "Open",
+                    "high": "High",
+                    "low": "Low",
+                    "close": "Close",
+                    "volume": "Volume",
+                }
+            )
+        return _market_state_from_df(frame, self._lookback, self._interval, self._session_gain_mode)
+
+
 class MultiBrokerMarketDataProvider:
     def __init__(self, providers: dict[str, object], routing: dict | None = None):
         self._providers = providers
@@ -628,15 +701,19 @@ def main():
                 market_data_provider = MultiBrokerMarketDataProvider(providers, routing_cfg)
             else:
                 logging.warning("Broker providers unavailable; falling back to yfinance.")
-                market_data_provider = lambda s: _market_state_from_yf(
-                    s,
+                market_data_provider = YFinanceMarketDataProvider(
                     cfg["data"]["lookback_days"],
                     cfg["data"]["interval"],
                     cfg["data"].get("session_gain_mode", "gap"),
                 )
+        elif provider == "yfinance":
+            market_data_provider = YFinanceMarketDataProvider(
+                cfg["data"]["lookback_days"],
+                cfg["data"]["interval"],
+                cfg["data"].get("session_gain_mode", "gap"),
+            )
         else:
-            market_data_provider = lambda s: _market_state_from_yf(
-                s,
+            market_data_provider = YFinanceMarketDataProvider(
                 cfg["data"]["lookback_days"],
                 cfg["data"]["interval"],
                 cfg["data"].get("session_gain_mode", "gap"),
