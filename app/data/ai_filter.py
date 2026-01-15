@@ -568,48 +568,76 @@ def _fetch_bars_yfinance(
 ) -> dict[str, pd.DataFrame]:
     symbols = symbols[:limit_symbols] if limit_symbols else symbols
     bars_by_symbol: dict[str, pd.DataFrame] = {}
-    for symbol in symbols:
+    for chunk in _chunked(symbols, 100):
         try:
             data = yf.download(
-                tickers=symbol,
+                tickers=" ".join(chunk),
                 period=f"{cfg.lookback_days}d",
                 interval=cfg.interval,
                 auto_adjust=True,
                 progress=False,
             )
         except Exception as exc:
-            logging.warning("AI filter yfinance fetch failed for %s: %s", symbol, exc)
+            logging.warning("AI filter yfinance fetch failed for %d symbols: %s", len(chunk), exc)
             continue
         if data is None or data.empty:
             continue
         if getattr(data.columns, "nlevels", 1) > 1:
-            data = data.copy()
-            data.columns = data.columns.get_level_values(0)
-        data = data.rename(
-            columns={
-                "Open": "open",
-                "High": "high",
-                "Low": "low",
-                "Close": "close",
-                "Volume": "volume",
-            }
-        )
-        if not data.empty:
-            data = data.copy()
-            for col in ("open", "high", "low", "close"):
-                if col in data.columns:
-                    data[col] = data[col].ffill().bfill()
-            if "volume" in data.columns:
-                data["volume"] = data["volume"].fillna(0.0)
-            if any(
-                col in data.columns and data[col].isna().any()
-                for col in ("open", "high", "low", "close")
-            ):
+            for symbol in chunk:
+                if symbol not in data.columns.get_level_values(1):
+                    continue
+                frame = data.xs(symbol, level=1, axis=1)
+                frame = frame.rename(
+                    columns={
+                        "Open": "open",
+                        "High": "high",
+                        "Low": "low",
+                        "Close": "close",
+                        "Volume": "volume",
+                    }
+                )
+                if not frame.empty:
+                    frame = frame.copy()
+                    for col in ("open", "high", "low", "close"):
+                        if col in frame.columns:
+                            frame[col] = frame[col].ffill().bfill()
+                    if "volume" in frame.columns:
+                        frame["volume"] = frame["volume"].fillna(0.0)
+                    if any(
+                        col in frame.columns and frame[col].isna().any()
+                        for col in ("open", "high", "low", "close")
+                    ):
+                        continue
+                required = {"close", "volume"}
+                if not required.issubset(set(frame.columns)):
+                    continue
+                bars_by_symbol[symbol] = frame.sort_index()
+        elif len(chunk) == 1:
+            frame = data.rename(
+                columns={
+                    "Open": "open",
+                    "High": "high",
+                    "Low": "low",
+                    "Close": "close",
+                    "Volume": "volume",
+                }
+            )
+            if not frame.empty:
+                frame = frame.copy()
+                for col in ("open", "high", "low", "close"):
+                    if col in frame.columns:
+                        frame[col] = frame[col].ffill().bfill()
+                if "volume" in frame.columns:
+                    frame["volume"] = frame["volume"].fillna(0.0)
+                if any(
+                    col in frame.columns and frame[col].isna().any()
+                    for col in ("open", "high", "low", "close")
+                ):
+                    continue
+            required = {"close", "volume"}
+            if not required.issubset(set(frame.columns)):
                 continue
-        required = {"close", "volume"}
-        if not required.issubset(set(data.columns)):
-            continue
-        bars_by_symbol[symbol] = data.sort_index()
+            bars_by_symbol[chunk[0]] = frame.sort_index()
     return bars_by_symbol
 
 
