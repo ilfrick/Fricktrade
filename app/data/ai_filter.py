@@ -594,6 +594,18 @@ def _fetch_bars_yfinance(
                 "Volume": "volume",
             }
         )
+        if not data.empty:
+            data = data.copy()
+            for col in ("open", "high", "low", "close"):
+                if col in data.columns:
+                    data[col] = data[col].ffill().bfill()
+            if "volume" in data.columns:
+                data["volume"] = data["volume"].fillna(0.0)
+            if any(
+                col in data.columns and data[col].isna().any()
+                for col in ("open", "high", "low", "close")
+            ):
+                continue
         required = {"close", "volume"}
         if not required.issubset(set(data.columns)):
             continue
