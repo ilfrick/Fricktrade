@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
-import yfinance as yf
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
@@ -23,6 +22,7 @@ from app.backtest.engine import run_backtest
 from app.backtest.agent_engine import run_agent_backtest
 from app.data.downloader import download_yfinance
 from app.data.ingestion import ingest_from_config
+from app.data.yfinance_utils import fetch_yfinance_bars
 from app.learning.train_rl import train_from_config
 from app.learning.pretrain_orchestrator import run_pretrain
 from app.learning.evaluate import evaluate_from_config
@@ -60,19 +60,11 @@ def _empty_market_state() -> dict:
 
 
 def _market_state_from_yf(symbol: str, lookback: int, interval: str, session_gain_mode: str):
-    data = yf.download(tickers=symbol, period=f"{lookback}d", interval=interval, auto_adjust=True, progress=False)
+    bars = fetch_yfinance_bars([symbol], lookback, interval, batch_size=1, lowercase=False)
+    data = bars.get(symbol)
     if data is None or data.empty:
         return _empty_market_state()
-    if getattr(data.columns, "nlevels", 1) > 1:
-        data = data.copy()
-        if "Close" in data.columns.get_level_values(0):
-            data.columns = data.columns.get_level_values(0)
-        else:
-            data.columns = data.columns.get_level_values(-1)
-    if "Close" not in data.columns:
-        return _empty_market_state()
-    state = _market_state_from_df(data, lookback, interval, session_gain_mode)
-    return state
+    return _market_state_from_df(data, lookback, interval, session_gain_mode)
 
 
 def _alpaca_timeframe(interval: str) -> TimeFrame:
@@ -364,32 +356,15 @@ class YFinanceMarketDataProvider:
 
     def _fetch_chunk(self, symbols: list[str]) -> dict[str, dict]:
         cache: dict[str, dict] = {}
-        try:
-            data = yf.download(
-                tickers=" ".join(symbols),
-                period=f"{self._lookback}d",
-                interval=self._interval,
-                auto_adjust=True,
-                progress=False,
-            )
-        except Exception as exc:
-            logging.warning("yfinance download failed for %d symbols: %s", len(symbols), exc)
-            return cache
-        if data is None or data.empty:
-            return cache
-        if getattr(data.columns, "nlevels", 1) > 1:
-            for symbol in symbols:
-                if symbol not in data.columns.get_level_values(1):
-                    continue
-                frame = data.xs(symbol, level=1, axis=1)
-                state = self._state_from_frame(frame)
-                if state is not None:
-                    cache[symbol] = state
-            return cache
-        if len(symbols) == 1:
-            state = self._state_from_frame(data)
-            if state is not None:
-                cache[symbols[0]] = state
+        bars = fetch_yfinance_bars(
+            symbols,
+            self._lookback,
+            self._interval,
+            batch_size=len(symbols) if symbols else 1,
+            lowercase=False,
+        )
+        for symbol, frame in bars.items():
+            cache[symbol] = _market_state_from_df(frame, self._lookback, self._interval, self._session_gain_mode)
         return cache
 
     def _state_from_frame(self, frame: pd.DataFrame) -> dict | None:
