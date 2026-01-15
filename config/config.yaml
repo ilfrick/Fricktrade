@@ -408,8 +408,8 @@ benchmarking:
 data:
   provider: yfinance
   symbols: []
-  interval: 1m
-  lookback_days: 7
+  interval: 5m
+  lookback_days: 2
   session_gain_mode: gap
   quality:
     enabled: true
