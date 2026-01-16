@@ -69,6 +69,7 @@ class AISymbolFilterConfig:
     market_cache_redis_url: str
     market_cache_file_dir: str
     market_cache_cache_only: bool
+    market_cache_ignore_staleness: bool
 
 
 def score_symbols(
@@ -83,13 +84,14 @@ def score_symbols(
         return [], {}, {}
     config = _read_config(cfg)
     logging.info(
-        "AI filter config; symbols=%d provider=%s interval=%s lookback_days=%s cache_enabled=%s cache_only=%s",
+        "AI filter config; symbols=%d provider=%s interval=%s lookback_days=%s cache_enabled=%s cache_only=%s cache_ignore_stale=%s",
         len(symbols),
         config.provider,
         config.interval,
         config.lookback_days,
         config.market_cache_enabled,
         config.market_cache_cache_only,
+        config.market_cache_ignore_staleness,
     )
     model_path = _normalize_model_path(config.model_path, config.model_type)
     if config.model_type == "ppo":
@@ -201,6 +203,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     market_cache_redis_url = str(cache_cfg.get("redis_url", "redis://redis:6379/0"))
     market_cache_file_dir = str(cache_cfg.get("file_dir", "/data/market_cache"))
     market_cache_cache_only = bool(cache_cfg.get("cache_only", True))
+    market_cache_ignore_staleness = bool(cache_cfg.get("ignore_staleness", False))
     return AISymbolFilterConfig(
         interval=interval,
         lookback_days=lookback_days,
@@ -240,6 +243,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         market_cache_redis_url=market_cache_redis_url,
         market_cache_file_dir=market_cache_file_dir,
         market_cache_cache_only=market_cache_cache_only,
+        market_cache_ignore_staleness=market_cache_ignore_staleness,
     )
 
 
@@ -600,7 +604,11 @@ def _fetch_bars_yfinance(
     symbols = symbols[:limit_symbols] if limit_symbols else symbols
     max_age = interval_to_seconds(cfg.interval)
     if cfg.market_cache_enabled:
-        cache = MarketCache(cfg.market_cache_redis_url, cfg.market_cache_file_dir)
+        cache = MarketCache(
+            cfg.market_cache_redis_url,
+            cfg.market_cache_file_dir,
+            ignore_staleness=cfg.market_cache_ignore_staleness,
+        )
         cached = cache.get_bars(symbols, cfg.interval, max_age_seconds=max_age, lowercase=True)
         if cfg.market_cache_cache_only:
             required = {"close", "volume"}

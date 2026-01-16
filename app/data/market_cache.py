@@ -26,6 +26,7 @@ class MarketCacheConfig:
     file_dir: str
     batch_size: int
     cache_only: bool
+    ignore_staleness: bool
     filtered_symbols_enabled: bool
 
 
@@ -49,6 +50,7 @@ def build_market_cache_config(cfg: dict | None) -> MarketCacheConfig:
         file_dir=str(cfg.get("file_dir", "/data/market_cache")),
         batch_size=int(cfg.get("batch_size", 100)),
         cache_only=bool(cfg.get("cache_only", True)),
+        ignore_staleness=bool(cfg.get("ignore_staleness", False)),
         filtered_symbols_enabled=bool(cfg.get("filtered_symbols", {}).get("enabled", True)),
     )
 
@@ -57,11 +59,11 @@ def build_market_cache(cfg: dict | None) -> "MarketCache | None":
     cache_cfg = build_market_cache_config(cfg)
     if not cache_cfg.enabled:
         return None
-    return MarketCache(cache_cfg.redis_url, cache_cfg.file_dir)
+    return MarketCache(cache_cfg.redis_url, cache_cfg.file_dir, ignore_staleness=cache_cfg.ignore_staleness)
 
 
 class MarketCache:
-    def __init__(self, redis_url: str, file_dir: str):
+    def __init__(self, redis_url: str, file_dir: str, *, ignore_staleness: bool = False):
         self._redis = None
         if redis is not None:
             try:
@@ -73,6 +75,7 @@ class MarketCache:
         self._file_dir = Path(file_dir)
         self._bars_dir = self._file_dir / "bars"
         self._filtered_dir = self._file_dir / "filtered"
+        self._ignore_staleness = ignore_staleness
 
     def get_bars(
         self,
@@ -100,10 +103,11 @@ class MarketCache:
                     if not record:
                         missing.append(symbol)
                         continue
-                    updated_at = record.get("updated_at", 0.0)
-                    if now - updated_at > max_age_seconds:
-                        missing.append(symbol)
-                        continue
+                    if not self._ignore_staleness:
+                        updated_at = record.get("updated_at", 0.0)
+                        if now - updated_at > max_age_seconds:
+                            missing.append(symbol)
+                            continue
                     frame = record.get("data")
                     if isinstance(frame, pd.DataFrame):
                         results[symbol] = _normalize_frame(frame, lowercase=lowercase)
@@ -112,7 +116,7 @@ class MarketCache:
             except Exception as exc:
                 logging.warning("Market cache redis read failed: %s", exc)
         for symbol in missing or symbols:
-            frame = self._read_file(symbol, interval, max_age_seconds)
+            frame = self._read_file(symbol, interval, max_age_seconds, ignore_staleness=self._ignore_staleness)
             if frame is not None:
                 results[symbol] = _normalize_frame(frame, lowercase=lowercase)
         return results
@@ -146,14 +150,19 @@ class MarketCache:
                 if raw:
                     record = self._deserialize(raw)
                     if record:
-                        updated_at = record.get("updated_at", 0.0)
-                        if now - updated_at <= max_age_seconds:
+                        if self._ignore_staleness:
                             symbols = record.get("symbols")
                             if isinstance(symbols, list):
                                 return [str(s) for s in symbols if s]
+                        else:
+                            updated_at = record.get("updated_at", 0.0)
+                            if now - updated_at <= max_age_seconds:
+                                symbols = record.get("symbols")
+                                if isinstance(symbols, list):
+                                    return [str(s) for s in symbols if s]
             except Exception as exc:
                 logging.warning("Market cache redis filtered read failed: %s", exc)
-        return self._read_filtered_file(interval, max_age_seconds)
+        return self._read_filtered_file(interval, max_age_seconds, ignore_staleness=self._ignore_staleness)
 
     def set_filtered_symbols(self, symbols: list[str], interval: str, ttl_seconds: int) -> None:
         symbols = [s for s in symbols if s]
@@ -183,11 +192,18 @@ class MarketCache:
             return None
         return record if isinstance(record, dict) else None
 
-    def _read_file(self, symbol: str, interval: str, max_age_seconds: int) -> pd.DataFrame | None:
+    def _read_file(
+        self,
+        symbol: str,
+        interval: str,
+        max_age_seconds: int,
+        *,
+        ignore_staleness: bool,
+    ) -> pd.DataFrame | None:
         path = self._bars_dir / interval / f"{symbol}.pkl"
         if not path.exists():
             return None
-        if time.time() - path.stat().st_mtime > max_age_seconds:
+        if not ignore_staleness and time.time() - path.stat().st_mtime > max_age_seconds:
             return None
         try:
             record = pd.read_pickle(path)
@@ -210,11 +226,17 @@ class MarketCache:
         except Exception as exc:
             logging.warning("Market cache file write failed for %s: %s", symbol, exc)
 
-    def _read_filtered_file(self, interval: str, max_age_seconds: int) -> list[str] | None:
+    def _read_filtered_file(
+        self,
+        interval: str,
+        max_age_seconds: int,
+        *,
+        ignore_staleness: bool,
+    ) -> list[str] | None:
         path = self._filtered_dir / f"{interval}.json"
         if not path.exists():
             return None
-        if time.time() - path.stat().st_mtime > max_age_seconds:
+        if not ignore_staleness and time.time() - path.stat().st_mtime > max_age_seconds:
             return None
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))

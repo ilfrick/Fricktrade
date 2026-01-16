@@ -37,7 +37,7 @@ def main() -> None:
         return
     _configure_yfinance_cache(cache_cfg.file_dir)
 
-    cache = MarketCache(cache_cfg.redis_url, cache_cfg.file_dir)
+    cache = MarketCache(cache_cfg.redis_url, cache_cfg.file_dir, ignore_staleness=cache_cfg.ignore_staleness)
     dyn_cfg = cfg.get("data", {}).get("dynamic_symbols", {}) or {}
     universe_cfg = dyn_cfg.get("universe", "alpaca_active")
     max_universe = int(dyn_cfg.get("max_universe", 50000))

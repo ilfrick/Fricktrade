@@ -529,6 +529,7 @@ market_cache:
   file_dir: /data/market_cache
   batch_size: 100
   cache_only: true
+  ignore_staleness: true
   filtered_symbols:
     enabled: true
 checkpointing:
