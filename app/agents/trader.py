@@ -1275,6 +1275,9 @@ class TradingAgent:
             self._last_market_open = market_open
 
     def _prepare_market_data(self, market_data_provider, symbols: list[str]) -> None:
+        data_cfg = self.cfg.get("data", {}) or {}
+        if not data_cfg.get("prefetch_enabled", True):
+            return
         if hasattr(market_data_provider, "prepare"):
             try:
                 market_data_provider.prepare(symbols)
