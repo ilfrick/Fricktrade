@@ -445,10 +445,10 @@ data:
       retrain_hours: 6
       model_type: ppo
       model_path: /data/ai_symbol_filter.zip
-      train_max_symbols: 300
+      train_max_symbols: 100
       max_samples_per_symbol: 200
       rl:
-        timesteps: 20000
+        timesteps: 2000
         learning_rate: 0.0003
         batch_size: 64
         n_steps: 64
