@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 from datetime import datetime
 
@@ -33,6 +34,7 @@ def main() -> None:
     if not cache_cfg.enabled:
         logging.info("Market cache disabled; exiting.")
         return
+    _configure_yfinance_cache(cache_cfg.file_dir)
 
     cache = MarketCache(cache_cfg.redis_url, cache_cfg.file_dir)
     dyn_cfg = cfg.get("data", {}).get("dynamic_symbols", {}) or {}
@@ -112,6 +114,19 @@ def _resolve_universe(cfg: dict, universe_cfg: object, max_universe: int) -> lis
         logging.warning("Market cache: Alpaca credentials missing; no universe loaded.")
         return []
     return load_universe(api_key, api_secret, universe_cfg, max_universe=max_universe)
+
+
+def _configure_yfinance_cache(base_dir: str) -> None:
+    cache_dir = Path(base_dir) / "yf_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("XDG_CACHE_HOME", str(cache_dir))
+    try:
+        import yfinance as yf
+
+        if hasattr(yf, "set_tz_cache_location"):
+            yf.set_tz_cache_location(str(cache_dir / "tz"))
+    except Exception as exc:
+        logging.warning("Market cache yfinance cache setup failed: %s", exc)
 
 
 if __name__ == "__main__":
