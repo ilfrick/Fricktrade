@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.monitoring.metrics import MARKET_CACHE_STALE_BARS, MARKET_CACHE_STALE_FILTERED
+
 try:
     import redis
 except Exception:  # pragma: no cover - optional dependency
@@ -109,6 +111,7 @@ class MarketCache:
                     if now - updated_at > max_age_seconds:
                         if self._ignore_staleness:
                             stale_redis += 1
+                            MARKET_CACHE_STALE_BARS.labels(interval=interval, source="redis").inc()
                         else:
                             missing.append(symbol)
                             continue
@@ -132,6 +135,7 @@ class MarketCache:
                 age = time.time() - path.stat().st_mtime
                 if age > max_age_seconds:
                     stale_files += 1
+                    MARKET_CACHE_STALE_BARS.labels(interval=interval, source="file").inc()
             frame = self._read_file(symbol, interval, max_age_seconds, ignore_staleness=self._ignore_staleness)
             if frame is not None:
                 results[symbol] = _normalize_frame(frame, lowercase=lowercase)
@@ -181,6 +185,7 @@ class MarketCache:
                                     interval,
                                     int(now - updated_at),
                                 )
+                                MARKET_CACHE_STALE_FILTERED.labels(interval=interval, source="redis").inc()
                             symbols = record.get("symbols")
                             if isinstance(symbols, list):
                                 return [str(s) for s in symbols if s]
@@ -199,6 +204,7 @@ class MarketCache:
                     interval,
                     int(age),
                 )
+                MARKET_CACHE_STALE_FILTERED.labels(interval=interval, source="file").inc()
         return self._read_filtered_file(interval, max_age_seconds, ignore_staleness=self._ignore_staleness)
 
     def set_filtered_symbols(self, symbols: list[str], interval: str, ttl_seconds: int) -> None:

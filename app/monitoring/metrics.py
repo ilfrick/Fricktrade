@@ -113,6 +113,16 @@ ORDER_LATENCY = Histogram(
     "Time to enqueue an order for execution",
     ["symbol", "side"],
 )
+MARKET_CACHE_STALE_BARS = Counter(
+    "market_cache_stale_bars_total",
+    "Stale market cache bars used",
+    ["interval", "source"],
+)
+MARKET_CACHE_STALE_FILTERED = Counter(
+    "market_cache_stale_filtered_total",
+    "Stale market cache filtered symbols used",
+    ["interval", "source"],
+)
 
 
 def start_metrics_server(port: int):
