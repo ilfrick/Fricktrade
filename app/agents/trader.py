@@ -127,6 +127,7 @@ class TradingAgent:
         self._dynamic_symbols_at: datetime | None = None
         self._dynamic_symbols: list[str] = []
         self._symbols: list[str] = []
+        self._symbols_by_broker: dict[str, list[str]] = {}
         self._symbols_by_strategy: dict[str, list[str]] = {}
         self._symbol_venues: dict[str, str] = {}
         self._symbol_venues_at: datetime | None = None
@@ -1213,12 +1214,17 @@ class TradingAgent:
         for sym in symbols:
             SYMBOL_ACTIVE.labels(symbol=sym).set(1)
         self._active_symbol_labels = current_symbols
-        routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
-        if routing_mode == "auto_split" and len(self._broker_map) > 1:
-            symbols_by_broker: dict[str, set[str]] = {}
-            buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
-            for broker_name, batch in buckets.items():
+        symbols_by_broker: dict[str, set[str]] = {}
+        if self._symbols_by_broker:
+            for broker_name, batch in self._symbols_by_broker.items():
                 symbols_by_broker[broker_name] = set(batch)
+        else:
+            routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
+            if routing_mode == "auto_split" and len(self._broker_map) > 1:
+                buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
+                for broker_name, batch in buckets.items():
+                    symbols_by_broker[broker_name] = set(batch)
+        if symbols_by_broker:
             for broker_name, active_syms in symbols_by_broker.items():
                 previous = self._active_symbol_labels_by_broker.get(broker_name, set())
                 for sym in previous - active_syms:
@@ -1230,6 +1236,12 @@ class TradingAgent:
     def _build_symbol_batches(self, symbols: list[str]) -> list[tuple[str, str | None, list[str]]]:
         routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
         if routing_mode == "auto_split" and len(self._broker_map) > 1:
+            if self._symbols_by_broker:
+                return [
+                    ("auto_split", broker, batch)
+                    for broker, batch in self._symbols_by_broker.items()
+                    if batch
+                ]
             buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
             return [("auto_split", broker, batch) for broker, batch in buckets.items()]
         return [("default", None, symbols)]
@@ -1299,13 +1311,16 @@ class TradingAgent:
         market_data_provider,
         broker_override: str | None,
     ) -> None:
+        batch_portfolio = portfolio
+        if broker_override:
+            batch_portfolio = self._portfolio_for_broker(portfolio, broker_override)
         for sym in symbols:
             if not self._is_symbol_market_open(sym):
                 continue
             market_state: dict = {"symbol": sym}
             try:
                 market_state = market_data_provider(sym)
-                self._enrich_market_state(market_state, portfolio, sym)
+                self._enrich_market_state(market_state, batch_portfolio, sym)
                 market_state["risk_outcome"] = self._risk_outcomes.get(sym, {})
                 if broker_override:
                     market_state["broker_override"] = broker_override
@@ -2090,6 +2105,7 @@ class TradingAgent:
         max_symbols = self._resolve_max_symbols(dyn_cfg, universe, portfolio)
 
         self._symbols_by_strategy = {}
+        self._symbols_by_broker = {}
         ai_cfg = dyn_cfg.get("ai_filter", {})
         if (
             ai_cfg.get("enabled", False)
@@ -2103,6 +2119,7 @@ class TradingAgent:
             cached_symbols = self._market_cache.get_filtered_symbols(cache_interval, max_age_seconds=max_age)
             if cached_symbols:
                 ordered = self._merge_with_positions(cached_symbols, portfolio, max_symbols)
+                self._symbols_by_broker = self._build_symbols_by_broker(ordered, portfolio, dyn_cfg)
                 self._symbols_by_strategy["__global__"] = ordered
                 for name in self._strategy_names:
                     self._symbols_by_strategy[name] = ordered
@@ -2179,6 +2196,7 @@ class TradingAgent:
                     if removed > 0:
                         logging.info("AI filter coverage removed %d symbols without bars.", removed)
             ordered = self._merge_with_positions(ordered, portfolio, max_symbols)
+            self._symbols_by_broker = self._build_symbols_by_broker(ordered, portfolio, dyn_cfg)
             self._symbols_by_strategy["__global__"] = ordered
             for name in self._strategy_names:
                 self._symbols_by_strategy[name] = ordered
@@ -2224,6 +2242,8 @@ class TradingAgent:
         if self._symbols_by_strategy:
             self._symbols = self._symbols_by_strategy.get("__global__", self._symbols)
             self._dynamic_symbols = list(self._symbols)
+            if self._symbols:
+                self._symbols_by_broker = self._build_symbols_by_broker(self._symbols, portfolio, dyn_cfg)
         self._dynamic_symbols_at = now
         return
 
@@ -2245,6 +2265,121 @@ class TradingAgent:
         if extras:
             max_symbols = max(max_symbols, len(extras))
         return max_symbols
+
+    def _resolve_max_symbols_for_broker(
+        self,
+        dyn_cfg: dict,
+        universe: list[str],
+        portfolio: dict,
+        broker_name: str,
+    ) -> int:
+        try:
+            max_symbols = int(dyn_cfg.get("max_symbols", 50))
+        except (TypeError, ValueError):
+            max_symbols = 50
+        if universe:
+            max_symbols = min(max_symbols, len(universe)) if max_symbols > 0 else len(universe)
+        extras = set()
+        for symbol in portfolio.get("positions", {}).keys():
+            if symbol:
+                extras.add(symbol)
+        for symbol in self._open_order_symbols_for_broker(broker_name):
+            if symbol:
+                extras.add(symbol)
+        if extras:
+            max_symbols = max(max_symbols, len(extras))
+        max_symbols = self._cap_symbols_by_cash(max_symbols, portfolio, dyn_cfg)
+        if extras:
+            max_symbols = max(max_symbols, len(extras))
+        return max_symbols
+
+    def _cap_symbols_by_cash(self, max_symbols: int, portfolio: dict, dyn_cfg: dict) -> int:
+        if not dyn_cfg.get("cash_aware", True):
+            return max_symbols
+        filters_cfg = dyn_cfg.get("filters", {}) or {}
+        price_min = filters_cfg.get("price_min", self.cfg.get("trading_limits", {}).get("min_price"))
+        try:
+            price_min = float(price_min or 0.0)
+        except (TypeError, ValueError):
+            return max_symbols
+        if price_min <= 0:
+            return max_symbols
+        cap = self._apply_cash_cap(price_min, float("inf"), portfolio, dyn_cfg)
+        if cap <= 0:
+            return 0
+        affordable = int(cap // price_min)
+        if affordable <= 0:
+            return 0
+        return min(max_symbols, affordable)
+
+    def _open_order_symbols_for_broker(self, broker_name: str) -> list[str]:
+        symbols: list[str] = []
+        single_broker = len(self._broker_map) <= 1
+        for order in self._open_orders_cache:
+            symbol = order.get("symbol")
+            if not symbol:
+                continue
+            order_broker = order.get("broker")
+            if not order_broker and single_broker:
+                order_broker = self._broker_name
+            if order_broker == broker_name:
+                symbols.append(symbol)
+        return symbols
+
+    def _merge_with_positions_for_broker(
+        self,
+        candidates: list[str],
+        portfolio: dict,
+        broker_name: str,
+        max_symbols: int,
+    ) -> list[str]:
+        held = [s for s in portfolio.get("positions", {}).keys() if s]
+        open_order_symbols = self._open_order_symbols_for_broker(broker_name)
+        if not held and not open_order_symbols and not candidates:
+            return []
+        ordered: list[str] = []
+        seen = set()
+        for symbol in held + open_order_symbols + candidates:
+            if symbol in seen:
+                continue
+            ordered.append(symbol)
+            seen.add(symbol)
+            if len(ordered) >= max_symbols:
+                break
+        return ordered
+
+    def _portfolio_snapshot_for_broker_symbols(self, portfolio: dict, broker_name: str) -> dict:
+        brokers = portfolio.get("brokers")
+        if isinstance(brokers, dict) and broker_name in brokers:
+            data = dict(brokers[broker_name])
+            data.setdefault("broker", broker_name)
+            data.setdefault("positions", {})
+            data.setdefault("gross_exposure", 0.0)
+            data.setdefault("short_exposure", 0.0)
+            return data
+        return portfolio
+
+    def _build_symbols_by_broker(self, ordered: list[str], portfolio: dict, dyn_cfg: dict) -> dict[str, list[str]]:
+        exec_cfg = self.cfg.get("execution", {}).get("brokers", {}) or {}
+        multi_enabled = bool(exec_cfg.get("enabled", False)) and len(self._broker_map) > 1
+        if not multi_enabled:
+            return {}
+        symbols_by_broker: dict[str, list[str]] = {}
+        for broker_name in self._broker_map.keys():
+            broker_portfolio = self._portfolio_snapshot_for_broker_symbols(portfolio, broker_name)
+            max_symbols = self._resolve_max_symbols_for_broker(
+                dyn_cfg,
+                ordered,
+                broker_portfolio,
+                broker_name,
+            )
+            symbols_by_broker[broker_name] = self._merge_with_positions_for_broker(
+                ordered,
+                broker_portfolio,
+                broker_name,
+                max_symbols,
+            )
+        return symbols_by_broker
 
     def _resolve_universe(
         self,
@@ -2340,6 +2475,11 @@ class TradingAgent:
 
     def _resolve_active_symbols(self) -> list[str]:
         if not self._symbols_by_strategy:
+            if self._symbols_by_broker:
+                merged = set()
+                for symbols in self._symbols_by_broker.values():
+                    merged.update(symbols)
+                return list(merged) if merged else self._symbols
             return self._symbols
         merged = set()
         for symbols in self._symbols_by_strategy.values():
