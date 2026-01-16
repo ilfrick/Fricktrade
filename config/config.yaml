@@ -407,7 +407,8 @@ benchmarking:
   pdf_path: /data/reports/benchmark_report.pdf
 data:
   provider: yfinance
-  prefetch_enabled: false
+  prefetch_enabled: true
+  prefetch_after_filter: false
   symbols: []
   interval: 5m
   lookback_days: 7

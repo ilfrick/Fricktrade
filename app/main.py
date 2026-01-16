@@ -269,7 +269,37 @@ class AlpacaMarketDataProvider:
         self._cache_at = now
 
     def __call__(self, symbol: str) -> dict:
-        return self._cache.get(symbol, _empty_market_state())
+        if symbol in self._cache:
+            return self._cache.get(symbol, _empty_market_state())
+        state = self._fetch_symbol(symbol)
+        if state:
+            self._cache[symbol] = state
+            return state
+        return _empty_market_state()
+
+    def _fetch_symbol(self, symbol: str) -> dict | None:
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(days=self._lookback)
+        timeframe = _alpaca_timeframe(self._interval)
+        req = StockBarsRequest(
+            symbol_or_symbols=[symbol],
+            timeframe=timeframe,
+            start=start,
+            end=now,
+            feed=self._feed,
+            adjustment="raw",
+        )
+        data = _fetch_bars(self._client, req, self._timeout_seconds, self._retries)
+        if data is None or data.empty:
+            return None
+        if isinstance(data.index, pd.MultiIndex):
+            try:
+                df = data.xs(symbol, level=0)
+            except KeyError:
+                return None
+        else:
+            df = data
+        return _market_state_from_df(df, self._lookback, self._interval, self._session_gain_mode)
 
 
 def _ibkr_bar_size(interval: str) -> str:
@@ -341,7 +371,36 @@ class IBKRMarketDataProvider:
         self._cache_at = now
 
     def __call__(self, symbol: str) -> dict:
-        return self._cache.get(symbol, _empty_market_state())
+        if symbol in self._cache:
+            return self._cache.get(symbol, _empty_market_state())
+        state = self._fetch_symbol(symbol)
+        if state:
+            self._cache[symbol] = state
+            return state
+        return _empty_market_state()
+
+    def _fetch_symbol(self, symbol: str) -> dict | None:
+        now = datetime.now(timezone.utc)
+        duration = f"{self._lookback} D"
+        bar_size = _ibkr_bar_size(self._interval)
+        contract = Stock(symbol, self._exchange, self._currency)
+        try:
+            bars = self._ib.reqHistoricalData(
+                contract,
+                endDateTime="",
+                durationStr=duration,
+                barSizeSetting=bar_size,
+                whatToShow="TRADES",
+                useRTH=True,
+                formatDate=1,
+            )
+        except Exception as exc:
+            logging.warning("IBKR bars fetch failed for %s: %s", symbol, exc)
+            return None
+        if not bars:
+            return None
+        df = util.df(bars)
+        return _market_state_from_df(df, self._lookback, self._interval, self._session_gain_mode)
 
 
 class YFinanceMarketDataProvider:
@@ -377,7 +436,13 @@ class YFinanceMarketDataProvider:
         self._cache_at = now
 
     def __call__(self, symbol: str) -> dict:
-        return self._cache.get(symbol, _empty_market_state())
+        if symbol in self._cache:
+            return self._cache.get(symbol, _empty_market_state())
+        fetched = self._fetch_chunk([symbol])
+        if fetched:
+            self._cache.update(fetched)
+            return self._cache.get(symbol, _empty_market_state())
+        return _empty_market_state()
 
     def _fetch_chunk(self, symbols: list[str]) -> dict[str, dict]:
         cache: dict[str, dict] = {}

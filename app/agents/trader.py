@@ -1278,6 +1278,8 @@ class TradingAgent:
         data_cfg = self.cfg.get("data", {}) or {}
         if not data_cfg.get("prefetch_enabled", True):
             return
+        if not data_cfg.get("prefetch_after_filter", True):
+            return
         if hasattr(market_data_provider, "prepare"):
             try:
                 market_data_provider.prepare(symbols)
