@@ -82,6 +82,15 @@ def score_symbols(
     if not symbols or not api_key or not api_secret:
         return [], {}, {}
     config = _read_config(cfg)
+    logging.info(
+        "AI filter config; symbols=%d provider=%s interval=%s lookback_days=%s cache_enabled=%s cache_only=%s",
+        len(symbols),
+        config.provider,
+        config.interval,
+        config.lookback_days,
+        config.market_cache_enabled,
+        config.market_cache_cache_only,
+    )
     model_path = _normalize_model_path(config.model_path, config.model_type)
     if config.model_type == "ppo":
         model, stats = _load_ppo_model(model_path, config.retrain_hours)
@@ -464,6 +473,7 @@ def _train_ppo_model(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logging.info("AI filter train device: %s", device)
     train_symbols = symbols[: cfg.train_max_symbols]
+    logging.info("AI filter training start; symbols=%d timesteps=%d", len(train_symbols), cfg.rl_timesteps)
     bars = _fetch_bars(train_symbols, api_key, api_secret, cfg, limit_symbols=cfg.train_max_symbols)
     catalyst_map = _fetch_news_catalysts(train_symbols, api_key, api_secret, cfg, brokers_cfg or {})
     features, labels = _build_training_data(bars, cfg, catalyst_map)
@@ -491,6 +501,12 @@ def _train_ppo_model(
     )
     model.learn(total_timesteps=timesteps)
     stats = {"mean": mean.tolist(), "std": std.tolist(), "objective": cfg.objective}
+    logging.info(
+        "AI filter training complete; symbols=%d samples=%d timesteps=%d",
+        len(train_symbols),
+        len(labels),
+        timesteps,
+    )
     return model, stats
 
 
@@ -506,6 +522,7 @@ def _online_update_ppo_model(
     update_symbols = symbols[: cfg.online_max_symbols]
     if not update_symbols:
         return False
+    logging.info("AI filter online update start; symbols=%d timesteps=%d", len(update_symbols), cfg.online_timesteps)
     bars = _fetch_bars(update_symbols, api_key, api_secret, cfg, limit_symbols=cfg.online_max_symbols)
     features, labels = _build_training_data(bars, cfg, catalyst_map)
     if features.size == 0:
@@ -587,6 +604,11 @@ def _fetch_bars_yfinance(
         cached = cache.get_bars(symbols, cfg.interval, max_age_seconds=max_age, lowercase=True)
         if cfg.market_cache_cache_only:
             required = {"close", "volume"}
+            logging.info(
+                "AI filter cache-only bars; cached=%d missing=%d",
+                len(cached),
+                max(0, len(symbols) - len(cached)),
+            )
             return {symbol: frame for symbol, frame in cached.items() if required.issubset(frame.columns)}
         missing = [symbol for symbol in symbols if symbol not in cached]
     else:
@@ -604,6 +626,11 @@ def _fetch_bars_yfinance(
         if cfg.market_cache_enabled and fetched:
             cache.set_bars(fetched, cfg.interval, ttl_seconds=max_age)
         cached.update(fetched)
+        logging.info(
+            "AI filter fetched bars; fetched=%d missing_after=%d",
+            len(fetched),
+            max(0, len(symbols) - len(cached)),
+        )
     required = {"close", "volume"}
     return {symbol: frame for symbol, frame in cached.items() if required.issubset(frame.columns)}
 

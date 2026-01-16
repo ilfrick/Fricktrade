@@ -141,6 +141,7 @@ class TradingAgent:
         self._ai_filter_executor = ThreadPoolExecutor(max_workers=1)
         self._ai_filter_future = None
         self._ai_filter_inflight_at: datetime | None = None
+        self._ai_filter_inflight_log_at: datetime | None = None
         self._market_cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
         self._market_cache = build_market_cache(cfg.get("market_cache", {}))
         self._pipeline = DecisionPipeline(self)
@@ -2125,6 +2126,12 @@ class TradingAgent:
                 self._ai_filter_inflight_at = now
                 return
             if not self._ai_filter_future.done():
+                if self._ai_filter_inflight_at is not None:
+                    elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
+                    last_log = self._ai_filter_inflight_log_at
+                    if last_log is None or (now - last_log).total_seconds() >= 60:
+                        logging.info("AI filter still running; elapsed_sec=%d", elapsed)
+                        self._ai_filter_inflight_log_at = now
                 return
             try:
                 result = self._ai_filter_future.result()
@@ -2134,15 +2141,24 @@ class TradingAgent:
                     ordered, scores = result
                     signal_map = {}
             except Exception as exc:
-                logging.warning("AI filter run failed: %s", exc)
+                elapsed = None
+                if self._ai_filter_inflight_at is not None:
+                    elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
+                logging.warning("AI filter run failed; elapsed_sec=%s err=%s", elapsed, exc)
                 ordered = []
                 scores = {}
                 signal_map = {}
+            inflight_at = self._ai_filter_inflight_at
             self._ai_filter_future = None
             self._ai_filter_inflight_at = None
+            self._ai_filter_inflight_log_at = None
+            elapsed = None
+            if inflight_at is not None:
+                elapsed = int((now - inflight_at).total_seconds())
             logging.info(
-                "AI filter scored %d symbols (enabled); top=%s",
+                "AI filter scored %d symbols (enabled); elapsed_sec=%s top=%s",
                 len(ordered),
+                elapsed,
                 ",".join(ordered[:5]),
             )
             self._ai_filter_last_run_at = now
