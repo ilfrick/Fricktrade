@@ -318,3 +318,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Updated architecture diagram to reflect AI filter, ingestion, and online updates.
 - Increased AI filter online update steps and max symbols for continuous training.
 - Refactored trading/orchestrator state to isolate per-broker risk, performance, and checkpoint tracking.
+- `pytest` currently fails without `PYTHONPATH=.` (tests import `app`).
