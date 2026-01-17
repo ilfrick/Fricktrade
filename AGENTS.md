@@ -364,3 +364,5 @@ Highest positive impact (testing/live trading):
 - Backtest loop now pre-extracts OHLCV arrays and uses timeline indexers to avoid per-bar pandas `.loc` lookups; added `_prepare_backtest_frames` and `_SymbolState.update_from_values`.
 - cProfile backtest time dropped ~3.75s -> ~1.65s in the sample run; pandas indexing no longer dominates.
 - `pytest` passed (34 passed, 9 skipped).
+
+- Live-loop perf guidance: biggest wins are reducing pandas work in `_market_state_from_df` and skipping symbol evaluation when no new bar; Numba best for pure numerical feature loops (EMA/RSI, signal metrics, var/cvar, realized vol) once arrays are used. Vectorize with NumPy (`np.diff`, `np.mean`) or batch arrays per provider where possible.
