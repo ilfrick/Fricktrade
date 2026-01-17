@@ -49,6 +49,13 @@ can reload context quickly. Keep it updated when the setup changes.
 - Full-universe Alpaca ingest for 2 months is running via `python -m app.main ingest`.
 
 ## Recent Tasks
+- Added API auth gating (`api.auth.*`) for config/restart endpoints and UI support; documented token usage in `README.md` and `.env.example`.
+- Added IBKR currency mapping using `market.default_currency`, `market.symbol_currencies`, and `brokers.ibkr.currency`.
+- Added open-order completion grace (`execution.open_orders.missing_grace_seconds`) and improved order-queue completion handling.
+- Switched market cache bars to JSON serialization with optional legacy pickle reads (`market_cache.allow_pickle`); updated AI filter cache wiring.
+- Hardened Alpaca account secret merge to match by account name.
+- Added tests for API auth, IBKR currency mapping, market cache serialization, and order-queue grace.
+- Session log saved to `/home/nicola/.codex/AGENTS.md`.
 - Updated healthwatch market shutdown project name to `fricktrade`.
 - Switched Alertmanager SMTP settings to environment-variable configuration.
 - Added local Alertmanager config renderer for SMTP secrets.

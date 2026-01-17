@@ -329,3 +329,13 @@ Highest positive impact (testing/live trading):
 - RL-only backtest returned +25.76% with 12 trades on the full-year run.
 - Dual RL strategies with per-strategy symbol lists returned +56.20% on short-window dynamic-symbol tests.
 - Best-model loading keeps the strongest evaluated RL policy in live trading.
+
+## Session Log
+### 2026-01-17
+- Added API auth gating for config/restart endpoints and UI token support; documented in `README.md` and `.env.example`.
+- Added IBKR currency mapping via `market.default_currency`, `market.symbol_currencies`, and `brokers.ibkr.currency`.
+- Added open-order completion grace and safe market-cache JSON serialization with optional legacy pickle reads.
+- Hardened Alpaca account secret merge by name and updated AI filter cache wiring.
+- Added tests for API auth, IBKR currency mapping, market cache serialization, and order-queue grace.
+- Committed and pushed `d20694f` to both `origin` and `github`; tests skipped locally due to missing deps.
+- Session saved to `/home/nicola/.codex/AGENTS.md`.
