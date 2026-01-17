@@ -320,3 +320,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - Refactored trading/orchestrator state to isolate per-broker risk, performance, and checkpoint tracking.
 - `pytest` currently fails without `PYTHONPATH=.` (tests import `app`).
 - For deterministic per-account routing with duplicate symbols, prefer account+symbol keys for strategy/orchestrator state to avoid cross-account leakage.
+- Strategy/guardrail caches and orchestrator state are now keyed per broker+symbol; tests pass with `PYTHONPATH=. pytest`.

@@ -346,3 +346,6 @@ Highest positive impact (testing/live trading):
 - Ran `pytest`; failed with `ModuleNotFoundError: No module named 'app'` (needs repo on `PYTHONPATH`).
 - Completed code review for per-broker isolation refactor; noted orchestrator/risk outcome broker-key edge cases.
 - Discussed deterministic per-account routing; recommended account+symbol keys and per-account strategy/orchestrator state to avoid cross-account collisions.
+- Keyed strategy/guardrail caches by broker+symbol to prevent cross-account state bleed, and removed symbol-only orchestrator broker tracking.
+- Ensured per-account risk_outcome is set before signals; updated broker selection flow accordingly.
+- `PYTHONPATH=. pytest` passed (34 passed, 9 skipped).

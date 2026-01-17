@@ -117,8 +117,8 @@ class TradingAgent:
         self._account_snapshot: dict[str, object] = {}
         params = cfg["strategy"]["params"]
         self._strategy_params = params
-        self._strategy_by_symbol: dict[str, dict[str, object]] = {}
-        self._guardrail_by_symbol: dict[str, object] = {}
+        self._strategy_by_symbol: dict[tuple[str, str], dict[str, object]] = {}
+        self._guardrail_by_symbol: dict[tuple[str, str], object] = {}
         self.executor = ExecutionEngine(broker)
         self._routing_cfg = cfg.get("execution", {}).get("brokers", {}).get("routing", {})
         self._broker_map = self._resolve_broker_map()
@@ -160,7 +160,6 @@ class TradingAgent:
         self._symbol_venues: dict[str, str] = {}
         self._symbol_venues_at: datetime | None = None
         self._orchestrator_state: dict[tuple[str, str], dict[str, object]] = {}
-        self._orchestrator_broker_by_symbol: dict[str, str] = {}
         self._position_symbols: set[str] = set()
         self._position_symbols_by_broker: dict[str, set[str]] = {}
         self._ai_filter_last_run_at: datetime | None = None
@@ -425,20 +424,25 @@ class TradingAgent:
             guard_params.get("allow_shorts", params["allow_shorts"]),
         )
 
-    def _get_strategy(self, symbol: str, name: str):
-        if symbol not in self._strategy_by_symbol:
-            self._strategy_by_symbol[symbol] = {}
-        if name not in self._strategy_by_symbol[symbol]:
+    def _strategy_key(self, broker_name: str, symbol: str) -> tuple[str, str]:
+        return (self._normalize_broker_name(broker_name), symbol)
+
+    def _get_strategy(self, broker_name: str, symbol: str, name: str):
+        key = self._strategy_key(broker_name, symbol)
+        if key not in self._strategy_by_symbol:
+            self._strategy_by_symbol[key] = {}
+        if name not in self._strategy_by_symbol[key]:
             strategy = self._build_strategy(name, self._strategy_params)
             if strategy is None:
                 return None
-            self._strategy_by_symbol[symbol][name] = strategy
-        return self._strategy_by_symbol[symbol][name]
+            self._strategy_by_symbol[key][name] = strategy
+        return self._strategy_by_symbol[key][name]
 
-    def _get_guardrail(self, symbol: str):
-        if symbol not in self._guardrail_by_symbol:
-            self._guardrail_by_symbol[symbol] = self._build_guardrail(self._strategy_params)
-        return self._guardrail_by_symbol[symbol]
+    def _get_guardrail(self, broker_name: str, symbol: str):
+        key = self._strategy_key(broker_name, symbol)
+        if key not in self._guardrail_by_symbol:
+            self._guardrail_by_symbol[key] = self._build_guardrail(self._strategy_params)
+        return self._guardrail_by_symbol[key]
 
     def _apply_guardrail(self, action: str, guard_action: str, mode: str) -> str:
         if action not in ("buy", "sell"):
@@ -663,7 +667,11 @@ class TradingAgent:
         self._apply_kill_switch_profile(market_state)
         exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
         broker_hint = self._resolve_broker_for_symbol(symbol, self._strategy_names, None)
-        orchestrator_broker = self._orchestrator_broker_by_symbol.get(symbol) or broker_hint
+        broker_override = market_state.get("broker_override")
+        if broker_override:
+            broker_override = self._normalize_broker_name(str(broker_override))
+        strategy_broker = broker_override or broker_hint
+        market_state["risk_outcome"] = self._broker_state(strategy_broker).risk_outcomes.get(symbol, {})
         if trace:
             trace["broker_hint"] = broker_hint
         if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol, broker=broker_hint):
@@ -685,7 +693,7 @@ class TradingAgent:
                 allowed = strategy_symbols.get(name)
                 if isinstance(allowed, list) and allowed and symbol not in allowed:
                     continue
-            strategy = self._get_strategy(symbol, name)
+            strategy = self._get_strategy(strategy_broker, symbol, name)
             if not strategy:
                 continue
             try:
@@ -715,22 +723,23 @@ class TradingAgent:
                 self._signal_summary(sig, include_features=self._include_feature_snapshots) for sig in signals
             ]
             trace["orchestrator_mode"] = self.cfg.get("orchestrator", {}).get("mode", "direct")
-        self._update_orchestrator(symbol, market_state, orchestrator_broker)
+        self._update_orchestrator(symbol, market_state, strategy_broker)
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             names, weights = self._orchestrator.select(
-                symbol, active_strategies, market_state, signals, orchestrator_broker
+                symbol, active_strategies, market_state, signals, strategy_broker
             )
         else:
             names, weights = self._orchestrator.select(active_strategies, market_state)
         filtered_signals = [signal for signal in signals if signal.get("name") in names]
         action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names)
         order_meta = self._select_order_meta(filtered_signals, names)
-        broker_override = market_state.get("broker_override")
         if broker_override:
-            broker_name = self._normalize_broker_name(str(broker_override))
+            broker_name = broker_override
         else:
             broker_name = self._resolve_broker_for_symbol(symbol, names, filtered_signals, action_strategy)
         broker_state = self._broker_state(broker_name)
+        if broker_name != strategy_broker:
+            market_state["risk_outcome"] = broker_state.risk_outcomes.get(symbol, {})
         if broker_state.risk.should_circuit_break(broker_state.current_drawdown_pct):
             self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
             logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
@@ -780,7 +789,7 @@ class TradingAgent:
             trace["action"] = action
             trace["action_strategy"] = action_strategy
             trace["broker"] = broker_name
-        guardrail = self._get_guardrail(symbol)
+        guardrail = self._get_guardrail(broker_name, symbol)
         if guardrail:
             guard_action = guardrail.generate_signal(market_state).get("action", "hold")
             mode = self.learning_cfg.get("guardrail", {}).get("mode", "confirm")
@@ -2182,7 +2191,6 @@ class TradingAgent:
     ) -> None:
         broker_name = (
             broker_name
-            or self._orchestrator_broker_by_symbol.get(symbol)
             or market_state.get("broker_override")
             or self._broker_name
         )
@@ -2210,7 +2218,6 @@ class TradingAgent:
         self, symbol: str, signals: list[dict], market_state: dict, broker_name: str | None = None
     ) -> None:
         broker_name = broker_name or market_state.get("broker") or self._broker_name
-        self._orchestrator_broker_by_symbol[symbol] = broker_name
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.record(symbol, signals, market_state, broker_name)
             return
