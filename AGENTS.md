@@ -349,3 +349,5 @@ Highest positive impact (testing/live trading):
 - Keyed strategy/guardrail caches by broker+symbol to prevent cross-account state bleed, and removed symbol-only orchestrator broker tracking.
 - Ensured per-account risk_outcome is set before signals; updated broker selection flow accordingly.
 - `PYTHONPATH=. pytest` passed (34 passed, 9 skipped).
+- Added `pythonpath = .` to `pytest.ini` so tests import `app` without `PYTHONPATH`.
+- Re-ran `pytest` successfully (34 passed, 9 skipped).
