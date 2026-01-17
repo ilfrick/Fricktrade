@@ -344,3 +344,5 @@ can reload context quickly. Keep it updated when the setup changes.
 - Backtest run via docker compose did not complete within 5 minutes (heavy RL-missing warnings); container stopped.
 
 - RL policy models are expected at `/app/models/ppo_policy.zip` (host `./models` via docker volume); absence indicates training/learner hasn't produced checkpoints or wrote to a different path. Orchestrator RL models live under `/data` (host `./data`).
+
+- RL training run timed out after 30 minutes; `ppo_policy.zip` not written (only `models/ppo_policy.zip.tmp`). Stopped leftover trainer containers.
