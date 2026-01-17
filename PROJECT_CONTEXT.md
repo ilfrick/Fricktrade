@@ -340,3 +340,5 @@ can reload context quickly. Keep it updated when the setup changes.
 - `_session_gain_pct` now uses a direct previous-close lookup instead of slicing.
 
 - `config/config.yaml` now sets `data.process_on_new_bar_only: true` to avoid redundant per-bar work.
+
+- Backtest run via docker compose did not complete within 5 minutes (heavy RL-missing warnings); container stopped.

@@ -372,3 +372,5 @@ Highest positive impact (testing/live trading):
 - Optimized `_session_gain_pct` to avoid DataFrame slicing; `pytest` passed (34 passed, 9 skipped).
 
 - Enabled `data.process_on_new_bar_only` in `config/config.yaml` to skip per-symbol processing when bars haven't advanced.
+
+- Attempted `docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml`; timed out after 120s and again after 300s. Backtest spammed warnings about missing RL models and did not complete; container was stopped.
