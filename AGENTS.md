@@ -374,3 +374,5 @@ Highest positive impact (testing/live trading):
 - Enabled `data.process_on_new_bar_only` in `config/config.yaml` to skip per-symbol processing when bars haven't advanced.
 
 - Attempted `docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml`; timed out after 120s and again after 300s. Backtest spammed warnings about missing RL models and did not complete; container was stopped.
+
+- RL policy models missing: `learning.enabled` only loads `/app/models/ppo_policy.zip`; with Docker volumes this maps to `./models/`. If training/learner never ran or wrote elsewhere, no checkpoints exist. Orchestrator RL models live under `/data` (host `./data`).
