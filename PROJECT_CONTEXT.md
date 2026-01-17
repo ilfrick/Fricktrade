@@ -330,3 +330,6 @@ can reload context quickly. Keep it updated when the setup changes.
 - Ran a quick backtest cProfile; remaining hotspots are import time and pandas indexing.
 
 - Perf guidance: vectorize with NumPy/Polars first, then apply Numba to remaining tight loops; CuPy only after large, contiguous batches. Avoid pandas indexing in hot loops by pre-extracting arrays and reducing `.loc`/`.xs` calls.
+
+- Backtest loop now uses pre-extracted OHLCV arrays with timeline indexers to avoid per-row pandas indexing.
+- cProfile sample run improved from ~3.75s to ~1.65s; import time is now the main cost.

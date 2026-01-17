@@ -360,3 +360,7 @@ Highest positive impact (testing/live trading):
 - `pytest` passed (34 passed, 9 skipped).
 
 - Performance guidance: prioritize NumPy/Polars vectorization, then Numba for remaining per-bar loops; CuPy only after heavy vectorization with large batches. Pandas indexing fixes include pre-extracting columns to arrays, avoiding per-row `.loc`/`.xs`, and iterating over contiguous arrays.
+
+- Backtest loop now pre-extracts OHLCV arrays and uses timeline indexers to avoid per-bar pandas `.loc` lookups; added `_prepare_backtest_frames` and `_SymbolState.update_from_values`.
+- cProfile backtest time dropped ~3.75s -> ~1.65s in the sample run; pandas indexing no longer dominates.
+- `pytest` passed (34 passed, 9 skipped).

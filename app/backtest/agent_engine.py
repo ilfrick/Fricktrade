@@ -35,6 +35,12 @@ class BacktestPlanResult:
     total_trades: int
 
 
+@dataclass
+class _FrameData:
+    values: list[list[float]]
+    indexer: list[int]
+
+
 class SimBroker:
     def __init__(self, initial_cash: float, commission_pct: float, slippage_bps: float = 0.0, spread_bps: float = 0.0):
         self.cash = float(initial_cash)
@@ -207,7 +213,9 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
     if not frames:
         raise FileNotFoundError(f"No CSV data found for symbols in {data_dir}")
 
-    timeline = _build_timeline(frames, start, end)
+    timeline_index, prepared_frames = _prepare_backtest_frames(frames, start, end)
+    if not prepared_frames:
+        raise FileNotFoundError(f"No CSV data found for symbols in {data_dir}")
     sim_cfg = _backtest_cfg_override(cfg)
     broker = _build_sim_broker(cfg, backtest_cfg)
     agent = TradingAgent(broker, sim_cfg)
@@ -216,18 +224,20 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
     lookback_minutes = int(sim_cfg["strategy"]["params"].get("lookback_minutes", 30))
     lookback_bars = max(2, int(lookback_minutes / interval_minutes))
 
-    state = {sym: _SymbolState(max_len=max(lookback_bars, 60)) for sym in frames}
+    state = {sym: _SymbolState(max_len=max(lookback_bars, 60)) for sym in prepared_frames}
     start_value = broker.get_account()["equity"]
 
     news_cache = _load_backtest_news(backtest_cfg)
-    for ts in timeline:
+    timeline = timeline_index.to_pydatetime()
+    for ts_idx, ts in enumerate(timeline):
         _apply_news_cache(agent, news_cache, ts)
-        for symbol, frame in frames.items():
-            if ts not in frame.index:
+        for symbol, frame_data in prepared_frames.items():
+            pos = frame_data.indexer[ts_idx]
+            if pos < 0:
                 continue
-            row = frame.loc[ts]
+            row = frame_data.values[pos]
             sym_state = state[symbol]
-            sym_state.update(ts, row)
+            sym_state.update_from_values(ts, row)
             market_state = sym_state.market_state()
             if market_state["last_price"] is None:
                 continue
@@ -245,7 +255,7 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
         trades=broker.trades,
         start=start.strftime("%Y-%m-%d"),
         end=end.strftime("%Y-%m-%d"),
-        symbols=sorted(frames.keys()),
+        symbols=sorted(prepared_frames.keys()),
     )
 
 
@@ -339,6 +349,38 @@ def _build_timeline(frames: dict[str, pd.DataFrame], start: datetime, end: datet
         subset = frame.loc[(frame.index >= start) & (frame.index <= end)]
         times.update(subset.index.to_pydatetime().tolist())
     return sorted(times)
+
+
+def _prepare_backtest_frames(
+    frames: dict[str, pd.DataFrame],
+    start: datetime,
+    end: datetime,
+) -> tuple[pd.DatetimeIndex, dict[str, _FrameData]]:
+    timeline = None
+    subsets: dict[str, pd.DataFrame] = {}
+    for symbol, frame in frames.items():
+        subset = frame.loc[(frame.index >= start) & (frame.index <= end)]
+        if subset.empty:
+            continue
+        subsets[symbol] = subset
+        timeline = subset.index if timeline is None else timeline.union(subset.index)
+    if not subsets:
+        return pd.DatetimeIndex([]), {}
+    timeline = timeline.sort_values()
+    prepared: dict[str, _FrameData] = {}
+    columns = ["Open", "High", "Low", "Close", "Volume"]
+    for symbol, subset in subsets.items():
+        missing = [col for col in columns if col not in subset.columns]
+        if missing:
+            subset = subset.copy()
+            for col in missing:
+                subset[col] = 0.0
+        subset = subset[columns]
+        prepared[symbol] = _FrameData(
+            values=subset.to_numpy(),
+            indexer=subset.index.get_indexer(timeline),
+        )
+    return timeline, prepared
 
 
 def _interval_minutes(interval: str) -> int:
@@ -461,6 +503,20 @@ class _SymbolState:
         self.highs.append(float(row.get("High", 0.0) or 0.0))
         self.lows.append(float(row.get("Low", 0.0) or 0.0))
         self.volumes.append(float(row.get("Volume", 0.0) or 0.0))
+
+    def update_from_values(self, ts: datetime, values) -> None:
+        price = float(values[3] or 0.0)
+        date = ts.date()
+        if self.current_date != date:
+            if self.prices:
+                self.prev_close = self.prices[-1]
+            self.session_open = price
+            self.current_date = date
+        self.prices.append(price)
+        self.opens.append(float(values[0] or 0.0))
+        self.highs.append(float(values[1] or 0.0))
+        self.lows.append(float(values[2] or 0.0))
+        self.volumes.append(float(values[4] or 0.0))
 
     def market_state(self) -> dict:
         prices = list(self.prices)
