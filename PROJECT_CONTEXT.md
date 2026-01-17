@@ -328,3 +328,5 @@ can reload context quickly. Keep it updated when the setup changes.
 - Disabled decision-trace output after the first write failure to avoid log spam and perf overhead.
 - Added a Prometheus no-op metrics fallback when `prometheus_client` is missing.
 - Ran a quick backtest cProfile; remaining hotspots are import time and pandas indexing.
+
+- Perf guidance: vectorize with NumPy/Polars first, then apply Numba to remaining tight loops; CuPy only after large, contiguous batches. Avoid pandas indexing in hot loops by pre-extracting arrays and reducing `.loc`/`.xs` calls.

@@ -358,3 +358,5 @@ Highest positive impact (testing/live trading):
 - Disabled decision-trace output after the first write failure to avoid log spam and perf overhead; re-ran cProfile backtest.
 - Fixed Alpaca scanner helpers to use lazy imports in universe/price/venue helpers.
 - `pytest` passed (34 passed, 9 skipped).
+
+- Performance guidance: prioritize NumPy/Polars vectorization, then Numba for remaining per-bar loops; CuPy only after heavy vectorization with large batches. Pandas indexing fixes include pre-extracting columns to arrays, avoiding per-row `.loc`/`.xs`, and iterating over contiguous arrays.
