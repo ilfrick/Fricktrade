@@ -13,11 +13,20 @@ from pathlib import Path
 from statistics import pstdev
 import logging
 
-import torch
-from torch import nn
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+try:
+    import torch
+    from torch import nn
+except Exception:
+    torch = None
 
-import yfinance as yf
+    class _TorchStub:
+        Module = object
+
+        def __getattr__(self, name: str):
+            raise ImportError("torch is required for RL orchestrator features.")
+
+    nn = _TorchStub()
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 try:
     from app.data import ai_filter as ai_filter_module
@@ -335,6 +344,8 @@ class RLStrategyOrchestrator:
             yf_timeout_seconds=int(rl_cfg.get("pretrain", {}).get("timeout_seconds", 15)),
             yf_retries=int(rl_cfg.get("pretrain", {}).get("retries", 2)),
         )
+        if self.cfg.enabled:
+            _require_torch()
         self._device = _resolve_device(self.cfg.device)
         self._model: nn.Module | None = None
         self._optimizer: torch.optim.Optimizer | None = None
@@ -997,11 +1008,24 @@ def _order_feedback_vector(state: dict[str, float] | None) -> list[float]:
 
 
 def _resolve_device(device: str) -> str:
-    if torch.cuda.is_available():
+    if torch is not None and torch.cuda.is_available():
         return "cuda"
     if device != "auto":
         return device
     return "cpu"
+
+
+def _require_torch() -> None:
+    if torch is None:
+        raise ImportError("torch is required for RL orchestrator features; install torch to enable it.")
+
+
+def _load_yfinance():
+    try:
+        import yfinance as yf
+    except Exception as exc:
+        raise ImportError("yfinance is required for orchestrator pretrain; install yfinance.") from exc
+    return yf
 
 
 def _last_price(market_state: dict) -> float | None:
@@ -1032,7 +1056,7 @@ def _download_yf(
     for attempt in range(retries + 1):
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
-                yf.download,
+                _load_yfinance().download,
                 tickers=symbol,
                 period=f"{lookback_days}d",
                 interval=interval,

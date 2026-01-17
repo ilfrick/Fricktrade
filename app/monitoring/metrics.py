@@ -1,7 +1,32 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
-from prometheus_client import Counter, Gauge, Histogram, start_http_server
+try:
+    from prometheus_client import Counter, Gauge, Histogram, start_http_server
+except Exception:
+    class _NoopMetric:
+        def labels(self, **kwargs):
+            return self
+
+        def inc(self, amount: float = 1.0) -> None:
+            return None
+
+        def set(self, value: float) -> None:
+            return None
+
+        def observe(self, value: float) -> None:
+            return None
+
+        def remove(self, *args, **kwargs) -> None:
+            return None
+
+    def _noop_metric(*args, **kwargs):
+        return _NoopMetric()
+
+    Counter = Gauge = Histogram = _noop_metric
+
+    def start_http_server(*args, **kwargs):
+        return None
 
 TRADES = Counter("trades_total", "Total trades executed", ["symbol", "side"])
 SKIPPED_ORDERS = Counter(

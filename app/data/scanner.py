@@ -7,10 +7,15 @@ from dataclasses import dataclass
 from typing import Iterable
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockSnapshotRequest
-from alpaca.data.enums import DataFeed
-from alpaca.trading.client import TradingClient
+def _alpaca_imports():
+    try:
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import StockSnapshotRequest
+        from alpaca.data.enums import DataFeed
+        from alpaca.trading.client import TradingClient
+    except Exception as exc:
+        raise ImportError("alpaca-py is required for Alpaca scanning") from exc
+    return StockHistoricalDataClient, StockSnapshotRequest, DataFeed, TradingClient
 
 
 @dataclass
@@ -39,6 +44,7 @@ def scan_symbols(
     symbols = [s for s in symbols if s]
     if not symbols or not api_key or not api_secret:
         return []
+    StockHistoricalDataClient, StockSnapshotRequest, DataFeed, _ = _alpaca_imports()
     client = StockHistoricalDataClient(api_key, api_secret)
     results = []
     catalyst_map = catalyst_map or {}
@@ -77,18 +83,13 @@ def _chunked(items: list[str], size: int) -> list[list[str]]:
     return [items[idx : idx + size] for idx in range(0, len(items), size)]
 
 
-def _fetch_snapshots(
-    client: StockHistoricalDataClient,
-    symbols: list[str],
-    feed: str,
-    timeout_seconds: int,
-    retries: int,
-):
+def _fetch_snapshots(client, symbols: list[str], feed: str, timeout_seconds: int, retries: int):
+    _, StockSnapshotRequest, DataFeed, _ = _alpaca_imports()
     for attempt in range(retries + 1):
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
                 client.get_stock_snapshot,
-                StockSnapshotRequest(symbol_or_symbols=symbols, feed=_map_feed(feed)),
+                StockSnapshotRequest(symbol_or_symbols=symbols, feed=_map_feed(feed, DataFeed)),
             )
             try:
                 return future.result(timeout=timeout_seconds)
@@ -108,6 +109,7 @@ def load_universe(
     max_universe: int = 500,
 ) -> list[str]:
     if isinstance(universe, str) and universe == "alpaca_active":
+        _, _, _, TradingClient = _alpaca_imports()
         client = TradingClient(api_key, api_secret, raw_data=True)
         assets = client.get_all_assets()
         symbols = []
@@ -148,6 +150,7 @@ def filter_universe_by_price(
         return []
     if not api_key or not api_secret:
         return symbols
+    StockHistoricalDataClient, _, _, _ = _alpaca_imports()
     client = StockHistoricalDataClient(api_key, api_secret)
     filtered: list[str] = []
     for chunk in _chunked(symbols, 100):
@@ -174,6 +177,7 @@ def load_symbol_venues(
     max_symbols: int,
     exchange_map: dict[str, str],
 ) -> dict[str, str]:
+    _, _, _, TradingClient = _alpaca_imports()
     client = TradingClient(api_key, api_secret, raw_data=True)
     assets = client.get_all_assets()
     venues: dict[str, str] = {}
@@ -226,7 +230,7 @@ def _passes_filters(
     return True
 
 
-def _map_feed(feed: str) -> DataFeed:
+def _map_feed(feed: str, DataFeed):
     if feed.lower() == "sip":
         return DataFeed.SIP
     return DataFeed.IEX

@@ -7,7 +7,6 @@ import logging
 from collections import deque
 from typing import TYPE_CHECKING
 from pathlib import Path
-from stable_baselines3 import PPO
 
 from app.learning.features import build_observation, observation_size, risk_feature_vector
 from app.strategies.base import Strategy
@@ -44,7 +43,8 @@ class RLPolicyStrategy(Strategy):
         path = Path(model_path)
         if not path.exists():
             raise FileNotFoundError(f"RL model not found at {model_path}")
-        model = PPO.load(str(path), device=self.device, custom_objects=_sb3_custom_objects())
+        ppo_cls = _load_ppo()
+        model = ppo_cls.load(str(path), device=self.device, custom_objects=_sb3_custom_objects())
         expected = observation_size(self.window_size, self.feature_config)
         actual = 0
         try:
@@ -119,6 +119,16 @@ def _resolve_device(device: str) -> str:
     if device != "auto":
         return device
     return "cpu"
+
+
+def _load_ppo():
+    try:
+        from stable_baselines3 import PPO
+    except Exception as exc:
+        raise ImportError(
+            "stable_baselines3 is required for RL policy models; install the RL extras."
+        ) from exc
+    return PPO
 
 
 def _sb3_custom_objects() -> dict:

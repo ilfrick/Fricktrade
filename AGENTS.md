@@ -352,3 +352,9 @@ Highest positive impact (testing/live trading):
 - Added `pythonpath = .` to `pytest.ini` so tests import `app` without `PYTHONPATH`.
 - Re-ran `pytest` successfully (34 passed, 9 skipped).
 - Discussed performance-oriented rewrites: candidate hotspots include data scanning/feature extraction and backtest engine; advised profiling first and preferring NumPy/Polars/Numba before Rust/C++.
+
+- Added lazy imports for optional deps (torch/stable-baselines3/yfinance/alpaca-py) so backtests/profiling run without the full ML stack.
+- Added a Prometheus no-op fallback when `prometheus_client` is missing.
+- Disabled decision-trace output after the first write failure to avoid log spam and perf overhead; re-ran cProfile backtest.
+- Fixed Alpaca scanner helpers to use lazy imports in universe/price/venue helpers.
+- `pytest` passed (34 passed, 9 skipped).

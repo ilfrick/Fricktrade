@@ -180,6 +180,7 @@ class TradingAgent:
         trace_cfg = report_cfg.get("decision_trace", {}) or {}
         self._decision_trace_enabled = bool(trace_cfg.get("enabled", True))
         self._decision_trace_dir = str(trace_cfg.get("output_dir", "/data/reports/decision_trace"))
+        self._decision_trace_blocked = False
         monitoring_cfg = cfg.get("monitoring", {}) or {}
         audit_cfg = monitoring_cfg.get("audit", {}) or {}
         compliance_cfg = monitoring_cfg.get("compliance", {}) or {}
@@ -616,6 +617,11 @@ class TradingAgent:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(payload) + "\n")
+        except OSError as exc:
+            if not self._decision_trace_blocked:
+                logging.warning("Decision trace write failed; disabling trace output: %s", exc)
+            self._decision_trace_blocked = True
+            self._decision_trace_enabled = False
         except Exception as exc:
             logging.warning("Decision trace write failed: %s", exc)
 

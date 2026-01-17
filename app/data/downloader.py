@@ -7,10 +7,14 @@ import time
 from datetime import datetime
 
 import pandas as pd
-import yfinance as yf
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
+
+def _load_yfinance():
+    try:
+        import yfinance as yf
+    except Exception as exc:
+        raise ImportError("yfinance is required for yfinance downloads") from exc
+    return yf
 
 
 def _download_with_retries(
@@ -21,6 +25,7 @@ def _download_with_retries(
     retries: int = 3,
 ):
     last_err = None
+    yf = _load_yfinance()
     proxy_args = {"proxy": proxy} if proxy else {}
     for attempt in range(1, retries + 1):
         try:
@@ -81,6 +86,7 @@ def download_yfinance(
     start: str = "",
     end: str = "",
 ) -> list[Path]:
+    yf = _load_yfinance()
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     files = []
@@ -124,7 +130,17 @@ def download_yfinance(
     return files
 
 
-def _alpaca_timeframe(interval: str) -> TimeFrame:
+def _alpaca_imports():
+    try:
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+    except Exception as exc:
+        raise ImportError("alpaca-py is required for Alpaca downloads") from exc
+    return StockHistoricalDataClient, StockBarsRequest, TimeFrame, TimeFrameUnit
+
+
+def _alpaca_timeframe(interval: str, TimeFrame, TimeFrameUnit):
     if interval.endswith("m"):
         return TimeFrame(int(interval[:-1]), TimeFrameUnit.Minute)
     if interval.endswith("h"):
@@ -153,10 +169,11 @@ def download_alpaca_bars(
     if not api_key or not api_secret:
         logging.warning("Alpaca API credentials missing; skipping download")
         return []
+    StockHistoricalDataClient, StockBarsRequest, TimeFrame, TimeFrameUnit = _alpaca_imports()
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     client = StockHistoricalDataClient(api_key, api_secret)
-    timeframe = _alpaca_timeframe(interval)
+    timeframe = _alpaca_timeframe(interval, TimeFrame, TimeFrameUnit)
     start_dt = _parse_dt(start)
     end_dt = _parse_dt(end)
     files = []

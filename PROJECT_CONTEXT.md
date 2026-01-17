@@ -323,3 +323,8 @@ can reload context quickly. Keep it updated when the setup changes.
 - Strategy/guardrail caches and orchestrator state are now keyed per broker+symbol; tests pass with `PYTHONPATH=. pytest`.
 - `pytest` now works without `PYTHONPATH` thanks to `pythonpath = .` in `pytest.ini`.
 - Performance discussion: likely hotspots are data scanning/feature extraction and backtest simulation; profile first and consider NumPy/Polars/Numba before Rust/C++.
+
+- Added lazy imports for optional deps (torch, stable-baselines3, yfinance, alpaca-py) so backtests can run without the full ML stack.
+- Disabled decision-trace output after the first write failure to avoid log spam and perf overhead.
+- Added a Prometheus no-op metrics fallback when `prometheus_client` is missing.
+- Ran a quick backtest cProfile; remaining hotspots are import time and pandas indexing.
