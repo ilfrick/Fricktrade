@@ -351,3 +351,4 @@ Highest positive impact (testing/live trading):
 - `PYTHONPATH=. pytest` passed (34 passed, 9 skipped).
 - Added `pythonpath = .` to `pytest.ini` so tests import `app` without `PYTHONPATH`.
 - Re-ran `pytest` successfully (34 passed, 9 skipped).
+- Discussed performance-oriented rewrites: candidate hotspots include data scanning/feature extraction and backtest engine; advised profiling first and preferring NumPy/Polars/Numba before Rust/C++.

@@ -322,3 +322,4 @@ can reload context quickly. Keep it updated when the setup changes.
 - For deterministic per-account routing with duplicate symbols, prefer account+symbol keys for strategy/orchestrator state to avoid cross-account leakage.
 - Strategy/guardrail caches and orchestrator state are now keyed per broker+symbol; tests pass with `PYTHONPATH=. pytest`.
 - `pytest` now works without `PYTHONPATH` thanks to `pythonpath = .` in `pytest.ini`.
+- Performance discussion: likely hotspots are data scanning/feature extraction and backtest simulation; profile first and consider NumPy/Polars/Numba before Rust/C++.
