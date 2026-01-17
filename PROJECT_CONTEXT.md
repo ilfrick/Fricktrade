@@ -350,3 +350,5 @@ can reload context quickly. Keep it updated when the setup changes.
 - Reduced RL training timesteps to 20000, but training still timed out after ~15 minutes and no `ppo_policy.zip` was written (only `.tmp`).
 
 - RL training completed with reduced scope (`/data/rl_train_small`, 5000 timesteps); model + registry files now exist under `./models`.
+
+- Online RL enabled in config but no learner containers running; online updates require starting `learner`/`learner-gpu`.

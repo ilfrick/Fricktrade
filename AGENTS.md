@@ -382,3 +382,6 @@ Highest positive impact (testing/live trading):
 - Lowered `learning.training.timesteps` to 20000 and retried `docker compose run --rm trader python3 -m app.main train --config /app/config/config.yaml`; still timed out after 15 minutes. Training reported 20000 timesteps but logged `total_timesteps` ~483k; no `ppo_policy.zip` produced (only `ppo_policy.zip.tmp`). Stopped container `fricktrade-trader-run-23e95345e0c6`.
 
 - Reduced RL training scope: set `learning.training.timesteps: 5000` and `learning.training.data_dir: /data/rl_train_small` (AAPL/MSFT 1m only). Training completed; `ppo_policy.zip`, `ppo_policy_best.zip`, registry, and reports created under `./models`.
+
+- Checked online training flags: `learning.enabled: true`, `learning.online.enabled: true`, `orchestrator.rl.enabled: true` in `config/config.yaml`.
+- No learner containers running (`docker ps` shows none). Online updates require starting `learner` or `learner-gpu`.
