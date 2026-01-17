@@ -568,6 +568,11 @@ def _session_gain_pct(data, prices: list[float], mode: str) -> float:
 def _build_broker(cfg: dict):
     brokers: dict[str, object] = {}
     paper = os.getenv("TRADING_MODE", "paper").lower() == "paper"
+    market_cfg = cfg.get("market", {}) if isinstance(cfg, dict) else {}
+    default_currency = str(market_cfg.get("default_currency") or "USD").upper()
+    symbol_currencies = market_cfg.get("symbol_currencies", {}) if isinstance(market_cfg, dict) else {}
+    ibkr_base_cfg = cfg.get("brokers", {}).get("ibkr", {}) if isinstance(cfg, dict) else {}
+    ibkr_default_currency = str(ibkr_base_cfg.get("currency") or default_currency).upper()
     for account in iter_alpaca_accounts(cfg):
         try:
             broker = AlpacaBroker(
@@ -586,12 +591,17 @@ def _build_broker(cfg: dict):
             continue
     for account in iter_ibkr_accounts(cfg):
         try:
+            currency = str(account.get("currency") or ibkr_default_currency or default_currency).upper()
+            if not currency:
+                currency = default_currency
             broker = IBKRBroker(
                 account.get("host", "127.0.0.1"),
                 int(account.get("port", 7497)),
                 int(account.get("client_id", 1)),
                 name=account["name"],
                 account_id=account.get("account_id", ""),
+                currency=currency,
+                symbol_currencies=symbol_currencies,
             )
             if not broker.is_connected():
                 logging.warning("IBKR account %s unavailable; skipping.", account["name"])

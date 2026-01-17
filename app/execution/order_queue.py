@@ -39,7 +39,13 @@ class OrderResponse:
 
 
 class OrderQueue:
-    def __init__(self, broker: Broker, broker_name: str, retry_cfg: dict | None = None):
+    def __init__(
+        self,
+        broker: Broker,
+        broker_name: str,
+        retry_cfg: dict | None = None,
+        completion_grace_seconds: int = 0,
+    ):
         self._broker = broker
         self._broker_name = broker_name
         self._retry_cfg = retry_cfg or {}
@@ -49,6 +55,8 @@ class OrderQueue:
         self._cancel_requested: set[str] = set()
         self._responses: list[OrderResponse] = []
         self._retry_notional_used = 0.0
+        self._completion_grace_seconds = max(int(completion_grace_seconds), 0)
+        self._missing_since: datetime | None = None
 
     def enqueue(
         self,
@@ -84,17 +92,26 @@ class OrderQueue:
             self._cancel_requested.add(order_id)
 
     def update(self, open_orders: list[dict]) -> None:
+        now = datetime.utcnow()
         open_by_id = {str(o.get("order_id")): o for o in open_orders if o.get("order_id")}
         open_ids = set(open_by_id.keys())
         if self._active and self._active.order_id:
             active_id = self._active.order_id
             if active_id in open_by_id:
+                self._missing_since = None
                 snapshot = open_by_id[active_id]
                 response = self._response_from_snapshot(snapshot, "open")
                 if response and response != self._active_snapshot:
                     self._active_snapshot = response
                     self._responses.append(OrderResponse(**response))
             elif active_id not in open_ids:
+                if self._completion_grace_seconds > 0:
+                    if self._missing_since is None:
+                        self._missing_since = now
+                        return
+                    if (now - self._missing_since).total_seconds() < self._completion_grace_seconds:
+                        return
+                self._missing_since = None
                 status = "canceled" if self._active.order_id in self._cancel_requested else "completed"
                 snapshot = self._active_snapshot or {}
                 self._responses.append(

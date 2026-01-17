@@ -22,7 +22,7 @@ class _StubBroker:
 
 def test_order_queue_fifo() -> None:
     broker = _StubBroker()
-    queue = OrderQueue(broker, "alpaca")
+    queue = OrderQueue(broker, "alpaca", completion_grace_seconds=0)
     first_id = queue.enqueue("AAA", "buy", 1)
     second_id = queue.enqueue("BBB", "sell", 2)
     assert first_id is not None
@@ -66,10 +66,48 @@ def test_order_queue_retry() -> None:
         "max_notional": 0,
         "reasons": ["unknown"],
     }
-    queue = OrderQueue(broker, "alpaca", retry_cfg)
+    queue = OrderQueue(broker, "alpaca", retry_cfg, completion_grace_seconds=0)
     queue.enqueue("AAA", "buy", 1, notional=100)
     responses = queue.pop_responses()
     assert any(r.status == "retrying" for r in responses)
     queue.update([])
     responses = queue.pop_responses()
     assert any(r.status == "submitted" for r in responses)
+
+
+def test_order_queue_completion_grace(monkeypatch) -> None:
+    class _Clock:
+        now = None
+
+        @classmethod
+        def utcnow(cls):
+            return cls.now
+
+    class _StubBroker:
+        def __init__(self) -> None:
+            self.orders = []
+
+        def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs):
+            order_id = f"order-{len(self.orders) + 1}"
+            self.orders.append({"order_id": order_id, "symbol": symbol, "side": side, "qty": qty})
+            return order_id
+
+    from datetime import datetime, timedelta
+    import app.execution.order_queue as order_queue
+
+    _Clock.now = datetime(2026, 1, 1, 0, 0, 0)
+    monkeypatch.setattr(order_queue, "datetime", _Clock)
+
+    broker = _StubBroker()
+    queue = OrderQueue(broker, "alpaca", completion_grace_seconds=60)
+    order_id = queue.enqueue("AAA", "buy", 1)
+    queue.update([{"order_id": order_id, "symbol": "AAA", "side": "buy", "qty": 1}])
+    queue.pop_responses()
+
+    queue.update([])
+    assert queue.pop_responses() == []
+
+    _Clock.now = _Clock.now + timedelta(seconds=61)
+    queue.update([])
+    responses = queue.pop_responses()
+    assert any(r.status == "completed" for r in responses)

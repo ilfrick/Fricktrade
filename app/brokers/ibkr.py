@@ -8,11 +8,26 @@ from app.monitoring.broker_metrics import record_broker_call
 
 
 class IBKRBroker(Broker):
-    def __init__(self, host: str, port: int, client_id: int, name: str = "ibkr", account_id: str | None = None):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        client_id: int,
+        name: str = "ibkr",
+        account_id: str | None = None,
+        currency: str = "USD",
+        symbol_currencies: dict[str, str] | None = None,
+    ):
         self.ib = IB()
         self.ib.connect(host, port, clientId=client_id)
         self._name = name
         self._account_id = str(account_id) if account_id else ""
+        self._currency = str(currency or "USD").upper()
+        self._symbol_currencies = {
+            str(symbol).upper(): str(code).upper()
+            for symbol, code in (symbol_currencies or {}).items()
+            if symbol and code
+        }
 
     def is_connected(self) -> bool:
         return self.ib.isConnected()
@@ -74,7 +89,7 @@ class IBKRBroker(Broker):
         return orders
 
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
-        contract = Stock(symbol, "SMART", "EUR")
+        contract = Stock(symbol, "SMART", self._resolve_currency(symbol))
         action = "BUY" if side.lower() == "buy" else "SELL"
         extended_hours = bool(kwargs.get("extended_hours", False))
         if str(order_type).lower() == "limit":
@@ -102,7 +117,10 @@ class IBKRBroker(Broker):
                 order = MarketOrder(side, abs(pos.position))
                 if self._account_id:
                     order.account = self._account_id
-                record_broker_call(self._name, "close_position", self.ib.placeOrder, pos.contract, order)
+                contract = pos.contract
+                if not getattr(contract, "currency", None):
+                    contract = Stock(symbol, "SMART", self._resolve_currency(symbol))
+                record_broker_call(self._name, "close_position", self.ib.placeOrder, contract, order)
 
     def cancel_order(self, order_id: str) -> None:
         try:
@@ -122,6 +140,9 @@ class IBKRBroker(Broker):
             if order.orderId == oid or getattr(order, "permId", None) == oid:
                 record_broker_call(self._name, "cancel_order", self.ib.cancelOrder, order)
                 return
+
+    def _resolve_currency(self, symbol: str) -> str:
+        return self._symbol_currencies.get(str(symbol).upper(), self._currency)
 
 
 def _find_account_flag(data: dict, names: set[str]) -> str | None:

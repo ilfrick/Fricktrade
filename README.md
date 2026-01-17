@@ -180,6 +180,7 @@ flowchart LR
 - Prometheus metrics (`app/monitoring/metrics.py`)
 - Grafana dashboards for orders, positions, PnL, account status, and latency
 - FastAPI `/health`, `/config`, `/config/raw`, `/config/schema`, `/config/update`, `/restart`, `/`, `/ui`
+- Optional API auth via `api.auth.*` using `X-API-Key` or `Authorization: Bearer`
 - Audit and compliance logs (JSONL/CSV) for decision traces
 
 ### Resilience & Storage
@@ -192,6 +193,7 @@ All configuration lives in `config/config.yaml`.
 `.env` directly (for example, Alertmanager SMTP rendering).
 
 Key sections:
+- `api.*`: FastAPI auth controls
 - `market.*`: venue gating, hours, symbol venue mapping
 - `brokers.*`: broker credentials and adapters (supports `brokers.<name>.accounts[]` or env auto-detect for multi-account routing)
 - `data.*`: symbols, dynamic scan, sources, AI filter
@@ -250,6 +252,7 @@ cp .env.example .env
 2) Set broker credentials in `.env`:
 - `ALPACA_API_KEY`
 - `ALPACA_API_SECRET`
+- `FRICKTRADE_API_TOKEN` (if `api.auth.enabled`)
 
 3) Start services:
 

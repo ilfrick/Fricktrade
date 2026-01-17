@@ -70,6 +70,7 @@ class AISymbolFilterConfig:
     market_cache_file_dir: str
     market_cache_cache_only: bool
     market_cache_ignore_staleness: bool
+    market_cache_allow_pickle: bool
 
 
 def score_symbols(
@@ -204,6 +205,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     market_cache_file_dir = str(cache_cfg.get("file_dir", "/data/market_cache"))
     market_cache_cache_only = bool(cache_cfg.get("cache_only", True))
     market_cache_ignore_staleness = bool(cache_cfg.get("ignore_staleness", False))
+    market_cache_allow_pickle = bool(cache_cfg.get("allow_pickle", False))
     return AISymbolFilterConfig(
         interval=interval,
         lookback_days=lookback_days,
@@ -244,6 +246,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         market_cache_file_dir=market_cache_file_dir,
         market_cache_cache_only=market_cache_cache_only,
         market_cache_ignore_staleness=market_cache_ignore_staleness,
+        market_cache_allow_pickle=market_cache_allow_pickle,
     )
 
 
@@ -608,6 +611,7 @@ def _fetch_bars_yfinance(
             cfg.market_cache_redis_url,
             cfg.market_cache_file_dir,
             ignore_staleness=cfg.market_cache_ignore_staleness,
+            allow_pickle=cfg.market_cache_allow_pickle,
         )
         cached = cache.get_bars(symbols, cfg.interval, max_age_seconds=max_age, lowercase=True)
         if cfg.market_cache_cache_only:

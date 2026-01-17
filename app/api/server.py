@@ -2,11 +2,12 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 from datetime import datetime
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse
 
 from app.utils.config import load_config
@@ -17,15 +18,50 @@ app = FastAPI(title="Fricktrade API")
 CONFIG_PATH = Path("/app/config/config.yaml")
 
 
+def _load_raw_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+    except FileNotFoundError:
+        return {}
+
+
+def _resolve_auth_token(cfg: dict) -> str | None:
+    auth_cfg = cfg.get("api", {}).get("auth", {}) if isinstance(cfg, dict) else {}
+    if not auth_cfg.get("enabled", False):
+        return None
+    token_env = str(auth_cfg.get("token_env", "FRICKTRADE_API_TOKEN"))
+    token = os.getenv(token_env, "")
+    if not token:
+        raise HTTPException(status_code=500, detail="API auth enabled but token is missing")
+    return token
+
+
+def _require_auth(request: Request) -> None:
+    token = _resolve_auth_token(_load_raw_config())
+    if not token:
+        return
+    header = request.headers.get("x-api-key", "")
+    auth = request.headers.get("authorization", "")
+    provided = header
+    if auth.lower().startswith("bearer "):
+        provided = auth.split(" ", 1)[1].strip()
+    if not provided or provided != token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 _DESCRIPTIONS = {
     "app.name": "Application name for logging and identification.",
     "app.env": "Environment label (e.g., prod, dev).",
     "app.timezone": "Timezone for market checks (IANA string).",
     "app.log_level": "Log verbosity level.",
+    "api.auth.enabled": "Require API token for config and restart endpoints.",
+    "api.auth.token_env": "Environment variable holding the API auth token.",
     "market.venue": "Primary venue label (informational).",
     "market.default_currency": "Default currency for reporting.",
     "market.default_symbol_venue": "Fallback venue when a symbol is not mapped.",
     "market.symbol_venues": "Manual symbol -> venue mappings.",
+    "market.symbol_currencies": "Manual symbol -> currency mappings.",
     "market.symbol_sectors": "Manual symbol -> sector mappings for exposure caps.",
     "market.open_mode": "Market gate: any|all configured venues must be open.",
     "market.holiday_update.enabled": "Enable automated holiday refresh.",
@@ -54,6 +90,7 @@ _DESCRIPTIONS = {
     "brokers.ibkr.port": "IBKR port.",
     "brokers.ibkr.client_id": "IBKR client id.",
     "brokers.ibkr.account_id": "Optional IBKR account id for routing positions/orders.",
+    "brokers.ibkr.currency": "IBKR default currency for contracts.",
     "brokers.ibkr.accounts": "Optional list of IBKR accounts (each becomes its own broker instance).",
     "brokers.ibkr.accounts[].name": "Account label used in broker routing (ibkr:<name>).",
     "brokers.ibkr.accounts[].enabled": "Enable this IBKR account entry.",
@@ -61,6 +98,7 @@ _DESCRIPTIONS = {
     "brokers.ibkr.accounts[].port": "IBKR port for this account.",
     "brokers.ibkr.accounts[].client_id": "IBKR client id for this account.",
     "brokers.ibkr.accounts[].account_id": "IBKR account id for this account.",
+    "brokers.ibkr.accounts[].currency": "IBKR contract currency override for this account.",
     "risk.max_daily_loss_pct": "Max daily loss percentage.",
     "risk.max_position_size_pct": "Max position size percentage.",
     "risk.max_portfolio_leverage": "Max leverage.",
@@ -425,6 +463,7 @@ _DESCRIPTIONS = {
     "execution.open_orders.enabled": "Enable periodic open-order checks.",
     "execution.open_orders.interval_seconds": "Open-order refresh interval in seconds.",
     "execution.open_orders.skip_if_pending": "Skip new signals if an order is pending for the symbol.",
+    "execution.open_orders.missing_grace_seconds": "Grace period before marking a missing order as completed.",
     "execution.brokers.enabled": "Enable multi-broker routing.",
     "execution.brokers.routing.default": "Default broker for order routing.",
     "execution.brokers.routing.symbols": "Symbol-to-broker routing map.",
@@ -454,6 +493,7 @@ _DESCRIPTIONS = {
     "monitoring.compliance.reason_codes_path": "Path to JSON list of allowed reason codes.",
     "monitoring.compliance.signing.enabled": "Enable compliance export signing.",
     "monitoring.compliance.signing.secret_env": "Environment variable containing the compliance signing secret.",
+    "market_cache.allow_pickle": "Allow legacy pickle cache reads (unsafe; defaults off).",
 }
 
 
@@ -462,27 +502,26 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/config")
+@app.get("/config", dependencies=[Depends(_require_auth)])
 async def get_config():
-    cfg = load_config("/app/config/config.yaml")
+    cfg = load_config(CONFIG_PATH)
     _mask_secrets(cfg)
     return cfg
 
 
-@app.get("/config/raw")
+@app.get("/config/raw", dependencies=[Depends(_require_auth)])
 async def get_config_raw():
-    with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
-        raw_cfg = yaml.safe_load(handle) or {}
+    raw_cfg = _load_raw_config()
     _mask_secrets(raw_cfg)
     return {"yaml": yaml.safe_dump(raw_cfg, sort_keys=False)}
 
 
-@app.get("/config/schema")
+@app.get("/config/schema", dependencies=[Depends(_require_auth)])
 async def get_config_schema():
     return {"descriptions": _DESCRIPTIONS}
 
 
-@app.post("/config/update")
+@app.post("/config/update", dependencies=[Depends(_require_auth)])
 async def update_config(payload: dict[str, Any]):
     if "yaml" not in payload:
         raise HTTPException(status_code=400, detail="Missing yaml field")
@@ -491,8 +530,7 @@ async def update_config(payload: dict[str, Any]):
         new_cfg = yaml.safe_load(raw_yaml) or {}
     except yaml.YAMLError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}") from exc
-    with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
-        current_cfg = yaml.safe_load(handle) or {}
+    current_cfg = _load_raw_config()
     unknown_keys = _validate_config_keys(new_cfg, current_cfg)
     if unknown_keys:
         joined = ", ".join(sorted(unknown_keys)[:20])
@@ -507,7 +545,7 @@ async def update_config(payload: dict[str, Any]):
     return {"status": "ok", "restart_required": True}
 
 
-@app.post("/restart")
+@app.post("/restart", dependencies=[Depends(_require_auth)])
 async def request_restart():
     restart_flag_path().write_text(datetime.utcnow().isoformat(), encoding="utf-8")
     return {"status": "ok"}
@@ -572,12 +610,22 @@ def _merge_secrets(target: dict, source: dict) -> None:
     try:
         current_accounts = source.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
         new_accounts = target.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
+        current_by_name = {
+            str(item.get("name")): item
+            for item in current_accounts
+            if isinstance(item, dict) and item.get("name")
+        }
         for idx, acct in enumerate(new_accounts):
             if not isinstance(acct, dict):
                 continue
-            if idx >= len(current_accounts):
+            current_acct = None
+            name = acct.get("name")
+            if name:
+                current_acct = current_by_name.get(str(name))
+            if current_acct is None and idx < len(current_accounts) and isinstance(current_accounts[idx], dict):
+                current_acct = current_accounts[idx]
+            if not current_acct:
                 continue
-            current_acct = current_accounts[idx] if isinstance(current_accounts[idx], dict) else {}
             for key in ("api_key", "api_secret"):
                 if acct.get(key) == "***":
                     acct[key] = current_acct.get(key, "")
@@ -591,12 +639,20 @@ def _merge_secrets(target: dict, source: dict) -> None:
             for item in current_sources
             if isinstance(item, dict) and item.get("provider")
         }
+        current_by_name = {
+            str(item.get("name")): item
+            for item in current_sources
+            if isinstance(item, dict) and item.get("name")
+        }
         for idx, item in enumerate(new_sources):
             if not isinstance(item, dict):
                 continue
             provider = item.get("provider")
             current_item = None
-            if provider:
+            name = item.get("name")
+            if name:
+                current_item = current_by_name.get(str(name))
+            if current_item is None and provider:
                 current_item = current_by_provider.get(str(provider))
             elif idx < len(current_sources) and isinstance(current_sources[idx], dict):
                 current_item = current_sources[idx]
@@ -648,6 +704,8 @@ def _render_ui() -> str:
     button { background: #2563eb; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
     button.secondary { background: #334155; }
     .status { margin-top: 8px; font-size: 12px; color: #94a3b8; }
+    .api-key { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .api-key input { flex: 1; }
     .desc { font-size: 12px; line-height: 1.4; padding: 6px 0; display: grid; grid-template-columns: minmax(180px, 0.9fr) 1.1fr; gap: 12px; }
     .desc b { color: #e2e8f0; display: block; }
     .group { margin-top: 12px; border-top: 1px solid #1f2937; padding-top: 10px; }
@@ -663,6 +721,10 @@ def _render_ui() -> str:
   <header><h2>Fricktrade Configuration</h2></header>
   <main>
     <section class="panel">
+      <div class="api-key">
+        <input id="apiKey" type="password" placeholder="API key (optional)"/>
+        <button class="secondary" onclick="saveApiKey()">Save</button>
+      </div>
       <textarea id="config"></textarea>
       <div class="actions">
         <button onclick="applyConfig()">Apply Changes</button>
@@ -714,14 +776,38 @@ def _render_ui() -> str:
       monitoring: "Monitoring",
       other: "Other"
     };
+    function apiHeaders() {
+      const key = localStorage.getItem('apiKey') || '';
+      return key ? { 'X-API-Key': key } : {};
+    }
+    function saveApiKey() {
+      const key = document.getElementById('apiKey').value || '';
+      if (key) {
+        localStorage.setItem('apiKey', key);
+      } else {
+        localStorage.removeItem('apiKey');
+      }
+    }
+    function loadApiKey() {
+      const key = localStorage.getItem('apiKey') || '';
+      document.getElementById('apiKey').value = key;
+    }
     async function loadConfig() {
-      const res = await fetch('/config/raw');
+      const res = await fetch('/config/raw', { headers: apiHeaders() });
+      if (res.status === 401) {
+        document.getElementById('status').textContent = 'Unauthorized. Provide API key.';
+        return;
+      }
       const data = await res.json();
       document.getElementById('config').value = data.yaml;
       document.getElementById('status').textContent = 'Loaded configuration.';
     }
     async function loadDescriptions() {
-      const res = await fetch('/config/schema');
+      const res = await fetch('/config/schema', { headers: apiHeaders() });
+      if (res.status === 401) {
+        document.getElementById('status').textContent = 'Unauthorized. Provide API key.';
+        return;
+      }
       const data = await res.json();
       descriptions = data.descriptions || {};
       const groupSelect = document.getElementById('groupFilter');
@@ -763,7 +849,8 @@ def _render_ui() -> str:
     }
     async function applyConfig() {
       const payload = { yaml: document.getElementById('config').value };
-      const res = await fetch('/config/update', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const headers = { 'Content-Type': 'application/json', ...apiHeaders() };
+      const res = await fetch('/config/update', { method: 'POST', headers, body: JSON.stringify(payload) });
       const data = await res.json();
       if (!res.ok) {
         document.getElementById('status').textContent = data.detail || 'Config update failed.';
@@ -772,10 +859,15 @@ def _render_ui() -> str:
       document.getElementById('status').textContent = data.restart_required ? 'Config saved. Restart required.' : 'Config saved.';
     }
     async function requestRestart() {
-      const res = await fetch('/restart', { method: 'POST' });
+      const res = await fetch('/restart', { method: 'POST', headers: apiHeaders() });
+      if (res.status === 401) {
+        document.getElementById('status').textContent = 'Unauthorized. Provide API key.';
+        return;
+      }
       const data = await res.json();
       document.getElementById('status').textContent = data.status === 'ok' ? 'Restart requested.' : 'Restart failed.';
     }
+    loadApiKey();
     loadConfig();
     loadDescriptions();
   </script>

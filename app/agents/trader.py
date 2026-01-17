@@ -105,7 +105,12 @@ class TradingAgent:
         self._broker_name = self._resolve_default_broker_name()
         self._broker_name = routing_utils.normalize_broker_name(self._broker_name, self._broker_names)
         retry_cfg = cfg.get("execution", {}).get("retry", {})
-        self._order_queues = {name: OrderQueue(item, name, retry_cfg) for name, item in self._broker_map.items()}
+        open_orders_cfg = cfg.get("execution", {}).get("open_orders", {})
+        completion_grace = int(open_orders_cfg.get("missing_grace_seconds", 0))
+        self._order_queues = {
+            name: OrderQueue(item, name, retry_cfg, completion_grace_seconds=completion_grace)
+            for name, item in self._broker_map.items()
+        }
         self._order_queue = self._order_queues.get(self._broker_name)
         self._last_market_open = None
         self._started_at = datetime.utcnow()

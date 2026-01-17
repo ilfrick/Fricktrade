@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -30,6 +31,7 @@ class MarketCacheConfig:
     cache_only: bool
     ignore_staleness: bool
     filtered_symbols_enabled: bool
+    allow_pickle: bool
 
 
 def interval_to_seconds(interval: str) -> int:
@@ -54,6 +56,7 @@ def build_market_cache_config(cfg: dict | None) -> MarketCacheConfig:
         cache_only=bool(cfg.get("cache_only", True)),
         ignore_staleness=bool(cfg.get("ignore_staleness", False)),
         filtered_symbols_enabled=bool(cfg.get("filtered_symbols", {}).get("enabled", True)),
+        allow_pickle=bool(cfg.get("allow_pickle", False)),
     )
 
 
@@ -61,11 +64,23 @@ def build_market_cache(cfg: dict | None) -> "MarketCache | None":
     cache_cfg = build_market_cache_config(cfg)
     if not cache_cfg.enabled:
         return None
-    return MarketCache(cache_cfg.redis_url, cache_cfg.file_dir, ignore_staleness=cache_cfg.ignore_staleness)
+    return MarketCache(
+        cache_cfg.redis_url,
+        cache_cfg.file_dir,
+        ignore_staleness=cache_cfg.ignore_staleness,
+        allow_pickle=cache_cfg.allow_pickle,
+    )
 
 
 class MarketCache:
-    def __init__(self, redis_url: str, file_dir: str, *, ignore_staleness: bool = False):
+    def __init__(
+        self,
+        redis_url: str,
+        file_dir: str,
+        *,
+        ignore_staleness: bool = False,
+        allow_pickle: bool = False,
+    ):
         self._redis = None
         if redis is not None:
             try:
@@ -78,6 +93,7 @@ class MarketCache:
         self._bars_dir = self._file_dir / "bars"
         self._filtered_dir = self._file_dir / "filtered"
         self._ignore_staleness = ignore_staleness
+        self._allow_pickle = allow_pickle
 
     def get_bars(
         self,
@@ -130,8 +146,14 @@ class MarketCache:
             except Exception as exc:
                 logging.warning("Market cache redis read failed: %s", exc)
         for symbol in missing or symbols:
-            path = self._bars_dir / interval / f"{symbol}.pkl"
-            if self._ignore_staleness and path.exists():
+            json_path = self._bars_dir / interval / f"{symbol}.json"
+            pkl_path = self._bars_dir / interval / f"{symbol}.pkl"
+            path = None
+            if json_path.exists():
+                path = json_path
+            elif self._allow_pickle and pkl_path.exists():
+                path = pkl_path
+            if self._ignore_staleness and path is not None:
                 age = time.time() - path.stat().st_mtime
                 if age > max_age_seconds:
                     stale_files += 1
@@ -225,10 +247,42 @@ class MarketCache:
     def _filtered_key(self, interval: str) -> str:
         return f"market_cache:filtered:{interval}"
 
+    def _encode_record(self, record: dict) -> dict:
+        if not isinstance(record, dict):
+            return {}
+        payload = dict(record)
+        data = payload.get("data")
+        if isinstance(data, pd.DataFrame):
+            payload["data"] = data.to_json(orient="split", date_format="iso")
+            payload["data_format"] = "split-json"
+        return payload
+
+    def _decode_record(self, record: object) -> dict | None:
+        if not isinstance(record, dict):
+            return None
+        data = record.get("data")
+        if isinstance(data, str) and record.get("data_format") == "split-json":
+            try:
+                frame = pd.read_json(io.StringIO(data), orient="split", convert_dates=["index"])
+            except Exception:
+                return None
+            decoded = dict(record)
+            decoded["data"] = frame
+            return decoded
+        return record
+
     def _serialize(self, record: dict) -> bytes:
-        return pickle.dumps(record, protocol=pickle.HIGHEST_PROTOCOL)
+        payload = self._encode_record(record)
+        return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
     def _deserialize(self, payload: bytes) -> dict | None:
+        try:
+            text = payload.decode("utf-8")
+            record = json.loads(text)
+            return self._decode_record(record)
+        except Exception:
+            if not self._allow_pickle:
+                return None
         try:
             record = pickle.loads(payload)
         except Exception:
@@ -243,13 +297,26 @@ class MarketCache:
         *,
         ignore_staleness: bool,
     ) -> pd.DataFrame | None:
-        path = self._bars_dir / interval / f"{symbol}.pkl"
-        if not path.exists():
+        json_path = self._bars_dir / interval / f"{symbol}.json"
+        if json_path.exists():
+            if not ignore_staleness and time.time() - json_path.stat().st_mtime > max_age_seconds:
+                return None
+            try:
+                payload = json.loads(json_path.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+            record = self._decode_record(payload)
+            if record and isinstance(record.get("data"), pd.DataFrame):
+                return record["data"]
+        if not self._allow_pickle:
             return None
-        if not ignore_staleness and time.time() - path.stat().st_mtime > max_age_seconds:
+        pkl_path = self._bars_dir / interval / f"{symbol}.pkl"
+        if not pkl_path.exists():
+            return None
+        if not ignore_staleness and time.time() - pkl_path.stat().st_mtime > max_age_seconds:
             return None
         try:
-            record = pd.read_pickle(path)
+            record = pd.read_pickle(pkl_path)
         except Exception:
             return None
         if isinstance(record, dict) and isinstance(record.get("data"), pd.DataFrame):
@@ -261,10 +328,11 @@ class MarketCache:
     def _write_file(self, symbol: str, interval: str, record: dict) -> None:
         path = self._bars_dir / interval
         path.mkdir(parents=True, exist_ok=True)
-        target = path / f"{symbol}.pkl"
+        target = path / f"{symbol}.json"
         tmp = target.with_suffix(".tmp")
         try:
-            pd.to_pickle(record, tmp)
+            payload = self._encode_record(record)
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
             os.replace(tmp, target)
         except Exception as exc:
             logging.warning("Market cache file write failed for %s: %s", symbol, exc)
