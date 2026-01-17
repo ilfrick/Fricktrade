@@ -354,7 +354,7 @@ learning:
   training:
     data_dir: /data
     interval: 1m
-    timesteps: 200000
+    timesteps: 20000
     initial_cash: 200
     commission_pct: 0.05
     slippage_bps: 2

@@ -346,3 +346,5 @@ can reload context quickly. Keep it updated when the setup changes.
 - RL policy models are expected at `/app/models/ppo_policy.zip` (host `./models` via docker volume); absence indicates training/learner hasn't produced checkpoints or wrote to a different path. Orchestrator RL models live under `/data` (host `./data`).
 
 - RL training run timed out after 30 minutes; `ppo_policy.zip` not written (only `models/ppo_policy.zip.tmp`). Stopped leftover trainer containers.
+
+- Reduced RL training timesteps to 20000, but training still timed out after ~15 minutes and no `ppo_policy.zip` was written (only `.tmp`).

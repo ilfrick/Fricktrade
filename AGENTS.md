@@ -378,3 +378,5 @@ Highest positive impact (testing/live trading):
 - RL policy models missing: `learning.enabled` only loads `/app/models/ppo_policy.zip`; with Docker volumes this maps to `./models/`. If training/learner never ran or wrote elsewhere, no checkpoints exist. Orchestrator RL models live under `/data` (host `./data`).
 
 - Attempted `docker compose run --rm trader python3 -m app.main train --config /app/config/config.yaml`; timed out after 30 minutes. RL training started on CUDA but no `ppo_policy.zip` was produced; only `models/ppo_policy.zip.tmp` remains (likely incomplete). Stopped lingering `fricktrade-trader-run-*` containers.
+
+- Lowered `learning.training.timesteps` to 20000 and retried `docker compose run --rm trader python3 -m app.main train --config /app/config/config.yaml`; still timed out after 15 minutes. Training reported 20000 timesteps but logged `total_timesteps` ~483k; no `ppo_policy.zip` produced (only `ppo_policy.zip.tmp`). Stopped container `fricktrade-trader-run-23e95345e0c6`.
