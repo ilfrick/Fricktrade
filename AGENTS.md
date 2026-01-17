@@ -366,3 +366,9 @@ Highest positive impact (testing/live trading):
 - `pytest` passed (34 passed, 9 skipped).
 
 - Live-loop perf guidance: biggest wins are reducing pandas work in `_market_state_from_df` and skipping symbol evaluation when no new bar; Numba best for pure numerical feature loops (EMA/RSI, signal metrics, var/cvar, realized vol) once arrays are used. Vectorize with NumPy (`np.diff`, `np.mean`) or batch arrays per provider where possible.
+
+- Live loop optimization: market data now includes `last_bar_ts` and uses array extraction with `compute_signal_metrics_from_window` to reduce pandas overhead.
+- Added optional `data.process_on_new_bar_only` gate to skip per-symbol processing when the bar timestamp hasn't advanced.
+- Optimized `_session_gain_pct` to avoid DataFrame slicing; `pytest` passed (34 passed, 9 skipped).
+
+- Enabled `data.process_on_new_bar_only` in `config/config.yaml` to skip per-symbol processing when bars haven't advanced.

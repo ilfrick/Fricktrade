@@ -335,3 +335,8 @@ can reload context quickly. Keep it updated when the setup changes.
 - cProfile sample run improved from ~3.75s to ~1.65s; import time is now the main cost.
 
 - Live-loop perf guidance: reduce pandas in `_market_state_from_df`, skip per-symbol work when no new bar, and consider NumPy vectorization or Numba for pure numeric loops (EMA/RSI, signal metrics, var/cvar, realized vol).
+
+- Live loop optimization: market_state now includes `last_bar_ts`, `_market_state_from_df` avoids extra pandas work, and an optional `data.process_on_new_bar_only` gate skips symbols without new bars.
+- `_session_gain_pct` now uses a direct previous-close lookup instead of slicing.
+
+- `config/config.yaml` now sets `data.process_on_new_bar_only: true` to avoid redundant per-bar work.

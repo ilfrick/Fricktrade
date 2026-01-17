@@ -30,7 +30,7 @@ from app.learning.evaluate import evaluate_from_config
 from app.monitoring.metrics import start_metrics_server
 from app.utils.config import load_config
 from app.utils.logging import setup_logging
-from app.utils.signal_features import compute_signal_metrics_from_df
+from app.utils.signal_features import compute_signal_metrics_from_window
 
 
 def _empty_market_state() -> dict:
@@ -57,6 +57,7 @@ def _empty_market_state() -> dict:
         "signal_abs_move": 0.0,
         "signal_runup_abs": 0.0,
         "signal_drawdown_abs": 0.0,
+        "last_bar_ts": None,
     }
 
 
@@ -147,16 +148,17 @@ def _market_state_from_df(data: pd.DataFrame, lookback_days: int, interval: str,
     high = data["High"] if "High" in data else None
     low = data["Low"] if "Low" in data else None
     lookback_bars = _bars_for_lookback(lookback_days, interval)
-    prices = close.iloc[-lookback_bars:].tolist()
-    volumes = volume.iloc[-lookback_bars:].tolist() if volume is not None else []
-    opens = open_.iloc[-lookback_bars:].tolist() if open_ is not None else []
-    highs = high.iloc[-lookback_bars:].tolist() if high is not None else []
-    lows = low.iloc[-lookback_bars:].tolist() if low is not None else []
+    prices = close.iloc[-lookback_bars:].to_numpy(dtype=float).tolist()
+    volumes = volume.iloc[-lookback_bars:].to_numpy(dtype=float).tolist() if volume is not None else []
+    opens = open_.iloc[-lookback_bars:].to_numpy(dtype=float).tolist() if open_ is not None else []
+    highs = high.iloc[-lookback_bars:].to_numpy(dtype=float).tolist() if high is not None else []
+    lows = low.iloc[-lookback_bars:].to_numpy(dtype=float).tolist() if low is not None else []
     last_price = prices[-1] if prices else None
     avg_volume = float(sum(volumes) / len(volumes)) if volumes else 0.0
     session_volume = float(sum(volumes)) if volumes else 0.0
     rel_volume = float(volumes[-1] / avg_volume) if avg_volume else 0.0
     session_gain_pct = _session_gain_pct(data, prices, session_gain_mode)
+    last_bar_ts = data.index[-1].to_pydatetime()
     state = {
         "prices": prices,
         "volumes": volumes,
@@ -172,8 +174,17 @@ def _market_state_from_df(data: pd.DataFrame, lookback_days: int, interval: str,
         "relative_volume": rel_volume,
         "session_gain_pct": session_gain_pct,
         "spread_pct": None,
+        "last_bar_ts": last_bar_ts,
     }
-    state.update(compute_signal_metrics_from_df(data, interval))
+    state.update(
+        compute_signal_metrics_from_window(
+            prices=prices,
+            volumes=volumes,
+            highs=highs or None,
+            lows=lows or None,
+            interval=interval,
+        )
+    )
     return state
 
 
@@ -554,10 +565,9 @@ def _session_gain_pct(data, prices: list[float], mode: str) -> float:
         if mode == "session":
             first_price = prices[0]
             return (prices[-1] - first_price) / first_price * 100.0 if first_price else 0.0
-        prior_data = data.iloc[:-1]
-        prev_close = None
-        if not prior_data.empty:
-            prev_close = prior_data["Close"].iloc[-1]
+        if len(data.index) < 2:
+            return 0.0
+        prev_close = data["Close"].iloc[-2]
         if prev_close:
             return (prices[-1] - prev_close) / prev_close * 100.0
         return 0.0

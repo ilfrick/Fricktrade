@@ -107,6 +107,7 @@ class BrokerState:
     performance_last_report_at: datetime | None = None
     risk_outcomes: dict[str, dict] = field(default_factory=dict)
     last_prices: dict[str, float] = field(default_factory=dict)
+    last_bar_ts: dict[str, datetime] = field(default_factory=dict)
 
 
 class TradingAgent:
@@ -1419,6 +1420,7 @@ class TradingAgent:
         market_data_provider,
         broker_override: str | None,
     ) -> None:
+        skip_unchanged = bool(self.cfg.get("data", {}).get("process_on_new_bar_only", False))
         batch_portfolio = portfolio
         if broker_override:
             batch_portfolio = self._portfolio_for_broker(portfolio, broker_override)
@@ -1430,6 +1432,12 @@ class TradingAgent:
             market_state: dict = {"symbol": sym}
             try:
                 market_state = market_data_provider(sym)
+                last_bar_ts = market_state.get("last_bar_ts")
+                if last_bar_ts is not None:
+                    last_seen = broker_state.last_bar_ts.get(sym)
+                    if last_seen == last_bar_ts and skip_unchanged:
+                        continue
+                    broker_state.last_bar_ts[sym] = last_bar_ts
                 self._enrich_market_state(market_state, batch_portfolio, sym)
                 market_state["risk_outcome"] = broker_state.risk_outcomes.get(sym, {})
                 if broker_override:

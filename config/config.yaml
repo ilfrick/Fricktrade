@@ -415,6 +415,7 @@ data:
   provider: yfinance
   prefetch_enabled: true
   prefetch_after_filter: false
+  process_on_new_bar_only: true
   symbols: []
   interval: 5m
   lookback_days: 7
