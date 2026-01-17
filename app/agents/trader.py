@@ -6,7 +6,8 @@ import hashlib
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, date
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
@@ -87,11 +88,31 @@ from app.agents.orchestrator import RLStrategyOrchestrator
 from app.agents.pipeline import DecisionPipeline
 
 
+@dataclass
+class BrokerState:
+    risk: RiskManager
+    equity_start: float | None = None
+    equity_peak: float | None = None
+    current_drawdown_pct: float = 0.0
+    equity_history: list[float] = field(default_factory=list)
+    var_cvar: dict[str, float] = field(default_factory=dict)
+    day_start_date: date | None = None
+    day_start_equity: float | None = None
+    last_trade_at: datetime | None = None
+    pending_entry_strategy: dict[str, dict[str, object]] = field(default_factory=dict)
+    position_state: dict[str, dict[str, object]] = field(default_factory=dict)
+    strategy_trades: dict[str, list[dict[str, object]]] = field(default_factory=dict)
+    symbol_trades: dict[str, list[dict[str, object]]] = field(default_factory=dict)
+    disabled_strategies: set[str] = field(default_factory=set)
+    performance_last_report_at: datetime | None = None
+    risk_outcomes: dict[str, dict] = field(default_factory=dict)
+    last_prices: dict[str, float] = field(default_factory=dict)
+
+
 class TradingAgent:
     def __init__(self, broker, cfg: dict):
         self.cfg = cfg
         self.broker = broker
-        self.risk = RiskManager(cfg["risk"])
         self.learning_cfg = cfg.get("learning", {})
         self._account_snapshot: dict[str, object] = {}
         params = cfg["strategy"]["params"]
@@ -112,11 +133,13 @@ class TradingAgent:
             for name, item in self._broker_map.items()
         }
         self._order_queue = self._order_queues.get(self._broker_name)
+        self._broker_states: dict[str, BrokerState] = {
+            name: BrokerState(risk=RiskManager(cfg["risk"])) for name in self._broker_map.keys()
+        }
         self._last_market_open = None
         self._started_at = datetime.utcnow()
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
-        self._risk_outcomes: dict[str, dict] = {}
         self._news_executor = ThreadPoolExecutor(max_workers=1)
         self._news_future = None
         self._news_inflight_at: datetime | None = None
@@ -136,8 +159,8 @@ class TradingAgent:
         self._symbols_by_strategy: dict[str, list[str]] = {}
         self._symbol_venues: dict[str, str] = {}
         self._symbol_venues_at: datetime | None = None
-        self._orchestrator_state: dict[str, dict[str, object]] = {}
-        self._last_trade_at: datetime | None = None
+        self._orchestrator_state: dict[tuple[str, str], dict[str, object]] = {}
+        self._orchestrator_broker_by_symbol: dict[str, str] = {}
         self._position_symbols: set[str] = set()
         self._position_symbols_by_broker: dict[str, set[str]] = {}
         self._ai_filter_last_run_at: datetime | None = None
@@ -210,9 +233,7 @@ class TradingAgent:
         self._day_start_equity: float | None = None
         self._current_drawdown_pct = 0.0
         self._equity_history: list[float] = []
-        self._equity_history_by_broker: dict[str, list[float]] = {}
         self._var_cvar: dict[str, float] = {}
-        self._var_cvar_by_broker: dict[str, dict[str, float]] = {}
         self._active_kill_switch_profile: str | None = None
         self._checkpoint_at: datetime | None = None
         self._kill_switch_liquidated = False
@@ -227,14 +248,8 @@ class TradingAgent:
         self._performance_report_path = str(
             self._performance_cfg.get("report_path", "/data/reports/strategy_performance.json")
         )
-        self._performance_last_report_at: datetime | None = None
         self._kill_switch_enabled = bool(self._performance_cfg.get("kill_switch", {}).get("enabled", True))
-        self._pending_entry_strategy: dict[str, dict[str, object]] = {}
-        self._position_state: dict[str, dict[str, object]] = {}
-        self._last_prices: dict[str, float] = {}
-        self._strategy_trades: dict[str, list[dict[str, object]]] = {}
-        self._symbol_trades: dict[str, list[dict[str, object]]] = {}
-        self._disabled_strategies: set[str] = set()
+        self._performance_last_report_at: datetime | None = None
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -249,8 +264,29 @@ class TradingAgent:
         if broker_name:
             SKIPPED_ORDERS_BY_BROKER.labels(broker=broker_name, symbol=symbol, side=action, reason=reason).inc()
 
-    def _record_risk_outcome(self, symbol: str, action: str, allowed: bool, reason: str) -> None:
-        self._risk_outcomes[symbol] = {
+    def _broker_state(self, broker_name: str | None) -> BrokerState:
+        if not broker_name:
+            return self._broker_states[self._broker_name]
+        if broker_name in self._broker_states:
+            return self._broker_states[broker_name]
+        normalized = self._normalize_broker_name(str(broker_name))
+        return self._broker_states.get(normalized, self._broker_states[self._broker_name])
+
+    def _strategy_disabled_globally(self, name: str) -> bool:
+        if not self._broker_states:
+            return False
+        return all(name in state.disabled_strategies for state in self._broker_states.values())
+
+    def _record_risk_outcome(
+        self,
+        symbol: str,
+        action: str,
+        allowed: bool,
+        reason: str,
+        broker_name: str | None = None,
+    ) -> None:
+        broker_state = self._broker_state(broker_name)
+        broker_state.risk_outcomes[symbol] = {
             "action": action,
             "allowed": allowed,
             "reason": reason,
@@ -625,13 +661,9 @@ class TradingAgent:
         if self._kill_switch_liquidated:
             return None
         self._apply_kill_switch_profile(market_state)
-        if self.risk.should_circuit_break(self._current_drawdown_pct):
-            self._record_skip(symbol, "hold", "circuit_breaker")
-            logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
-            self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
-            return None
         exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
         broker_hint = self._resolve_broker_for_symbol(symbol, self._strategy_names, None)
+        orchestrator_broker = self._orchestrator_broker_by_symbol.get(symbol) or broker_hint
         if trace:
             trace["broker_hint"] = broker_hint
         if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol, broker=broker_hint):
@@ -639,7 +671,9 @@ class TradingAgent:
             logging.info("Skipping %s: open orders pending (strategy guard)", symbol)
             self._emit_decision_trace(trace, "skip", "open_order", "strategy_guard")
             return None
-        active_strategies = [name for name in self._strategy_names if name not in self._disabled_strategies]
+        active_strategies = [
+            name for name in self._strategy_names if not self._strategy_disabled_globally(name)
+        ]
         if not active_strategies:
             logging.warning("No active strategies available; skipping %s", symbol)
             self._emit_decision_trace(trace, "skip", "no_active_strategies", "strategy")
@@ -681,19 +715,13 @@ class TradingAgent:
                 self._signal_summary(sig, include_features=self._include_feature_snapshots) for sig in signals
             ]
             trace["orchestrator_mode"] = self.cfg.get("orchestrator", {}).get("mode", "direct")
-        self._update_orchestrator(symbol, market_state)
+        self._update_orchestrator(symbol, market_state, orchestrator_broker)
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
-            names, weights = self._orchestrator.select(symbol, active_strategies, market_state, signals)
+            names, weights = self._orchestrator.select(
+                symbol, active_strategies, market_state, signals, orchestrator_broker
+            )
         else:
             names, weights = self._orchestrator.select(active_strategies, market_state)
-        if trace:
-            trace["orchestrator_selected"] = list(names)
-            trace["orchestrator_weights"] = list(weights) if isinstance(weights, (list, tuple)) else weights
-        for name in self._strategy_names:
-            ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
-        for name in set(names):
-            ORCHESTRATOR_STRATEGY_SELECTED.labels(strategy=name).inc()
-        self._record_orchestrator(symbol, signals, market_state)
         filtered_signals = [signal for signal in signals if signal.get("name") in names]
         action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names)
         order_meta = self._select_order_meta(filtered_signals, names)
@@ -702,7 +730,52 @@ class TradingAgent:
             broker_name = self._normalize_broker_name(str(broker_override))
         else:
             broker_name = self._resolve_broker_for_symbol(symbol, names, filtered_signals, action_strategy)
+        broker_state = self._broker_state(broker_name)
+        if broker_state.risk.should_circuit_break(broker_state.current_drawdown_pct):
+            self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
+            logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
+            self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
+            return None
+        allowed_names = [name for name in names if name not in broker_state.disabled_strategies]
+        if not allowed_names:
+            logging.warning("No active strategies available for %s; skipping %s", broker_name, symbol)
+            self._emit_decision_trace(trace, "skip", "no_active_strategies", "strategy")
+            return None
+        if allowed_names != list(names) or (action_strategy and action_strategy not in allowed_names):
+            filtered_signals = [signal for signal in signals if signal.get("name") in allowed_names]
+            filtered_weights = weights
+            if isinstance(weights, dict):
+                filtered_weights = {name: weights.get(name, 1.0) for name in allowed_names}
+            action, reduce_pct, action_strategy = self._combine_signals(
+                filtered_signals, filtered_weights, order=allowed_names
+            )
+            order_meta = self._select_order_meta(filtered_signals, allowed_names)
+            if not broker_override:
+                broker_name = self._resolve_broker_for_symbol(
+                    symbol, allowed_names, filtered_signals, action_strategy
+                )
+                broker_state = self._broker_state(broker_name)
+                if action_strategy and action_strategy in broker_state.disabled_strategies:
+                    self._record_skip(symbol, "hold", "strategy_disabled", broker_name)
+                    logging.info("Skipping %s: strategy disabled for broker %s", symbol, broker_name)
+                    self._emit_decision_trace(trace, "skip", "strategy_disabled", "strategy")
+                    return None
+            names = allowed_names
+            weights = filtered_weights
+        if broker_state.risk.should_circuit_break(broker_state.current_drawdown_pct):
+            self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
+            logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
+            self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
+            return None
+        if trace:
+            trace["orchestrator_selected"] = list(names)
+            trace["orchestrator_weights"] = list(weights) if isinstance(weights, (list, tuple)) else weights
+        for name in self._strategy_names:
+            ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
+        for name in set(names):
+            ORCHESTRATOR_STRATEGY_SELECTED.labels(strategy=name).inc()
         market_state["broker"] = broker_name
+        self._record_orchestrator(symbol, signals, market_state, broker_name)
         if trace:
             trace["action"] = action
             trace["action_strategy"] = action_strategy
@@ -753,7 +826,7 @@ class TradingAgent:
             self._emit_decision_trace(trace, "skip", "min_price", "limits")
             return None
         try:
-            self._last_prices[symbol] = float(last_price)
+            broker_state.last_prices[symbol] = float(last_price)
         except (TypeError, ValueError):
             pass
 
@@ -766,14 +839,14 @@ class TradingAgent:
             trace["short_exposure_pct"] = market_state.get("short_exposure_pct")
             trace["leverage"] = market_state.get("leverage")
         if self._is_account_blocked(broker_name):
-            self._record_risk_outcome(symbol, action, False, "account_blocked")
+            self._record_risk_outcome(symbol, action, False, "account_blocked", broker_name)
             self._record_skip(symbol, action, "account_blocked", broker_name)
             logging.info("Skipping %s for %s: account blocked", action, symbol)
             self._emit_decision_trace(trace, "skip", "account_blocked", "account")
             return None
         var_reason = self._var_limit_reason(broker_name)
         if var_reason:
-            self._record_risk_outcome(symbol, action, False, var_reason)
+            self._record_risk_outcome(symbol, action, False, var_reason, broker_name)
             self._record_skip(symbol, action, var_reason, broker_name)
             logging.info("Skipping %s for %s: %s", action, symbol, var_reason)
             self._emit_decision_trace(trace, "skip", var_reason, "risk")
@@ -784,13 +857,13 @@ class TradingAgent:
             current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
             can_short = self._can_short(symbol, portfolio)
             if current_qty <= 0 and not can_short:
-                self._record_risk_outcome(symbol, action, False, "shorting_disabled")
+                self._record_risk_outcome(symbol, action, False, "shorting_disabled", broker_name)
                 self._record_skip(symbol, action, "shorting_disabled", broker_name)
                 logging.info("Skipping %s for %s: shorting disabled", action, symbol)
                 self._emit_decision_trace(trace, "skip", "shorting_disabled", "shorting")
                 return None
         if self._is_action_blocked(symbol, action):
-            self._record_risk_outcome(symbol, action, False, "limit_block")
+            self._record_risk_outcome(symbol, action, False, "limit_block", broker_name)
             self._record_skip(symbol, action, "limit_block", broker_name)
             logging.info("Skipping %s for %s: limits block action", action, symbol)
             self._emit_decision_trace(trace, "skip", "limit_block", "limits")
@@ -803,19 +876,19 @@ class TradingAgent:
             trace["haircuts"] = self._haircut_snapshot(market_state)
         if qty <= 0:
             if skip_reason:
-                self._record_risk_outcome(symbol, action, False, str(skip_reason))
+                self._record_risk_outcome(symbol, action, False, str(skip_reason), broker_name)
                 self._record_skip(symbol, action, str(skip_reason), broker_name)
                 logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
                 self._emit_decision_trace(trace, "skip", str(skip_reason), "sizing")
             return None
         if self._violates_exposure_caps(symbol, action, qty, last_price, portfolio):
-            self._record_risk_outcome(symbol, action, False, "exposure_cap")
+            self._record_risk_outcome(symbol, action, False, "exposure_cap", broker_name)
             self._record_skip(symbol, action, "exposure_cap", broker_name)
             logging.info("Skipping %s for %s: exposure caps exceeded", action, symbol)
             self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
             return None
         if self._violates_order_limits(symbol, action, qty, last_price):
-            self._record_risk_outcome(symbol, action, False, "order_limit")
+            self._record_risk_outcome(symbol, action, False, "order_limit", broker_name)
             self._record_skip(symbol, action, "order_limit", broker_name)
             logging.info("Skipping %s for %s: order limits", action, symbol)
             self._emit_decision_trace(trace, "skip", "order_limit", "limits")
@@ -825,23 +898,23 @@ class TradingAgent:
             trace["qty"] = qty
 
         now = datetime.utcnow()
-        if self._is_cooldown_active(market_state, now):
-            self._record_risk_outcome(symbol, action, False, "cooldown")
+        if self._is_cooldown_active(market_state, now, broker_name):
+            self._record_risk_outcome(symbol, action, False, "cooldown", broker_name)
             self._record_skip(symbol, action, "cooldown", broker_name)
             logging.info("Skipping %s for %s: cooldown", action, symbol)
             self._emit_decision_trace(trace, "skip", "cooldown", "cooldown")
             return None
-        if not self.risk.can_open_trade(
+        if not broker_state.risk.can_open_trade(
             exposure_pct=market_state.get("exposure_pct", 0.0),
             short_exposure_pct=market_state.get("short_exposure_pct", 0.0),
             leverage=market_state.get("leverage", 1.0),
         ):
-            self._record_risk_outcome(symbol, action, False, "risk_block")
+            self._record_risk_outcome(symbol, action, False, "risk_block", broker_name)
             self._record_skip(symbol, action, "risk_block", broker_name)
             logging.info("Skipping %s for %s: risk limits exceeded", action, symbol)
             self._emit_decision_trace(trace, "skip", "risk_block", "risk")
             return None
-        self._record_risk_outcome(symbol, action, True, "ok")
+        self._record_risk_outcome(symbol, action, True, "ok", broker_name)
 
         order_type = str(order_meta.get("order_type") or "market").lower()
         limit_price = order_meta.get("limit_price")
@@ -894,10 +967,10 @@ class TradingAgent:
         if action == "buy":
             strategy_label = action_strategy or (names[0] if names else None)
             if strategy_label:
-                self._pending_entry_strategy[symbol] = {"strategy": strategy_label, "ts": now}
+                broker_state.pending_entry_strategy[symbol] = {"strategy": strategy_label, "ts": now}
         if order_id and action in ("buy", "sell"):
             TRADES.labels(symbol=symbol, side=action).inc()
-            self._last_trade_at = now
+            broker_state.last_trade_at = now
             self._emit_decision_trace(
                 trace,
                 "order_enqueued",
@@ -1152,12 +1225,15 @@ class TradingAgent:
             return True
         return False
 
-    def _is_cooldown_active(self, market_state: dict, now: datetime) -> bool:
+    def _is_cooldown_active(
+        self, market_state: dict, now: datetime, broker_name: str | None = None
+    ) -> bool:
         cfg = self.cfg.get("risk", {})
         cooldown = int(cfg.get("cooldown_seconds", 0))
-        if cooldown <= 0 or not self._last_trade_at:
+        broker_state = self._broker_state(broker_name)
+        if cooldown <= 0 or not broker_state.last_trade_at:
             return False
-        elapsed = (now - self._last_trade_at).total_seconds()
+        elapsed = (now - broker_state.last_trade_at).total_seconds()
         return elapsed < cooldown
 
     def _resolve_strategy_names(self) -> list[str]:
@@ -1293,12 +1369,19 @@ class TradingAgent:
 
     def _run_cycle_maintenance(self, symbols: list[str], portfolio: dict) -> list[str]:
         for name in self._strategy_names:
-            STRATEGY_ACTIVE.labels(strategy=name).set(0 if name in self._disabled_strategies else 1)
+            STRATEGY_ACTIVE.labels(strategy=name).set(0 if self._strategy_disabled_globally(name) else 1)
         for broker_name in self._broker_names:
             BROKER_ACTIVE.labels(broker=broker_name).set(1)
         self._update_account_metrics()
         self._update_position_metrics(portfolio)
-        self._update_performance_from_positions(portfolio)
+        if self._performance_enabled:
+            brokers = portfolio.get("brokers", {})
+            if isinstance(brokers, dict) and brokers:
+                for broker_name in brokers.keys():
+                    broker_portfolio = self._portfolio_for_broker(portfolio, broker_name)
+                    self._update_performance_from_positions(broker_portfolio, broker_name)
+            else:
+                self._update_performance_from_positions(portfolio, self._broker_name)
         self._maybe_report_performance()
         self._refresh_news_cache(symbols)
         self._log_news_cache()
@@ -1324,6 +1407,8 @@ class TradingAgent:
         batch_portfolio = portfolio
         if broker_override:
             batch_portfolio = self._portfolio_for_broker(portfolio, broker_override)
+        broker_name = broker_override or self._broker_name
+        broker_state = self._broker_state(broker_name)
         for sym in symbols:
             if not self._is_symbol_market_open(sym):
                 continue
@@ -1331,7 +1416,7 @@ class TradingAgent:
             try:
                 market_state = market_data_provider(sym)
                 self._enrich_market_state(market_state, batch_portfolio, sym)
-                market_state["risk_outcome"] = self._risk_outcomes.get(sym, {})
+                market_state["risk_outcome"] = broker_state.risk_outcomes.get(sym, {})
                 if broker_override:
                     market_state["broker_override"] = broker_override
                 market_state["strategy_symbols"] = self._symbols_by_strategy
@@ -1432,6 +1517,23 @@ class TradingAgent:
         strategy = chosen.get("name") if chosen else None
         return "sell", reduce_pct, strategy
 
+    def _update_broker_equity_state(self, broker_name: str, equity: float) -> None:
+        broker_state = self._broker_state(broker_name)
+        if broker_state.equity_start is None:
+            broker_state.equity_start = equity
+        if broker_state.equity_peak is None or equity > broker_state.equity_peak:
+            broker_state.equity_peak = equity
+        if broker_state.equity_peak:
+            drawdown_pct = (broker_state.equity_peak - equity) / broker_state.equity_peak * 100.0
+            broker_state.current_drawdown_pct = max(drawdown_pct, 0.0)
+        today = datetime.utcnow().date()
+        if broker_state.day_start_date != today or broker_state.day_start_equity is None:
+            broker_state.day_start_date = today
+            broker_state.day_start_equity = equity
+        if broker_state.day_start_equity:
+            day_pnl_pct = (equity - broker_state.day_start_equity) / broker_state.day_start_equity * 100.0
+            broker_state.risk.update_daily_loss(day_pnl_pct)
+
     def _update_account_metrics(self) -> None:
         try:
             account = self.broker.get_account()
@@ -1439,6 +1541,7 @@ class TradingAgent:
             logging.warning("Account metrics update failed: %s", exc)
             return
         total_val = cash_val = buying_power_val = None
+        broker_equities: dict[str, float] = {}
         if isinstance(account, dict):
             if "brokers" in account and isinstance(account["brokers"], dict):
                 total_val = float(account.get("equity") or 0.0)
@@ -1452,6 +1555,8 @@ class TradingAgent:
                     ACCOUNT_CASH_BY_BROKER.labels(broker=name).set(cash)
                     ACCOUNT_BUYING_POWER_BY_BROKER.labels(broker=name).set(buying_power)
                     ACCOUNT_INVESTED_BY_BROKER.labels(broker=name).set(equity - cash)
+                    broker_equities[str(name)] = equity
+                    self._update_broker_equity_state(str(name), equity)
             elif "equity" in account:
                 total_val = float(account.get("equity") or 0.0)
                 cash_val = float(account.get("cash") or 0.0)
@@ -1462,6 +1567,9 @@ class TradingAgent:
                 buying_power_val = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
         if total_val is None or cash_val is None:
             return
+        if not broker_equities:
+            broker_equities[self._broker_name] = total_val
+            self._update_broker_equity_state(self._broker_name, total_val)
         if self._equity_start is None:
             self._equity_start = total_val
         if self._equity_peak is None or total_val > self._equity_peak:
@@ -1495,9 +1603,8 @@ class TradingAgent:
             self._day_start_equity = total_val
         if self._day_start_equity:
             day_pnl_pct = (total_val - self._day_start_equity) / self._day_start_equity * 100.0
-            self.risk.update_daily_loss(day_pnl_pct)
             self._update_drift_monitor(day_pnl_pct)
-        self._update_var_cvar(total_val, account)
+        self._update_var_cvar(total_val, broker_equities)
 
     def _update_drift_monitor(self, day_pnl_pct: float) -> None:
         if not self._drift_monitor:
@@ -1523,7 +1630,7 @@ class TradingAgent:
             if not strategies:
                 del self._strategy_by_symbol[symbol]
 
-    def _update_var_cvar(self, total_val: float, account: dict) -> None:
+    def _update_var_cvar(self, total_val: float, broker_equities: dict[str, float] | None) -> None:
         var_cfg = self.cfg.get("risk", {}).get("var", {}) or {}
         if not var_cfg.get("enabled", False):
             return
@@ -1533,16 +1640,13 @@ class TradingAgent:
         if len(self._equity_history) > window:
             self._equity_history = self._equity_history[-window:]
         self._var_cvar = _var_cvar_from_history(self._equity_history, confidence)
-        brokers = account.get("brokers") if isinstance(account, dict) else None
-        if isinstance(brokers, dict):
-            for name, details in brokers.items():
-                equity = float(details.get("equity") or 0.0)
-                history = self._equity_history_by_broker.get(name, [])
-                history.append(equity)
-                if len(history) > window:
-                    history = history[-window:]
-                self._equity_history_by_broker[name] = history
-                self._var_cvar_by_broker[name] = _var_cvar_from_history(history, confidence)
+        broker_equities = broker_equities or {}
+        for name, equity in broker_equities.items():
+            broker_state = self._broker_state(name)
+            broker_state.equity_history.append(float(equity))
+            if len(broker_state.equity_history) > window:
+                broker_state.equity_history = broker_state.equity_history[-window:]
+            broker_state.var_cvar = _var_cvar_from_history(broker_state.equity_history, confidence)
 
     def _var_limit_reason(self, broker_name: str) -> str | None:
         var_cfg = self.cfg.get("risk", {}).get("var", {}) or {}
@@ -1554,7 +1658,7 @@ class TradingAgent:
             return "var_limit"
         if max_cvar and self._var_cvar.get("cvar_pct", 0.0) > max_cvar:
             return "cvar_limit"
-        broker_stats = self._var_cvar_by_broker.get(broker_name, {})
+        broker_stats = self._broker_state(broker_name).var_cvar
         if max_var and broker_stats.get("var_pct", 0.0) > max_var:
             return "var_limit_broker"
         if max_cvar and broker_stats.get("cvar_pct", 0.0) > max_cvar:
@@ -1676,20 +1780,22 @@ class TradingAgent:
                     POSITION_VALUE_BY_BROKER.labels(broker=broker_name, symbol=symbol).set(0)
                 self._position_symbols_by_broker[broker_name] = new_broker
 
-    def _prune_pending_entry_strategies(self, now: datetime) -> None:
-        if not self._pending_entry_strategy:
+    def _prune_pending_entry_strategies(self, now: datetime, broker_name: str) -> None:
+        broker_state = self._broker_state(broker_name)
+        if not broker_state.pending_entry_strategy:
             return
         cutoff = now - timedelta(days=1)
         stale = [
             symbol
-            for symbol, data in self._pending_entry_strategy.items()
+            for symbol, data in broker_state.pending_entry_strategy.items()
             if isinstance(data, dict) and data.get("ts") and data["ts"] < cutoff
         ]
         for symbol in stale:
-            self._pending_entry_strategy.pop(symbol, None)
+            broker_state.pending_entry_strategy.pop(symbol, None)
 
-    def _consume_pending_entry_strategy(self, symbol: str) -> str | None:
-        data = self._pending_entry_strategy.pop(symbol, None)
+    def _consume_pending_entry_strategy(self, symbol: str, broker_name: str) -> str | None:
+        broker_state = self._broker_state(broker_name)
+        data = broker_state.pending_entry_strategy.pop(symbol, None)
         if not data:
             return None
         strategy = data.get("strategy")
@@ -1697,11 +1803,14 @@ class TradingAgent:
             return str(strategy)
         return None
 
-    def _record_trade(self, strategy: str | None, symbol: str, pnl_pct: float, ts: datetime) -> None:
+    def _record_trade(
+        self, strategy: str | None, symbol: str, pnl_pct: float, ts: datetime, broker_name: str
+    ) -> None:
+        broker_state = self._broker_state(broker_name)
         record = {"ts": ts, "pnl_pct": pnl_pct}
-        self._symbol_trades.setdefault(symbol, []).append(record)
+        broker_state.symbol_trades.setdefault(symbol, []).append(record)
         if strategy and strategy in self._strategy_names:
-            self._strategy_trades.setdefault(strategy, []).append(record)
+            broker_state.strategy_trades.setdefault(strategy, []).append(record)
             STRATEGY_TRADES_REALIZED.labels(strategy=strategy).inc()
 
     def _prune_trade_records(self, records: list[dict], cutoff: datetime) -> list[dict]:
@@ -1735,13 +1844,14 @@ class TradingAgent:
             "drawdown_pct": max_dd,
         }
 
-    def _update_performance_from_positions(self, portfolio: dict) -> None:
+    def _update_performance_from_positions(self, portfolio: dict, broker_name: str) -> None:
         if not self._performance_enabled:
             return
+        broker_state = self._broker_state(broker_name)
         now = datetime.utcnow()
-        self._prune_pending_entry_strategies(now)
+        self._prune_pending_entry_strategies(now, broker_name)
         positions = portfolio.get("positions", {}) or {}
-        symbols = set(positions.keys()) | set(self._position_state.keys())
+        symbols = set(positions.keys()) | set(broker_state.position_state.keys())
         for symbol in symbols:
             current = positions.get(symbol) or {}
             curr_qty = float(current.get("qty", 0.0) or 0.0)
@@ -1751,11 +1861,11 @@ class TradingAgent:
                     curr_avg_entry = float(curr_avg_entry)
                 except (TypeError, ValueError):
                     curr_avg_entry = None
-            prev = self._position_state.get(symbol)
+            prev = broker_state.position_state.get(symbol)
             if prev is None:
                 if curr_qty != 0:
-                    strategy = self._consume_pending_entry_strategy(symbol)
-                    self._position_state[symbol] = {
+                    strategy = self._consume_pending_entry_strategy(symbol, broker_name)
+                    broker_state.position_state[symbol] = {
                         "qty": curr_qty,
                         "avg_entry": curr_avg_entry,
                         "strategy": strategy,
@@ -1766,7 +1876,7 @@ class TradingAgent:
             strategy = prev.get("strategy")
             if curr_qty > prev_qty:
                 if strategy is None:
-                    strategy = self._consume_pending_entry_strategy(symbol)
+                    strategy = self._consume_pending_entry_strategy(symbol, broker_name)
                 prev["qty"] = curr_qty
                 if curr_avg_entry is not None:
                     prev["avg_entry"] = curr_avg_entry
@@ -1774,14 +1884,14 @@ class TradingAgent:
                     prev["strategy"] = strategy
                 continue
             if curr_qty < prev_qty:
-                exit_price = self._last_prices.get(symbol)
+                exit_price = broker_state.last_prices.get(symbol)
                 entry_price = prev_avg or curr_avg_entry
                 if entry_price and exit_price:
                     direction = 1.0 if prev_qty > 0 else -1.0
                     pnl_pct = (exit_price - entry_price) / entry_price * 100.0 * direction
-                    self._record_trade(strategy, symbol, pnl_pct, now)
+                    self._record_trade(strategy, symbol, pnl_pct, now, broker_name)
                 if curr_qty == 0:
-                    self._position_state.pop(symbol, None)
+                    broker_state.position_state.pop(symbol, None)
                 else:
                     prev["qty"] = curr_qty
                     if curr_avg_entry is not None:
@@ -1798,42 +1908,63 @@ class TradingAgent:
         cutoff = now - timedelta(days=self._performance_window_days)
         strategy_report: dict[str, dict] = {}
         symbol_report: dict[str, dict] = {}
+        brokers_report: dict[str, dict] = {}
+        aggregate_strategy_records: dict[str, list[dict]] = {name: [] for name in self._strategy_names}
+        aggregate_symbol_records: dict[str, list[dict]] = {}
+
+        for broker_name, broker_state in self._broker_states.items():
+            broker_strategy_report: dict[str, dict] = {}
+            broker_symbol_report: dict[str, dict] = {}
+            for name in self._strategy_names:
+                records = self._prune_trade_records(broker_state.strategy_trades.get(name, []), cutoff)
+                broker_state.strategy_trades[name] = records
+                stats = self._compute_trade_stats(records)
+                broker_strategy_report[name] = stats | {"disabled": name in broker_state.disabled_strategies}
+                aggregate_strategy_records[name].extend(records)
+                if (
+                    self._kill_switch_enabled
+                    and name not in broker_state.disabled_strategies
+                    and stats["trades"] >= self._performance_min_trades
+                    and (
+                        stats["win_rate"] < self._performance_min_win_rate
+                        or stats["drawdown_pct"] > self._performance_max_drawdown
+                    )
+                ):
+                    broker_state.disabled_strategies.add(name)
+                    logging.warning(
+                        "Strategy %s disabled by kill switch (broker=%s trades=%d win_rate=%.2f drawdown=%.2f)",
+                        name,
+                        broker_name,
+                        stats["trades"],
+                        stats["win_rate"],
+                        stats["drawdown_pct"],
+                    )
+            for symbol, records in list(broker_state.symbol_trades.items()):
+                trimmed = self._prune_trade_records(records, cutoff)
+                if trimmed:
+                    broker_state.symbol_trades[symbol] = trimmed
+                    broker_symbol_report[symbol] = self._compute_trade_stats(trimmed)
+                    aggregate_symbol_records.setdefault(symbol, []).extend(trimmed)
+                else:
+                    broker_state.symbol_trades.pop(symbol, None)
+            brokers_report[broker_name] = {
+                "strategies": broker_strategy_report,
+                "symbols": broker_symbol_report,
+                "disabled_strategies": sorted(broker_state.disabled_strategies),
+            }
+            broker_state.performance_last_report_at = now
 
         for name in self._strategy_names:
-            records = self._prune_trade_records(self._strategy_trades.get(name, []), cutoff)
-            self._strategy_trades[name] = records
+            records = aggregate_strategy_records.get(name, [])
             stats = self._compute_trade_stats(records)
             STRATEGY_WIN_RATE.labels(strategy=name).set(stats["win_rate"])
             STRATEGY_AVG_PNL_PCT.labels(strategy=name).set(stats["avg_pnl_pct"])
             STRATEGY_DRAWDOWN_PCT.labels(strategy=name).set(stats["drawdown_pct"])
-            STRATEGY_DISABLED.labels(strategy=name).set(1 if name in self._disabled_strategies else 0)
-            if (
-                self._kill_switch_enabled
-                and name not in self._disabled_strategies
-                and stats["trades"] >= self._performance_min_trades
-                and (
-                    stats["win_rate"] < self._performance_min_win_rate
-                    or stats["drawdown_pct"] > self._performance_max_drawdown
-                )
-            ):
-                self._disabled_strategies.add(name)
-                STRATEGY_DISABLED.labels(strategy=name).set(1)
-                logging.warning(
-                    "Strategy %s disabled by kill switch (trades=%d win_rate=%.2f drawdown=%.2f)",
-                    name,
-                    stats["trades"],
-                    stats["win_rate"],
-                    stats["drawdown_pct"],
-                )
-            strategy_report[name] = stats | {"disabled": name in self._disabled_strategies}
+            STRATEGY_DISABLED.labels(strategy=name).set(1 if self._strategy_disabled_globally(name) else 0)
+            strategy_report[name] = stats | {"disabled": self._strategy_disabled_globally(name)}
 
-        for symbol, records in list(self._symbol_trades.items()):
-            trimmed = self._prune_trade_records(records, cutoff)
-            if trimmed:
-                self._symbol_trades[symbol] = trimmed
-                symbol_report[symbol] = self._compute_trade_stats(trimmed)
-            else:
-                self._symbol_trades.pop(symbol, None)
+        for symbol, records in aggregate_symbol_records.items():
+            symbol_report[symbol] = self._compute_trade_stats(records)
 
         report = {
             "generated_at": now.isoformat(),
@@ -1843,7 +1974,10 @@ class TradingAgent:
             "max_drawdown_pct": self._performance_max_drawdown,
             "strategies": strategy_report,
             "symbols": symbol_report,
-            "disabled_strategies": sorted(self._disabled_strategies),
+            "disabled_strategies": sorted(
+                [name for name in self._strategy_names if self._strategy_disabled_globally(name)]
+            ),
+            "brokers": brokers_report,
         }
         try:
             report_path = Path(self._performance_report_path)
@@ -1977,6 +2111,15 @@ class TradingAgent:
         self._ai_filter_last_log_at = now
 
     def _maybe_checkpoint(self) -> None:
+        broker_states_payload: dict[str, dict[str, object]] = {}
+        for name, state in self._broker_states.items():
+            broker_states_payload[name] = {
+                "last_trade_at": _dt_to_str(state.last_trade_at),
+                "equity_start": state.equity_start,
+                "equity_peak": state.equity_peak,
+                "disabled_strategies": sorted(state.disabled_strategies),
+            }
+        default_state = self._broker_states.get(self._broker_name)
         payload = {
             "dynamic_symbols": self._dynamic_symbols,
             "dynamic_symbols_at": _dt_to_str(self._dynamic_symbols_at),
@@ -1986,9 +2129,10 @@ class TradingAgent:
             "symbol_venues_at": _dt_to_str(self._symbol_venues_at),
             "news_cache": self._news_cache,
             "news_cache_at": _dt_to_str(self._news_cache_at),
-            "last_trade_at": _dt_to_str(self._last_trade_at),
+            "last_trade_at": _dt_to_str(default_state.last_trade_at) if default_state else None,
             "equity_start": self._equity_start,
             "equity_peak": self._equity_peak,
+            "broker_states": broker_states_payload,
         }
         self._checkpoint_at = maybe_save_checkpoint("trader", payload, self.cfg, self._checkpoint_at)
 
@@ -2007,15 +2151,45 @@ class TradingAgent:
         self._symbol_venues_at = _dt_from_str(payload.get("symbol_venues_at"))
         self._news_cache = dict(payload.get("news_cache", {}) or {})
         self._news_cache_at = _dt_from_str(payload.get("news_cache_at"))
-        self._last_trade_at = _dt_from_str(payload.get("last_trade_at"))
         self._equity_start = payload.get("equity_start")
         self._equity_peak = payload.get("equity_peak")
+        broker_payload = payload.get("broker_states", {}) or {}
+        if isinstance(broker_payload, dict):
+            for name, state in broker_payload.items():
+                if name not in self._broker_states:
+                    continue
+                if not isinstance(state, dict):
+                    continue
+                broker_state = self._broker_states[name]
+                broker_state.last_trade_at = _dt_from_str(state.get("last_trade_at"))
+                broker_state.equity_start = state.get("equity_start")
+                broker_state.equity_peak = state.get("equity_peak")
+                disabled = state.get("disabled_strategies")
+                if isinstance(disabled, list):
+                    broker_state.disabled_strategies = {str(item) for item in disabled}
+        legacy_last_trade_at = _dt_from_str(payload.get("last_trade_at"))
+        if legacy_last_trade_at and self._broker_name in self._broker_states:
+            broker_state = self._broker_states[self._broker_name]
+            if broker_state.last_trade_at is None:
+                broker_state.last_trade_at = legacy_last_trade_at
 
-    def _update_orchestrator(self, symbol: str, market_state: dict) -> None:
+    def _orchestrator_key(self, symbol: str, broker_name: str | None) -> tuple[str, str]:
+        broker = broker_name or self._broker_name
+        return (broker, symbol)
+
+    def _update_orchestrator(
+        self, symbol: str, market_state: dict, broker_name: str | None = None
+    ) -> None:
+        broker_name = (
+            broker_name
+            or self._orchestrator_broker_by_symbol.get(symbol)
+            or market_state.get("broker_override")
+            or self._broker_name
+        )
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
-            self._orchestrator.update(symbol, market_state)
+            self._orchestrator.update(symbol, market_state, broker_name)
             return
-        state = self._orchestrator_state.get(symbol)
+        state = self._orchestrator_state.get(self._orchestrator_key(symbol, broker_name))
         if not state:
             return
         last_price = state.get("last_price")
@@ -2030,11 +2204,15 @@ class TradingAgent:
         decisions = state.get("decisions", {})
         if isinstance(decisions, dict):
             self._orchestrator.update_biases(decisions, float(last_price), float(current_price))
-        self._orchestrator_state.pop(symbol, None)
+        self._orchestrator_state.pop(self._orchestrator_key(symbol, broker_name), None)
 
-    def _record_orchestrator(self, symbol: str, signals: list[dict], market_state: dict) -> None:
+    def _record_orchestrator(
+        self, symbol: str, signals: list[dict], market_state: dict, broker_name: str | None = None
+    ) -> None:
+        broker_name = broker_name or market_state.get("broker") or self._broker_name
+        self._orchestrator_broker_by_symbol[symbol] = broker_name
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
-            self._orchestrator.record(symbol, signals, market_state)
+            self._orchestrator.record(symbol, signals, market_state, broker_name)
             return
         decisions = {s.get("name"): s.get("action") for s in signals if s.get("name")}
         if not decisions:
@@ -2045,7 +2223,10 @@ class TradingAgent:
             last_price = prices[-1] if prices else None
         if last_price is None:
             return
-        self._orchestrator_state[symbol] = {"decisions": decisions, "last_price": last_price}
+        self._orchestrator_state[self._orchestrator_key(symbol, broker_name)] = {
+            "decisions": decisions,
+            "last_price": last_price,
+        }
 
     def _refresh_news_cache(self, symbols: list[str], now: datetime | None = None) -> None:
         news_cfg = self.cfg.get("news", {})
@@ -2854,7 +3035,8 @@ class TradingAgent:
             except Exception as exc:
                 logging.warning("Kill switch close failed for %s: %s", symbol, exc)
 
-        self._disabled_strategies = set(self._strategy_names)
+        for broker_state in self._broker_states.values():
+            broker_state.disabled_strategies = set(self._strategy_names)
         self._kill_switch_liquidated = True
         logging.critical(
             "Kill switch liquidation executed; positions=%d orders=%d",

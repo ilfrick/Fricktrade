@@ -339,3 +339,7 @@ Highest positive impact (testing/live trading):
 - Added tests for API auth, IBKR currency mapping, market cache serialization, and order-queue grace.
 - Committed and pushed `d20694f` to both `origin` and `github`; tests skipped locally due to missing deps.
 - Session saved to `/home/nicola/.codex/AGENTS.md`.
+- Refactored TradingAgent to keep risk, cooldowns, pending entries, and performance state per broker/account.
+- Keyed RL orchestrator history by broker+symbol and threaded broker context through select/record/update.
+- Extended checkpoints and performance reports with per-broker state while keeping global metrics.
+- Tests not run (not requested).

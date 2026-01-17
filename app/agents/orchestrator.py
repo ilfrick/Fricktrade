@@ -345,14 +345,14 @@ class RLStrategyOrchestrator:
         self._alpaca_cfg = get_alpaca_account_cfg(cfg)
         self._risk_cfg = cfg.get("risk", {})
         self._buffer: deque[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = deque(maxlen=self.cfg.buffer_size)
-        self._last_state: dict[str, dict[str, object]] = {}
-        self._feature_history: dict[str, deque[list[float]]] = {}
+        self._last_state: dict[tuple[str, str], dict[str, object]] = {}
+        self._feature_history: dict[tuple[str, str], deque[list[float]]] = {}
         self._last_saved_at: float | None = None
         self._score_ema: float | None = None
         self._best_score: float | None = None
         self._reward_ema: float | None = None
-        self._last_selection: dict[str, str] = {}
-        self._order_feedback: dict[str, dict[str, float]] = {}
+        self._last_selection: dict[tuple[str, str], str] = {}
+        self._order_feedback: dict[tuple[str, str], dict[str, float]] = {}
 
     def is_enabled(self) -> bool:
         return self.cfg.enabled
@@ -379,31 +379,37 @@ class RLStrategyOrchestrator:
         self._save_model(self.cfg.model_path)
         self._save_model(self.cfg.best_model_path)
 
+    def _key(self, symbol: str, broker_name: str | None) -> tuple[str, str]:
+        broker = str(broker_name) if broker_name else ""
+        return (broker, symbol)
+
     def select(
         self,
         symbol: str,
         strategy_names: list[str],
         market_state: dict,
         signals: list[dict] | None = None,
+        broker_name: str | None = None,
     ) -> tuple[list[str], dict[str, float]]:
         if not self.cfg.enabled or not strategy_names:
             return strategy_names, {name: 1.0 for name in strategy_names}
         self._ensure_model(strategy_names)
-        features = self._state_features(symbol, market_state, signals)
-        sequence = self._update_sequence(symbol, features)
+        key = self._key(symbol, broker_name)
+        features = self._state_features(symbol, market_state, signals, broker_name)
+        sequence = self._update_sequence(key, features)
         probs = self._predict(sequence)
         if random.random() < self.cfg.epsilon:
             shuffled = strategy_names[:]
             random.shuffle(shuffled)
             selected = shuffled[: max(1, min(len(shuffled), self._top_k))]
-            self._last_selection[symbol] = selected[0]
+            self._last_selection[key] = selected[0]
             return selected, {name: 1.0 for name in selected}
 
         ranked = sorted(strategy_names, key=lambda n: probs.get(n, 0.0), reverse=True)
         if not ranked:
             return strategy_names, {name: 1.0 for name in strategy_names}
         if len(ranked) == 1:
-            self._last_selection[symbol] = ranked[0]
+            self._last_selection[key] = ranked[0]
             return ranked, {ranked[0]: 1.0}
 
         selected = [name for name in ranked if probs.get(name, 0.0) >= self._min_score]
@@ -415,18 +421,20 @@ class RLStrategyOrchestrator:
             selected = [name for name in ranked if probs.get(name, 0.0) >= self._min_score]
             if not selected:
                 selected = [ranked[0]]
-            self._last_selection[symbol] = selected[0]
+            self._last_selection[key] = selected[0]
             return [selected[0]], {selected[0]: 1.0}
         if self._mode == "weight":
             weights = {name: max(probs.get(name, 0.0), 0.0) for name in selected}
             if not any(weight > 0 for weight in weights.values()):
                 weights = {name: 1.0 for name in selected}
-            self._last_selection[symbol] = selected[0]
+            self._last_selection[key] = selected[0]
             return selected, weights
-        self._last_selection[symbol] = selected[0]
+        self._last_selection[key] = selected[0]
         return selected, {name: 1.0 for name in selected}
 
-    def record(self, symbol: str, signals: list[dict], market_state: dict) -> None:
+    def record(
+        self, symbol: str, signals: list[dict], market_state: dict, broker_name: str | None = None
+    ) -> None:
         if not self.cfg.enabled:
             return
         actions = {s.get("name"): s.get("action") for s in signals if s.get("name")}
@@ -435,22 +443,24 @@ class RLStrategyOrchestrator:
         last_price = _last_price(market_state)
         if last_price is None:
             return
-        selected = self._last_selection.get(symbol)
+        key = self._key(symbol, broker_name)
+        selected = self._last_selection.get(key)
         if not selected or selected not in actions:
             return
-        features = self._state_features(symbol, market_state, signals)
-        sequence = self._update_sequence(symbol, features)
-        self._last_state[symbol] = {
+        features = self._state_features(symbol, market_state, signals, broker_name)
+        sequence = self._update_sequence(key, features)
+        self._last_state[key] = {
             "features": sequence,
             "action": str(actions.get(selected, "hold")),
             "action_idx": self._strategy_names.index(selected),
             "price": last_price,
         }
 
-    def update(self, symbol: str, market_state: dict) -> None:
+    def update(self, symbol: str, market_state: dict, broker_name: str | None = None) -> None:
         if not self.cfg.enabled:
             return
-        state = self._last_state.get(symbol)
+        key = self._key(symbol, broker_name)
+        state = self._last_state.get(key)
         if not state:
             return
         prev_price = state.get("price")
@@ -461,11 +471,11 @@ class RLStrategyOrchestrator:
             return
         move_pct = (current_price - prev_price) / prev_price * 100.0
         if abs(move_pct) < self.cfg.min_price_move_pct:
-            self._last_state.pop(symbol, None)
+            self._last_state.pop(key, None)
             return
         action = state.get("action")
         if not action:
-            self._last_state.pop(symbol, None)
+            self._last_state.pop(key, None)
             return
         if action == "buy":
             reward = move_pct - self.cfg.time_penalty_per_bar
@@ -476,20 +486,21 @@ class RLStrategyOrchestrator:
         reward *= self.cfg.reward_scale
         action_idx = state.get("action_idx")
         if action_idx is None:
-            self._last_state.pop(symbol, None)
+            self._last_state.pop(key, None)
             return
         self._enqueue(state.get("features"), int(action_idx), float(reward))
         self._train()
         self._update_score(float(reward))
         self._maybe_save()
         self._maybe_save_best()
-        self._last_state.pop(symbol, None)
+        self._last_state.pop(key, None)
 
     def on_order_update(self, response: dict) -> None:
         symbol = response.get("symbol")
         if not symbol:
             return
-        self._order_feedback[symbol] = _order_feedback_features(response)
+        broker_name = response.get("broker")
+        self._order_feedback[self._key(str(symbol), broker_name)] = _order_feedback_features(response)
 
     def _ensure_model(self, strategy_names: list[str]) -> None:
         if self._model is not None:
@@ -702,7 +713,7 @@ class RLStrategyOrchestrator:
                         signal = strategy.generate_signal(market_state)
                         signal["name"] = name
                         signals.append(signal)
-                    features = self._state_features(symbol, market_state, signals)
+                    features = self._state_features(symbol, market_state, signals, None)
                     seq.append(features)
                     sequence = list(seq)
                     if len(sequence) < self.cfg.seq_len:
@@ -736,23 +747,29 @@ class RLStrategyOrchestrator:
         for _ in range(max(1, self.cfg.pretrain_epochs)):
             self._train()
 
-    def _update_sequence(self, symbol: str, features: list[float]) -> list[list[float]]:
-        history = self._feature_history.get(symbol)
+    def _update_sequence(self, key: tuple[str, str], features: list[float]) -> list[list[float]]:
+        history = self._feature_history.get(key)
         if history is None:
             history = deque(maxlen=self.cfg.seq_len)
-            self._feature_history[symbol] = history
+            self._feature_history[key] = history
         history.append(features)
         sequence = list(history)
         if len(sequence) < self.cfg.seq_len:
             sequence = _pad_sequence(sequence, self.cfg.seq_len, len(features))
         return sequence
 
-    def _state_features(self, symbol: str, market_state: dict, signals: list[dict] | None) -> list[float]:
+    def _state_features(
+        self,
+        symbol: str,
+        market_state: dict,
+        signals: list[dict] | None,
+        broker_name: str | None,
+    ) -> list[float]:
         base = _feature_vector(market_state, self._risk_cfg)
         actions = signals or []
         ai_features = self._ai_features(symbol, market_state, actions)
         signal_features = _signal_feature_vector(self._strategy_names, actions)
-        order_features = _order_feedback_vector(self._order_feedback.get(symbol))
+        order_features = _order_feedback_vector(self._order_feedback.get(self._key(symbol, broker_name)))
         return base + ai_features + signal_features + order_features
 
     def _ai_features(self, symbol: str, market_state: dict, signals: list[dict]) -> list[float]:
