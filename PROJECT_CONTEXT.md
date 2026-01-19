@@ -378,3 +378,6 @@ can reload context quickly. Keep it updated when the setup changes.
 ## Session update 2026-01-19 16:45:05 CET
 - Post-restart check: all services up; learner reports GPU takeover and is sleeping before resuming online updates.
 - Trader resumed trading loop; API healthy.
+
+## Session update 2026-01-19 18:16:55 CET
+- Trader is down because healthwatch market_shutdown stopped the stack; `data/system_state.json` reports state=stopped with next_open 2026-01-20T09:00:00+01:00.
