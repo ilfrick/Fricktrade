@@ -403,3 +403,6 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-19 16:30:54 CET
 - Updated `docker-compose.yml` so the `learner` service uses the GPU image and requests NVIDIA devices by default (env vars + device_requests).
+
+## Session update 2026-01-19 16:32:20 CET
+- Adjusted `docker-compose.yml` to avoid hard GPU device requests for `learner`, allowing CPU fallback while still using the GPU image when available.

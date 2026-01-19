@@ -101,10 +101,6 @@ services:
       - ./data:/data
       - ./models:/app/models
     command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "online-train"]
-    device_requests:
-      - driver: nvidia
-        count: all
-        capabilities: ["gpu"]
     labels:
       - "autoheal=true"
     restart: unless-stopped

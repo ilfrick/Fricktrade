@@ -368,3 +368,6 @@ can reload context quickly. Keep it updated when the setup changes.
 
 ## Session update 2026-01-19 16:30:54 CET
 - Set `learner` service to use GPU image and NVIDIA device requests by default in `docker-compose.yml`.
+
+## Session update 2026-01-19 16:32:20 CET
+- Removed hard GPU device_requests from `learner` in `docker-compose.yml` so it can fall back to CPU if no GPU is available.
