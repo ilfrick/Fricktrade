@@ -381,3 +381,6 @@ can reload context quickly. Keep it updated when the setup changes.
 
 ## Session update 2026-01-19 18:16:55 CET
 - Trader is down because healthwatch market_shutdown stopped the stack; `data/system_state.json` reports state=stopped with next_open 2026-01-20T09:00:00+01:00.
+
+## Session update 2026-01-19 18:45:53 CET
+- Context/session saved after market shutdown confirmation.
