@@ -365,3 +365,6 @@ can reload context quickly. Keep it updated when the setup changes.
 - Post-restart check: all Fricktrade containers up; learner running online update without crash.
 - Trader resumed trading loop; market-cache stale warning persists but no fatal errors.
 - API started cleanly and /health is 200.
+
+## Session update 2026-01-19 16:30:54 CET
+- Set `learner` service to use GPU image and NVIDIA device requests by default in `docker-compose.yml`.

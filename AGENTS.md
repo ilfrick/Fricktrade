@@ -400,3 +400,6 @@ Highest positive impact (testing/live trading):
 - Learner logs show online update + RL training (1000 timesteps) running on CPU with progress output.
 - Trader logs show market open, checkpoint saved, and active model reload; only market-cache stale warning observed.
 - API started cleanly and /health returned 200.
+
+## Session update 2026-01-19 16:30:54 CET
+- Updated `docker-compose.yml` so the `learner` service uses the GPU image and requests NVIDIA devices by default (env vars + device_requests).
