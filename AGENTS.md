@@ -394,3 +394,9 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-19 16:04:42 CET
 - Fixed learner crash loop by making online checkpoint replace tolerant of missing temp file (`app/learning/train_rl.py`): if `.tmp.zip` is missing, falls back to `.tmp` or logs a warning and skips replace.
+
+## Session update 2026-01-19 16:27:50 CET
+- Checked post-restart logs: all Fricktrade containers are up; learner is no longer crash-looping.
+- Learner logs show online update + RL training (1000 timesteps) running on CPU with progress output.
+- Trader logs show market open, checkpoint saved, and active model reload; only market-cache stale warning observed.
+- API started cleanly and /health returned 200.

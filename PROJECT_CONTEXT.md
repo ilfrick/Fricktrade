@@ -360,3 +360,8 @@ can reload context quickly. Keep it updated when the setup changes.
 
 ## Session update 2026-01-19 16:04:42 CET
 - Made online RL checkpoint replacement robust to missing temp files; learner should no longer crash-loop on `.tmp.zip` rename (`app/learning/train_rl.py`).
+
+## Session update 2026-01-19 16:27:50 CET
+- Post-restart check: all Fricktrade containers up; learner running online update without crash.
+- Trader resumed trading loop; market-cache stale warning persists but no fatal errors.
+- API started cleanly and /health is 200.
