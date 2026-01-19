@@ -391,3 +391,6 @@ Highest positive impact (testing/live trading):
 - All core services (api, trader, prometheus, grafana, redis, healthwatch, market-cache) are up; api health checks are returning 200.
 - Learner container is restarting due to `FileNotFoundError` when renaming `/app/models/ppo_policy.zip.tmp.zip` to `/app/models/ppo_policy.zip` during online updates; online training currently unhealthy.
 - Trader logs show only periodic market-cache stale warnings and checkpoint writes; no fatal errors observed.
+
+## Session update 2026-01-19 16:04:42 CET
+- Fixed learner crash loop by making online checkpoint replace tolerant of missing temp file (`app/learning/train_rl.py`): if `.tmp.zip` is missing, falls back to `.tmp` or logs a warning and skips replace.

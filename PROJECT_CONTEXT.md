@@ -357,3 +357,6 @@ can reload context quickly. Keep it updated when the setup changes.
 - Checked container status/logs: core services healthy; API responding to /health.
 - Learner container is crash-looping due to `FileNotFoundError` renaming `/app/models/ppo_policy.zip.tmp.zip` -> `/app/models/ppo_policy.zip` during online updates.
 - Trader logs show only market-cache stale warnings and checkpoint writes; no fatal errors.
+
+## Session update 2026-01-19 16:04:42 CET
+- Made online RL checkpoint replacement robust to missing temp files; learner should no longer crash-loop on `.tmp.zip` rename (`app/learning/train_rl.py`).

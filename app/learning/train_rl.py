@@ -19,6 +19,8 @@ from app.learning.env import TradingEnv
 from app.learning.evaluate import evaluate_model
 from app.learning.registry import build_active_record, register_model, set_active_model
 
+logger = logging.getLogger(__name__)
+
 
 def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     learning_cfg = cfg.get("learning", {})
@@ -168,7 +170,13 @@ class _InProgressCheckpointCallback(BaseCallback):
         tmp_path = f"{self._model_path}.tmp"
         self.model.save(tmp_path)
         tmp_file = tmp_path if tmp_path.endswith(".zip") else f"{tmp_path}.zip"
-        os.replace(tmp_file, self._model_path)
+        if os.path.exists(tmp_file):
+            os.replace(tmp_file, self._model_path)
+        elif os.path.exists(tmp_path):
+            os.replace(tmp_path, self._model_path)
+        else:
+            logger.warning("Checkpoint temp file missing; skip replace: tmp=%s model=%s", tmp_file, self._model_path)
+            return
         if self._publish_active:
             record = build_active_record(self._model_path)
             set_active_model(self._active_path, record, reason="checkpoint")
