@@ -352,3 +352,8 @@ can reload context quickly. Keep it updated when the setup changes.
 - RL training completed with reduced scope (`/data/rl_train_small`, 5000 timesteps); model + registry files now exist under `./models`.
 
 - Online RL enabled in config but no learner containers running; online updates require starting `learner`/`learner-gpu`.
+
+## Session update 2026-01-19 16:04:22 CET
+- Checked container status/logs: core services healthy; API responding to /health.
+- Learner container is crash-looping due to `FileNotFoundError` renaming `/app/models/ppo_policy.zip.tmp.zip` -> `/app/models/ppo_policy.zip` during online updates.
+- Trader logs show only market-cache stale warnings and checkpoint writes; no fatal errors.

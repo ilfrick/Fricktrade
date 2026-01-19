@@ -385,3 +385,9 @@ Highest positive impact (testing/live trading):
 
 - Checked online training flags: `learning.enabled: true`, `learning.online.enabled: true`, `orchestrator.rl.enabled: true` in `config/config.yaml`.
 - No learner containers running (`docker ps` shows none). Online updates require starting `learner` or `learner-gpu`.
+
+## Session update 2026-01-19 16:04:22 CET
+- Checked container status and logs after recent changes.
+- All core services (api, trader, prometheus, grafana, redis, healthwatch, market-cache) are up; api health checks are returning 200.
+- Learner container is restarting due to `FileNotFoundError` when renaming `/app/models/ppo_policy.zip.tmp.zip` to `/app/models/ppo_policy.zip` during online updates; online training currently unhealthy.
+- Trader logs show only periodic market-cache stale warnings and checkpoint writes; no fatal errors observed.
