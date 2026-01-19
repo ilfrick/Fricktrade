@@ -371,3 +371,6 @@ can reload context quickly. Keep it updated when the setup changes.
 
 ## Session update 2026-01-19 16:32:20 CET
 - Removed hard GPU device_requests from `learner` in `docker-compose.yml` so it can fall back to CPU if no GPU is available.
+
+## Session update 2026-01-19 16:39:48 CET
+- Updated learner command in `docker-compose.yml` to use `python3` so the GPU image can start.

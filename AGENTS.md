@@ -406,3 +406,6 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-19 16:32:20 CET
 - Adjusted `docker-compose.yml` to avoid hard GPU device requests for `learner`, allowing CPU fallback while still using the GPU image when available.
+
+## Session update 2026-01-19 16:39:48 CET
+- Fixed learner restart loop by switching its command to `python3` in `docker-compose.yml` (GPU image lacks `python`).

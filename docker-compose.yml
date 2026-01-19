@@ -100,7 +100,7 @@ services:
       - ./config:/app/config
       - ./data:/data
       - ./models:/app/models
-    command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "online-train"]
+    command: ["python3", "-m", "app.main", "--config", "/app/config/config.yaml", "online-train"]
     labels:
       - "autoheal=true"
     restart: unless-stopped
