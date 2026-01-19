@@ -409,3 +409,8 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-19 16:39:48 CET
 - Fixed learner restart loop by switching its command to `python3` in `docker-compose.yml` (GPU image lacks `python`).
+
+## Session update 2026-01-19 16:45:05 CET
+- Post-restart check: all Fricktrade services up; learner running and reports GPU takeover, sleeping before resuming updates.
+- Trader restarted cleanly and resumed trading loop; standard market-cache stale warning only.
+- API healthy and serving /health.

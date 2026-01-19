@@ -374,3 +374,7 @@ can reload context quickly. Keep it updated when the setup changes.
 
 ## Session update 2026-01-19 16:39:48 CET
 - Updated learner command in `docker-compose.yml` to use `python3` so the GPU image can start.
+
+## Session update 2026-01-19 16:45:05 CET
+- Post-restart check: all services up; learner reports GPU takeover and is sleeping before resuming online updates.
+- Trader resumed trading loop; API healthy.
