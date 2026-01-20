@@ -485,6 +485,12 @@ data:
       objective: return_time_penalty
       time_penalty_per_bar: 0.15
       allow_orchestrator_fetch: false
+      keras_returns:
+        enabled: true
+        model_path: /app/models/keras/stocks_price_regression_128_60-60m_5minc_best.keras
+        interval: 5m
+        score_mode: expected_return
+        weight: 0.5
     filters:
       price_min: 2.0
       relative_volume_min: 2.0

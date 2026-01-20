@@ -71,6 +71,11 @@ class AISymbolFilterConfig:
     market_cache_cache_only: bool
     market_cache_ignore_staleness: bool
     market_cache_allow_pickle: bool
+    keras_enabled: bool
+    keras_model_path: str
+    keras_interval: str
+    keras_weight: float
+    keras_score_mode: str
 
 
 def score_symbols(
@@ -111,7 +116,7 @@ def score_symbols(
                 _save_linear_model(model_path, model, stats)
 
     if model is None or stats is None:
-        return symbols, {s: 0.0 for s in symbols}
+        return symbols, {s: 0.0 for s in symbols}, {}
 
     catalyst_map = _fetch_news_catalysts(symbols, api_key, api_secret, config, brokers_cfg or {})
     if config.online_enabled:
@@ -128,6 +133,14 @@ def score_symbols(
     bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
     scores = {}
     signal_map: dict[str, dict[str, float]] = {}
+    keras_score_fn = None
+    if config.keras_enabled:
+        try:
+            from app.signals.keras_returns import compute_keras_return_signals
+
+            keras_score_fn = compute_keras_return_signals
+        except Exception:
+            keras_score_fn = None
     for symbol, frame in bars.items():
         features = _latest_features(frame, config.window, catalyst_map.get(symbol, False), config.interval)
         if features is None:
@@ -137,6 +150,19 @@ def score_symbols(
             score = _predict_ppo(model, stats, features)
         else:
             score = _predict_linear(model, stats, features)
+        keras_signals = None
+        if keras_score_fn is not None:
+            try:
+                keras_signals = keras_score_fn(
+                    frame,
+                    model_path=config.keras_model_path,
+                    interval=config.keras_interval,
+                )
+            except Exception:
+                keras_signals = None
+        if keras_signals is not None:
+            keras_score = _keras_score_from_signals(keras_signals, config.keras_score_mode)
+            score = float(score) + config.keras_weight * float(keras_score)
         scores[symbol] = float(score)
         if frame is not None and not frame.empty:
             try:
@@ -154,6 +180,16 @@ def score_symbols(
                 )
             except Exception:
                 signal_map[symbol] = {}
+        if keras_signals is not None:
+            signal_map.setdefault(symbol, {})
+            signal_map[symbol].update(
+                {
+                    "keras_expected_return": float(keras_signals.expected_return),
+                    "keras_short_term_score": float(keras_signals.short_term_score),
+                    "keras_up_prob": float(keras_signals.up_prob),
+                    "keras_downside_risk": float(keras_signals.downside_risk),
+                }
+            )
     for symbol in symbols:
         scores.setdefault(symbol, 0.0)
         signal_map.setdefault(symbol, {})
@@ -206,6 +242,17 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     market_cache_cache_only = bool(cache_cfg.get("cache_only", True))
     market_cache_ignore_staleness = bool(cache_cfg.get("ignore_staleness", False))
     market_cache_allow_pickle = bool(cache_cfg.get("allow_pickle", False))
+    keras_cfg = cfg.get("keras_returns", {}) or {}
+    keras_enabled = bool(keras_cfg.get("enabled", False))
+    keras_model_path = str(
+        keras_cfg.get(
+            "model_path",
+            "/app/models/keras/stocks_price_regression_128_60-60m_5minc_best.keras",
+        )
+    )
+    keras_interval = str(keras_cfg.get("interval", "5m"))
+    keras_weight = float(keras_cfg.get("weight", 0.5))
+    keras_score_mode = str(keras_cfg.get("score_mode", "expected_return"))
     return AISymbolFilterConfig(
         interval=interval,
         lookback_days=lookback_days,
@@ -247,7 +294,22 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         market_cache_cache_only=market_cache_cache_only,
         market_cache_ignore_staleness=market_cache_ignore_staleness,
         market_cache_allow_pickle=market_cache_allow_pickle,
+        keras_enabled=keras_enabled,
+        keras_model_path=keras_model_path,
+        keras_interval=keras_interval,
+        keras_weight=keras_weight,
+        keras_score_mode=keras_score_mode,
     )
+
+
+def _keras_score_from_signals(signals, mode: str) -> float:
+    if mode == "short_term":
+        return float(signals.short_term_score)
+    if mode == "up_prob":
+        return float(signals.up_prob)
+    if mode == "downside_risk":
+        return float(signals.downside_risk)
+    return float(signals.expected_return)
 
 
 def _normalize_model_path(model_path: str, model_type: str) -> Path:
