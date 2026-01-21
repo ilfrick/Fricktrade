@@ -18,13 +18,25 @@ class AlpacaBroker(Broker):
 
     def is_connected(self) -> bool:
         try:
-            record_broker_call(self._name, "get_account", self.client.get_account)
-            return True
+            account_data = self.get_account()
+            # If get_account returns data, it means is_success_check passed for get_account
+            return bool(account_data)
         except Exception:
             return False
 
     def get_account(self) -> dict:
-        account = record_broker_call(self._name, "get_account", self.client.get_account)
+        def _check_account_data(account_obj) -> bool:
+            if account_obj is None:
+                return False
+            data = account_obj.dict()
+            return bool(data and data.get("status")) # Check if dict is not empty and has a 'status' key
+
+        account = record_broker_call(
+            self._name,
+            "get_account",
+            self.client.get_account,
+            is_success_check=_check_account_data,
+        )
         data = account.dict()
         if "shorting_enabled" in data:
             data["shorting_enabled"] = bool(data.get("shorting_enabled"))
@@ -37,7 +49,15 @@ class AlpacaBroker(Broker):
             except AttributeError:
                 return self.client.list_positions()
 
-        positions = record_broker_call(self._name, "get_positions", _fetch_positions)
+        def _check_positions_data(positions_list) -> bool:
+            return positions_list is not None # Ensure list is not None
+
+        positions = record_broker_call(
+            self._name,
+            "get_positions",
+            _fetch_positions,
+            is_success_check=_check_positions_data,
+        )
         return [pos.dict() if hasattr(pos, "dict") else dict(pos) for pos in positions]
 
     def get_open_orders(self) -> list[dict]:
@@ -47,7 +67,15 @@ class AlpacaBroker(Broker):
             except AttributeError:
                 return self.client.list_orders(status="open")
 
-        orders = record_broker_call(self._name, "get_open_orders", _fetch_orders)
+        def _check_orders_data(orders_list) -> bool:
+            return orders_list is not None # Ensure list is not None
+
+        orders = record_broker_call(
+            self._name,
+            "get_open_orders",
+            _fetch_orders,
+            is_success_check=_check_orders_data,
+        )
         results = []
         for order in orders:
             data = order.dict() if hasattr(order, "dict") else dict(order)

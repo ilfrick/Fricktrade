@@ -34,3 +34,11 @@
 - Confirm `healthwatch` container is running.
 - Check `healthwatch_service_up` metrics in Prometheus.
 - Verify service URLs in `healthwatch.targets`.
+
+## Broker Connectivity Issues
+If you are receiving `BrokerApiErrorRate` or `BrokerApiNoSuccess` alerts, it indicates a problem with the connection or API calls to your configured broker.
+- Check `trader` logs for specific error messages or exceptions related to broker API calls.
+- Verify that your broker API keys (`APP_BROKER_API_KEY`, `APP_BROKER_SECRET_KEY`) and base URL (`APP_BROKER_BASE_URL`) are correctly configured and have the necessary permissions.
+- Ensure network connectivity from the `trader` container to the broker's API endpoints.
+- Review the broker's status page for any outages or announced issues.
+

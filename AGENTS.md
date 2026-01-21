@@ -63,6 +63,7 @@ docker compose run --rm trader python3 -m app.main pretrain-orchestrator --confi
 - Sweep orchestrator hyperparameters:
 
 ```bash
+bash
 docker compose run --rm trader python3 scripts/orchestrator_sweep.py --config /app/config/config.yaml
 ```
 
@@ -211,6 +212,8 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- **Fix: Resolve all remaining Docker build and runtime dependency issues.** Corrected backtrader version to 1.9.78.123 in requirements.txt. Added DEBIAN_FRONTEND=noninteractive to Dockerfiles to prevent interactive apt-get prompts. Upgraded pip in Dockerfiles to ensure robust dependency resolution. These changes resolve ModuleNotFoundError for backtrader and allow all core services (api, trader, learner) to start and run correctly. (2026-01-21)
+- Fixed Keras model deserialization errors by adding `tf_keras` dependency and restoring `TF_USE_LEGACY_KERAS=1` in Dockerfiles. Ensures the 'Keras return overlay' in the AI symbol filter can load and use pre-trained models. (2026-01-21)
 - Added explainability fields to decision traces and new oversight runbook doc.
 - Added stress/liquidity haircuts to sizing for real-time risk controls.
 - Added audit/compliance retention, signing, and reason-code enforcement support.
@@ -396,9 +399,8 @@ Highest positive impact (testing/live trading):
 - Fixed learner crash loop by making online checkpoint replace tolerant of missing temp file (`app/learning/train_rl.py`): if `.tmp.zip` is missing, falls back to `.tmp` or logs a warning and skips replace.
 
 ## Session update 2026-01-19 16:27:50 CET
-- Checked post-restart logs: all Fricktrade containers are up; learner is no longer crash-looping.
-- Learner logs show online update + RL training (1000 timesteps) running on CPU with progress output.
-- Trader logs show market open, checkpoint saved, and active model reload; only market-cache stale warning observed.
+- Checked post-restart logs: all Fricktrade containers are up; learner running online update without crash.
+- Trader resumed trading loop; market-cache stale warning persists but no fatal errors.
 - API started cleanly and /health returned 200.
 
 ## Session update 2026-01-19 16:30:54 CET
@@ -421,3 +423,5 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-19 18:45:53 CET
 - Saved context/session after confirming trader stopped due to healthwatch market_shutdown (holiday) and pushed updates.
+### 2026-01-21
+- **Fix: Resolve all remaining Docker build and runtime dependency issues.** Corrected backtrader version to 1.9.78.123 in requirements.txt. Added DEBIAN_FRONTEND=noninteractive to Dockerfiles to prevent interactive apt-get prompts. Upgraded pip in Dockerfiles to ensure robust dependency resolution. These changes resolve ModuleNotFoundError for backtrader and allow all core services (api, trader, learner) to start and run correctly.

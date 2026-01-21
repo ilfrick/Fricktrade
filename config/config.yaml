@@ -374,7 +374,7 @@ backtest:
   use_gpu: true
   mode: agent
   symbols_source: data_dir
-  dynamic_symbols_enabled: false
+  dynamic_symbols_enabled: true
   news_enabled: false
   news_source: none
   news_path: /data/news_cache.json

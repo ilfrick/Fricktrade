@@ -13,6 +13,8 @@ Ensure your Docker build environment is non-interactive by setting `DEBIAN_FRONT
 - Default trader image is GPU-enabled.
 - Force CPU: set `learning.device: cpu`.
 - Disable GPU in backtests: `backtest.use_gpu: false`.
+- The system automatically falls back to CPU for GPU-reliant components upon `CUDA out of memory` or similar errors. This fallback is latched until the next restart to prevent continuous failures.
+
 
 ## Live vs Dev
 - Use a separate project name for dev:

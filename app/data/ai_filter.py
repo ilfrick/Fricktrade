@@ -230,7 +230,7 @@ def score_symbols(
         
         except (torch.cuda.OutOfMemoryError, tf.errors.ResourceExhaustedError) as exc:
             if current_device != "cpu":
-                logging.warning("CUDA out of memory during AI filter scoring: %s. Falling back to CPU.", exc)
+                logging.error(f"FATAL: CUDA out of memory during AI filter scoring on GPU ({current_device}). Disabling GPU globally and retrying with CPU. Error: {exc}")
                 disable_gpu_until_restart()
                 current_device = "cpu"
                 continue # Retry loop with CPU

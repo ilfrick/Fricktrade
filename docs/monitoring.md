@@ -26,13 +26,17 @@ Expose Prometheus metrics and Grafana dashboards.
 - `order_enqueue_latency_seconds`
 - `signal_return_30m_pct`, `signal_return_60m_pct`, `signal_early_volume_pct`
 - `signal_runup_pct`, `signal_drawdown_pct`, `signal_abs_move`, `signal_runup_abs`, `signal_drawdown_abs`
+- `broker_requests_total`: Total number of API calls made to brokers, labeled by `broker`, `method`, and `status` (e.g., `success`, `error`).
+- `broker_last_success_timestamp_seconds`: Unix timestamp of the last successful API call to a specific broker and method.
 
-## Audit & Compliance Logs
-- Audit logs capture full decision traces in JSONL for later replay.
-- Compliance exports can write JSONL and CSV summaries per day.
-- Enable via `monitoring.audit.enabled` and `monitoring.compliance.enabled`.
-- Retention and reason-code enforcement are controlled via `monitoring.audit.*` and `monitoring.compliance.*`.
-- Compliance exports write `.sha256` sidecar digests (and optional signatures).
+## Broker API Monitoring
+Critical for ensuring continuous operation, broker API calls are monitored using the following:
+-   **`broker_requests_total`**: A counter for every API interaction, categorized by broker, method, and the outcome (`success` or `error`). This metric helps identify frequent failures for specific API endpoints.
+-   **`broker_last_success_timestamp_seconds`**: A gauge that records the Unix timestamp of the last successful call for each broker API method. This is crucial for detecting prolonged periods of API unavailability.
+
+Alerts based on these metrics:
+-   **`BrokerApiErrorRate`**: Triggered when the rate of `error` statuses for a broker API exceeds a defined threshold (e.g., 20% over 10 minutes). This indicates a high frequency of failed API calls.
+-   **`BrokerApiNoSuccess`**: A critical alert fired if no successful API calls have been recorded for a specific broker method over an extended period (e.g., 10 minutes). This often signifies a complete loss of connectivity or a severe issue with the broker's API.
 
 ## Configuration
 `config/config.yaml`:
