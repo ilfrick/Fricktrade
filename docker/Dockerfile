@@ -18,5 +18,6 @@ COPY tests /app/tests
 COPY config /app/config
 
 ENV PYTHONPATH=/app
+ENV TF_USE_LEGACY_KERAS=1
 
 CMD ["python", "-m", "app.main", "trade"]

@@ -14,3 +14,10 @@ ollama/
 testenv/
 alertmanager/alertmanager.generated.yml
 scripts/.fuse_hidden*
+
+.venv/
+*.log
+*.odt
+*.html
+*_session.txt
+.nextcloudsync.log

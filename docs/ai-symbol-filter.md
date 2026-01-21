@@ -63,6 +63,13 @@ News features:
 - `data.dynamic_symbols.ai_filter.news.timeout_seconds`
 - `data.dynamic_symbols.ai_filter.news.retries`
 
+Keras return overlay (optional):
+- `data.dynamic_symbols.ai_filter.keras_returns.enabled`
+- `data.dynamic_symbols.ai_filter.keras_returns.model_path`
+- `data.dynamic_symbols.ai_filter.keras_returns.interval` (expects 5m inputs)
+- `data.dynamic_symbols.ai_filter.keras_returns.score_mode` (`expected_return`, `short_term`, `up_prob`, `downside_risk`)
+- `data.dynamic_symbols.ai_filter.keras_returns.weight` (score contribution scalar)
+
 Universe selection:
 - `data.dynamic_symbols.universe` (use `brokers_active` to start from Alpaca active universe today plus positions/orders)
 - `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap before scoring)

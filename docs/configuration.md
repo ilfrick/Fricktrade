@@ -58,6 +58,7 @@ Centralize runtime settings for all subsystems.
 - AI filter provider: `data.dynamic_symbols.ai_filter.provider` (alpaca or yfinance).
 - AI filter coverage filter: `data.dynamic_symbols.ai_filter.coverage_filter` (drop symbols without bars).
 - AI filter cached symbols: `data.dynamic_symbols.ai_filter.use_cached_symbols`.
+- Keras return overlay: `data.dynamic_symbols.ai_filter.keras_returns.*` (optional scoring feature).
 - Data quality validation: `data.quality.enabled`.
 - Data adjustments: `data.adjustments.enabled`.
 - Broker universe: `data.dynamic_symbols.universe: brokers_active` (Alpaca active universe today).

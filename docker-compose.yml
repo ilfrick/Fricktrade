@@ -35,11 +35,6 @@ services:
       - ./data:/data
       - ./models:/app/models
     command: ["python3", "-m", "app.main", "--config", "/app/config/config.yaml", "trade"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: ["gpu"]
     ports:
       - "0.0.0.0:8001:8001"
     labels:

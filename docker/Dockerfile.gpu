@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 WORKDIR /app
 
@@ -22,5 +22,6 @@ COPY tests /app/tests
 COPY config /app/config
 
 ENV PYTHONPATH=/app
+ENV TF_USE_LEGACY_KERAS=1
 
 CMD ["python3", "-m", "app.main", "backtest"]

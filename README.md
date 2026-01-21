@@ -167,6 +167,7 @@ flowchart LR
 - Live data from `data.provider` (yfinance, alpaca, or brokers). yfinance runs through the market-cache service (Redis + file fallback), with optional cache-only reads.
 - Historical bars from Alpaca for training/backtesting/ingestion
 - Dynamic scanner and PPO-based AI filter for symbol selection
+- Optional Keras return overlay can contribute to AI symbol scores (TensorFlow/Keras installed in containers).
 - The AI filter can publish cached symbol lists so the trader reads from cache when available.
 - News catalyst support (Alpaca news)
 
