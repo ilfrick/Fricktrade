@@ -9,6 +9,7 @@ import os
 import shutil
 from pathlib import Path
 
+import tensorflow as tf # Added tensorflow import
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -18,6 +19,7 @@ from app.learning.drift import compute_feature_stats
 from app.learning.env import TradingEnv
 from app.learning.evaluate import evaluate_model
 from app.learning.registry import build_active_record, register_model, set_active_model
+from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +68,43 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     vec_env = DummyVecEnv(envs)
 
     model = None
-    if resume and Path(model_path).exists():
+    # Try with initial device, then fall back to CPU if GPU error occurs
+    for attempt in range(2):
+        current_device = device if attempt == 0 else "cpu"
+        if is_gpu_disabled(): # If already globally disabled, just use CPU
+            current_device = "cpu"
+
         try:
-            model = PPO.load(model_path, env=vec_env, device=device, custom_objects=_sb3_custom_objects())
-        except ValueError as exc:
-            logging.warning("RL model shape mismatch; rebuilding model: %s", exc)
-            model = None
+            if resume and Path(model_path).exists():
+                try:
+                    model = PPO.load(model_path, env=vec_env, device=current_device, custom_objects=_sb3_custom_objects())
+                except ValueError as exc:
+                    logging.warning("RL model shape mismatch; rebuilding model: %s", exc)
+                    model = None
+            if model is None:
+                model = PPO("MlpPolicy", vec_env, verbose=1, device=current_device)
+            
+            # If successful, break out of retry loop
+            break
+
+        except (torch.cuda.OutOfMemoryError, tf.errors.ResourceExhaustedError) as exc:
+            if current_device != "cpu":
+                logging.warning("CUDA out of memory during RL training: %s. Falling back to CPU for current and future runs.", exc)
+                disable_gpu_until_restart()
+                device = "cpu" # Update device for subsequent PPO.learn call
+                continue # Retry with CPU
+            else:
+                logging.error("RL training failed on CPU after GPU error: %s", exc)
+                raise # Re-raise if fails even on CPU
+
+        except Exception as exc:
+            logging.error("Unknown error during RL training setup: %s", exc)
+            raise
+
     if model is None:
-        model = PPO("MlpPolicy", vec_env, verbose=1, device=device)
+        logging.error("Failed to initialize PPO model for training after retries.")
+        raise RuntimeError("Failed to initialize PPO model.")
+
     checkpoint_interval = int(training_cfg.get("checkpoint_interval_steps", 0))
     publish_in_progress = bool(training_cfg.get("publish_in_progress", False))
     callback = None
@@ -183,14 +214,15 @@ class _InProgressCheckpointCallback(BaseCallback):
 
 
 def _resolve_device(device: str) -> str:
+    if is_gpu_disabled():
+        logging.warning("GPU globally disabled. Forcing CPU for RL training.")
+        return "cpu"
     try:
         import torch
     except Exception:
         return "cpu"
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and device != "cpu":
         return "cuda"
-    if device != "auto":
-        return device
     return "cpu"
 
 

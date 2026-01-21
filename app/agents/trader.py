@@ -76,6 +76,8 @@ from app.learning.registry import load_active_model, load_latest_feature_stats
 from app.brokers.config_utils import get_alpaca_account_cfg
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
+from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart # Import GPU state utilities
+import tensorflow as tf # Import tensorflow for GPU error handling
 try:
     from app.data.ai_filter import score_symbols
 except Exception:
@@ -115,6 +117,21 @@ class TradingAgent:
         self.cfg = cfg
         self.broker = broker
         self.learning_cfg = cfg.get("learning", {})
+        # Enforce CPU if GPU is globally disabled due to previous errors
+        if is_gpu_disabled():
+            logging.warning("GPU globally disabled. Enforcing CPU for learning configurations.")
+            self.learning_cfg["device"] = "cpu"
+            # Update orchestrator device config
+            if "orchestrator" in self.cfg and "rl" in self.cfg["orchestrator"]:
+                self.cfg["orchestrator"]["rl"]["device"] = "cpu"
+            # Update AI filter device config
+            if "data" in self.cfg and \
+               "dynamic_symbols" in self.cfg["data"] and \
+               "ai_filter" in self.cfg["data"]["dynamic_symbols"]:
+                self.cfg["data"]["dynamic_symbols"]["ai_filter"]["device"] = "cpu"
+            # Update backtest GPU usage
+            if "backtest" in self.cfg:
+                self.cfg["backtest"]["use_gpu"] = False
         self._account_snapshot: dict[str, object] = {}
         params = cfg["strategy"]["params"]
         self._strategy_params = params
@@ -301,18 +318,40 @@ class TradingAgent:
                 window_size = int(self.learning_cfg.get("window_size", 50))
                 device = self.learning_cfg.get("device", "auto")
                 feature_config = self.learning_cfg.get("features", {})
-                try:
-                    return RLPolicyStrategy(
-                        model_path,
-                        window_size=window_size,
-                        device=device,
-                        feature_config=feature_config,
-                        drift_monitor=self._drift_monitor,
-                        include_features=self._include_feature_snapshots,
-                        risk_cfg=self.cfg.get("risk", {}),
-                    )
-                except (FileNotFoundError, ValueError) as exc:
-                    logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
+                
+                # Attempt to build with current device setting
+                try_devices = [device]
+                if device != "cpu":
+                    try_devices.append("cpu")
+
+                for current_device in try_devices:
+                    try:
+                        return RLPolicyStrategy(
+                            model_path,
+                            window_size=window_size,
+                            device=current_device, # Use the current device in the loop
+                            feature_config=feature_config,
+                            drift_monitor=self._drift_monitor,
+                            include_features=self._include_feature_snapshots,
+                            risk_cfg=self.cfg.get("risk", {}),
+                        )
+                    except (FileNotFoundError, ValueError) as exc:
+                        logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
+                        break # Model not found/invalid, no point in retrying with CPU
+                    except tf.errors.ResourceExhaustedError as exc:
+                        if current_device != "cpu":
+                            logging.warning(
+                                "CUDA out of memory during rl_policy build: %s. Falling back to CPU.", exc
+                            )
+                            disable_gpu_until_restart()
+                            self.learning_cfg["device"] = "cpu" # Update config for current run
+                            continue # Retry with CPU
+                        else:
+                            logging.error("RL policy failed on CPU after GPU error: %s", exc)
+                            break
+                    except Exception as exc:
+                        logging.warning("Unknown error during rl_policy build: %s", exc)
+                        break
             return None
         if name == "rl_policy_fees":
             if self.learning_cfg.get("enabled"):
@@ -323,20 +362,42 @@ class TradingAgent:
                 broker_fees = self.cfg.get("brokers", {}).get(self._broker_name, {}).get("fees", {})
                 fee_guard = self.cfg.get("strategy", {}).get("fee_aware", {})
                 risk_cfg = self.cfg.get("risk", {})
-                try:
-                    return FeeAwareRLPolicyStrategy(
-                        model_path,
-                        window_size=window_size,
-                        device=device,
-                        feature_config=feature_config,
-                        drift_monitor=self._drift_monitor,
-                        include_features=self._include_feature_snapshots,
-                        broker_fees=broker_fees,
-                        fee_guard=fee_guard,
-                        risk_cfg=risk_cfg,
-                    )
-                except (FileNotFoundError, ValueError) as exc:
-                    logging.warning("RL model unavailable, skipping rl_policy_fees: %s", exc)
+                
+                # Attempt to build with current device setting
+                try_devices = [device]
+                if device != "cpu":
+                    try_devices.append("cpu")
+
+                for current_device in try_devices:
+                    try:
+                        return FeeAwareRLPolicyStrategy(
+                            model_path,
+                            window_size=window_size,
+                            device=current_device, # Use the current device in the loop
+                            feature_config=feature_config,
+                            drift_monitor=self._drift_monitor,
+                            include_features=self._include_feature_snapshots,
+                            broker_fees=broker_fees,
+                            fee_guard=fee_guard,
+                            risk_cfg=risk_cfg,
+                        )
+                    except (FileNotFoundError, ValueError) as exc:
+                        logging.warning("RL model unavailable, skipping rl_policy_fees: %s", exc)
+                        break # Model not found/invalid, no point in retrying with CPU
+                    except tf.errors.ResourceExhaustedError as exc:
+                        if current_device != "cpu":
+                            logging.warning(
+                                "CUDA out of memory during rl_policy_fees build: %s. Falling back to CPU.", exc
+                            )
+                            disable_gpu_until_restart()
+                            self.learning_cfg["device"] = "cpu" # Update config for current run
+                            continue # Retry with CPU
+                        else:
+                            logging.error("RL policy fees failed on CPU after GPU error: %s", exc)
+                            break
+                    except Exception as exc:
+                        logging.warning("Unknown error during rl_policy_fees build: %s", exc)
+                        break
             return None
         if name == "pattern_trading":
             return PatternTradingStrategy(self.cfg.get("pattern_trading", {}))

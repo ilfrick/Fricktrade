@@ -3,14 +3,14 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import math
+import tensorflow as tf # Added tensorflow import
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
-
-import json
-import logging
-import math
 
 import gymnasium as gym
 import numpy as np
@@ -27,6 +27,7 @@ from app.data.news import fetch_catalyst_symbols_for_config
 from app.data.market_cache import MarketCache, interval_to_seconds
 from app.data.yfinance_utils import fetch_yfinance_bars
 from app.utils.signal_features import compute_signal_metrics_from_window
+from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart # Import GPU state utilities
 
 
 @dataclass
@@ -76,6 +77,7 @@ class AISymbolFilterConfig:
     keras_interval: str
     keras_weight: float
     keras_score_mode: str
+    device: str # New field for device
 
 
 def score_symbols(
@@ -90,7 +92,7 @@ def score_symbols(
         return [], {}, {}
     config = _read_config(cfg)
     logging.info(
-        "AI filter config; symbols=%d provider=%s interval=%s lookback_days=%s cache_enabled=%s cache_only=%s cache_ignore_stale=%s",
+        "AI filter config; symbols=%d provider=%s interval=%s lookback_days=%s cache_enabled=%s cache_only=%s cache_ignore_stale=%s device=%s",
         len(symbols),
         config.provider,
         config.interval,
@@ -98,103 +100,149 @@ def score_symbols(
         config.market_cache_enabled,
         config.market_cache_cache_only,
         config.market_cache_ignore_staleness,
+        config.device,
     )
-    model_path = _normalize_model_path(config.model_path, config.model_type)
-    if config.model_type == "ppo":
-        model, stats = _load_ppo_model(model_path, config.retrain_hours)
-    else:
-        model, stats = _load_linear_model(model_path, config.retrain_hours)
-    if model is None or stats is None:
-        if config.model_type == "ppo":
-            model, stats = _train_ppo_model(symbols, api_key, api_secret, config, brokers_cfg or {})
-        else:
-            model, stats = _train_linear_model(symbols, api_key, api_secret, config, brokers_cfg or {})
-        if model is not None and stats is not None:
-            if config.model_type == "ppo":
-                _save_ppo_model(model_path, model, stats)
-            else:
-                _save_linear_model(model_path, model, stats)
-
-    if model is None or stats is None:
-        return symbols, {s: 0.0 for s in symbols}, {}
-
-    catalyst_map = _fetch_news_catalysts(symbols, api_key, api_secret, config, brokers_cfg or {})
-    if config.online_enabled:
-        if config.model_type == "ppo":
-            updated = _online_update_ppo_model(symbols, api_key, api_secret, config, model, stats, catalyst_map)
-        else:
-            updated = _online_update_linear_model(symbols, api_key, api_secret, config, model, stats, catalyst_map)
-        if updated:
-            if config.model_type == "ppo":
-                _save_ppo_model(model_path, model, stats)
-            else:
-                _save_linear_model(model_path, model, stats)
-
-    bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
-    scores = {}
-    signal_map: dict[str, dict[str, float]] = {}
-    keras_score_fn = None
-    if config.keras_enabled:
+    
+    initial_device = config.device
+    current_device = initial_device
+    
+    model = None
+    stats = None
+    
+    # Retry loop for model loading/training/scoring with GPU fallback
+    for attempt in range(2): # Try twice: once with initial device, once with CPU if error
         try:
-            from app.signals.keras_returns import compute_keras_return_signals
+            model_path = _normalize_model_path(config.model_path, config.model_type)
+            if config.model_type == "ppo":
+                model, stats = _load_ppo_model(model_path, config.retrain_hours, current_device)
+            else:
+                model, stats = _load_linear_model(model_path, config.retrain_hours, current_device)
+            
+            if model is None or stats is None:
+                if config.model_type == "ppo":
+                    model, stats = _train_ppo_model(symbols, api_key, api_secret, config, brokers_cfg or {}, current_device)
+                else:
+                    model, stats = _train_linear_model(symbols, api_key, api_secret, config, brokers_cfg or {}, current_device)
+                if model is not None and stats is not None:
+                    if config.model_type == "ppo":
+                        _save_ppo_model(model_path, model, stats)
+                    else:
+                        _save_linear_model(model_path, model, stats)
 
-            keras_score_fn = compute_keras_return_signals
-        except Exception:
+            if model is None or stats is None:
+                if current_device != "cpu":
+                    logging.warning("AI filter model unavailable/training failed with %s. Retrying with CPU.", current_device)
+                    disable_gpu_until_restart()
+                    current_device = "cpu"
+                    continue # Retry loop with CPU
+                else:
+                    logging.error("AI filter model unavailable/training failed with CPU. Skipping scoring.")
+                    return symbols, {s: 0.0 for s in symbols}, {}
+
+            catalyst_map = _fetch_news_catalysts(symbols, api_key, api_secret, config, brokers_cfg or {})
+            if config.online_enabled:
+                if config.model_type == "ppo":
+                    updated = _online_update_ppo_model(symbols, api_key, api_secret, config, model, stats, catalyst_map, current_device)
+                else:
+                    updated = _online_update_linear_model(symbols, api_key, api_secret, config, model, stats, catalyst_map, current_device)
+                if updated:
+                    if config.model_type == "ppo":
+                        _save_ppo_model(model_path, model, stats)
+                    else:
+                        _save_linear_model(model_path, model, stats)
+
+            bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
+            scores = {}
+            signal_map: dict[str, dict[str, float]] = {}
             keras_score_fn = None
-    for symbol, frame in bars.items():
-        features = _latest_features(frame, config.window, catalyst_map.get(symbol, False), config.interval)
-        if features is None:
-            scores[symbol] = 0.0
-            continue
-        if config.model_type == "ppo":
-            score = _predict_ppo(model, stats, features)
-        else:
-            score = _predict_linear(model, stats, features)
-        keras_signals = None
-        if keras_score_fn is not None:
-            try:
-                keras_signals = keras_score_fn(
-                    frame,
-                    model_path=config.keras_model_path,
-                    interval=config.keras_interval,
-                )
-            except Exception:
+            if config.keras_enabled:
+                try:
+                    from app.signals.keras_returns import compute_keras_return_signals
+                    keras_score_fn = compute_keras_return_signals
+                except Exception as exc:
+                    logging.warning("Keras overlay import failed: %s", exc)
+                    keras_score_fn = None
+            
+            for symbol, frame in bars.items():
+                features = _latest_features(frame, config.window, catalyst_map.get(symbol, False), config.interval)
+                if features is None:
+                    scores[symbol] = 0.0
+                    continue
+                if config.model_type == "ppo":
+                    score = _predict_ppo(model, stats, features, current_device)
+                else:
+                    score = _predict_linear(model, stats, features, current_device)
+                
                 keras_signals = None
-        if keras_signals is not None:
-            keras_score = _keras_score_from_signals(keras_signals, config.keras_score_mode)
-            score = float(score) + config.keras_weight * float(keras_score)
-        scores[symbol] = float(score)
-        if frame is not None and not frame.empty:
-            try:
-                idx = frame.index
-                last_day = idx[-1].date()
-                day_frame = frame.loc[idx.date == last_day]
-                if day_frame.empty:
-                    day_frame = frame
-                signal_map[symbol] = compute_signal_metrics_from_window(
-                    prices=day_frame["close"].astype(float).tolist(),
-                    volumes=day_frame["volume"].astype(float).tolist(),
-                    highs=day_frame["high"].astype(float).tolist() if "high" in day_frame else None,
-                    lows=day_frame["low"].astype(float).tolist() if "low" in day_frame else None,
-                    interval=config.interval,
-                )
-            except Exception:
-                signal_map[symbol] = {}
-        if keras_signals is not None:
-            signal_map.setdefault(symbol, {})
-            signal_map[symbol].update(
-                {
-                    "keras_expected_return": float(keras_signals.expected_return),
-                    "keras_short_term_score": float(keras_signals.short_term_score),
-                    "keras_up_prob": float(keras_signals.up_prob),
-                    "keras_downside_risk": float(keras_signals.downside_risk),
-                }
-            )
-    for symbol in symbols:
-        scores.setdefault(symbol, 0.0)
-        signal_map.setdefault(symbol, {})
-    ordered = sorted(symbols, key=lambda s: scores.get(s, 0.0), reverse=True)
-    return ordered, scores, signal_map
+                if keras_score_fn is not None:
+                    try:
+                        keras_signals = keras_score_fn(
+                            frame,
+                            model_path=config.keras_model_path,
+                            interval=config.keras_interval,
+                            device=current_device, # Pass device to Keras function
+                        )
+                    except tf.errors.ResourceExhaustedError as exc:
+                        if current_device != "cpu":
+                            logging.warning("CUDA out of memory during Keras scoring for %s: %s. Keras overlay disabled for current run.", symbol, exc)
+                            disable_gpu_until_restart()
+                            keras_score_fn = None # Disable Keras for the rest of this run
+                        else:
+                            logging.error("Keras overlay failed on CPU for %s after GPU error: %s", symbol, exc)
+                            keras_score_fn = None
+                    except Exception as exc:
+                        logging.warning("Unknown error during Keras scoring for %s: %s", symbol, exc)
+                        keras_score_fn = None
+                        
+                if keras_signals is not None:
+                    keras_score = _keras_score_from_signals(keras_signals, config.keras_score_mode)
+                    score = float(score) + config.keras_weight * float(keras_score)
+                scores[symbol] = float(score)
+                if frame is not None and not frame.empty:
+                    try:
+                        idx = frame.index
+                        last_day = idx[-1].date()
+                        day_frame = frame.loc[idx.date == last_day]
+                        if day_frame.empty:
+                            day_frame = frame
+                        signal_map[symbol] = compute_signal_metrics_from_window(
+                            prices=day_frame["close"].astype(float).tolist(),
+                            volumes=day_frame["volume"].astype(float).tolist(),
+                            highs=day_frame["high"].astype(float).tolist() if "high" in day_frame else None,
+                            lows=day_frame["low"].astype(float).tolist() if "low" in day_frame else None,
+                            interval=config.interval,
+                        )
+                    except Exception:
+                        signal_map[symbol] = {}
+                if keras_signals is not None:
+                    signal_map.setdefault(symbol, {})
+                    signal_map[symbol].update(
+                        {
+                            "keras_expected_return": float(keras_signals.expected_return),
+                            "keras_short_term_score": float(keras_signals.short_term_score),
+                            "keras_up_prob": float(keras_signals.up_prob),
+                            "keras_downside_risk": float(keras_signals.downside_risk),
+                        }
+                    )
+            # If we reached here, scoring was successful with current_device
+            ordered = sorted(symbols, key=lambda s: scores.get(s, 0.0), reverse=True)
+            return ordered, scores, signal_map
+        
+        except (torch.cuda.OutOfMemoryError, tf.errors.ResourceExhaustedError) as exc:
+            if current_device != "cpu":
+                logging.warning("CUDA out of memory during AI filter scoring: %s. Falling back to CPU.", exc)
+                disable_gpu_until_restart()
+                current_device = "cpu"
+                continue # Retry loop with CPU
+            else:
+                logging.error("AI filter scoring failed on CPU after GPU error: %s", exc)
+                break # Failed even on CPU, re-raise or handle as complete failure
+        except Exception as exc:
+            logging.error("Unknown error during AI filter scoring: %s", exc)
+            break
+            
+    # If all retries fail or model is not available
+    return symbols, {s: 0.0 for s in symbols}, {}
 
 
 def _read_config(cfg: dict) -> AISymbolFilterConfig:
@@ -253,6 +301,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     keras_interval = str(keras_cfg.get("interval", "5m"))
     keras_weight = float(keras_cfg.get("weight", 0.5))
     keras_score_mode = str(keras_cfg.get("score_mode", "expected_return"))
+    device = str(cfg.get("device", "auto")) # Parse device from config
     return AISymbolFilterConfig(
         interval=interval,
         lookback_days=lookback_days,
@@ -299,6 +348,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         keras_interval=keras_interval,
         keras_weight=keras_weight,
         keras_score_mode=keras_score_mode,
+        device=device, # Pass device to config
     )
 
 
@@ -324,11 +374,10 @@ def _meta_path(model_path: Path) -> Path:
     return model_path.with_suffix(f"{suffix}.meta.json")
 
 
-def _load_linear_model(model_path: Path, retrain_hours: int):
+def _load_linear_model(model_path: Path, retrain_hours: int, device: str):
     if not model_path.exists():
         return None, None
     try:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
         logging.info("AI filter load device: %s", device)
         payload = torch.load(model_path, map_location=device)
     except Exception as exc:
@@ -371,8 +420,8 @@ def _train_linear_model(
     api_secret: str,
     cfg: AISymbolFilterConfig,
     brokers_cfg: dict,
+    device: str,
 ):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     logging.info("AI filter train device: %s", device)
     train_symbols = symbols[: cfg.train_max_symbols]
     bars = _fetch_bars(train_symbols, api_key, api_secret, cfg, limit_symbols=cfg.train_max_symbols)
@@ -410,8 +459,8 @@ def _online_update_linear_model(
     model,
     stats: dict,
     catalyst_map: dict[str, bool],
+    device: str,
 ) -> bool:
-    device = next(model.parameters()).device
     update_symbols = symbols[: cfg.online_max_symbols]
     if not update_symbols:
         return False
@@ -493,7 +542,7 @@ def _build_env(features: np.ndarray, rewards: np.ndarray) -> DummyVecEnv:
     return DummyVecEnv([lambda: _SymbolFilterEnv(features, rewards, shuffle=True)])
 
 
-def _load_ppo_model(model_path: Path, retrain_hours: int):
+def _load_ppo_model(model_path: Path, retrain_hours: int, device: str):
     if not model_path.exists():
         return None, None
     meta_path = _meta_path(model_path)
@@ -509,7 +558,6 @@ def _load_ppo_model(model_path: Path, retrain_hours: int):
         trained_dt = datetime.fromisoformat(trained_at)
         if datetime.utcnow() - trained_dt > timedelta(hours=retrain_hours):
             return None, None
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     logging.info("AI filter load device: %s", device)
     try:
         model = PPO.load(str(model_path), device=device)
@@ -538,8 +586,8 @@ def _train_ppo_model(
     api_secret: str,
     cfg: AISymbolFilterConfig,
     brokers_cfg: dict,
+    device: str,
 ):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     logging.info("AI filter train device: %s", device)
     train_symbols = symbols[: cfg.train_max_symbols]
     logging.info("AI filter training start; symbols=%d timesteps=%d", len(train_symbols), cfg.rl_timesteps)
@@ -587,6 +635,7 @@ def _online_update_ppo_model(
     model: PPO,
     stats: dict,
     catalyst_map: dict[str, bool],
+    device: str,
 ) -> bool:
     update_symbols = symbols[: cfg.online_max_symbols]
     if not update_symbols:
@@ -885,12 +934,12 @@ def _target_value(
     return float(next_return)
 
 
-def _predict_linear(model, stats: dict, features: np.ndarray) -> float:
+def _predict_linear(model, stats: dict, features: np.ndarray, device: str) -> float:
     mean = np.array(stats.get("mean", []), dtype=float)
     std = np.array(stats.get("std", []), dtype=float)
     if mean.size and std.size:
         features = (features - mean) / std
-    x = torch.tensor(features, dtype=torch.float32, device=next(model.parameters()).device).view(1, -1)
+    x = torch.tensor(features, dtype=torch.float32, device=device).view(1, -1)
     with torch.no_grad():
         score = model(x).item()
     if math.isnan(score) or math.isinf(score):
@@ -898,13 +947,17 @@ def _predict_linear(model, stats: dict, features: np.ndarray) -> float:
     return float(score)
 
 
-def _predict_ppo(model: PPO, stats: dict, features: np.ndarray) -> float:
+def _predict_ppo(model: PPO, stats: dict, features: np.ndarray, device: str) -> float:
     mean = np.array(stats.get("mean", []), dtype=float)
     std = np.array(stats.get("std", []), dtype=float)
     if mean.size and std.size:
         features = (features - mean) / std
     obs = np.array(features, dtype=np.float32).reshape(1, -1)
+    # Ensure obs_to_tensor uses the correct device
     obs_tensor, _ = model.policy.obs_to_tensor(obs)
+    # Move obs_tensor to the specified device if it's not already there
+    if obs_tensor.device.type != device:
+        obs_tensor = obs_tensor.to(device)
     dist = model.policy.get_distribution(obs_tensor)
     probs = dist.distribution.probs.detach().cpu().numpy()
     if probs.ndim == 2 and probs.shape[1] >= 2:

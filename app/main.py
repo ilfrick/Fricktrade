@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
+import torch # Added torch import for GPU error handling
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
@@ -31,6 +32,7 @@ from app.monitoring.metrics import start_metrics_server
 from app.utils.config import load_config
 from app.utils.logging import setup_logging
 from app.utils.signal_features import compute_signal_metrics_from_window
+from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart # Import GPU state utilities
 
 
 def _empty_market_state() -> dict:
@@ -704,16 +706,34 @@ def main():
             result = run_agent_backtest(cfg)
             logging.info("Agent backtest result: %s", result.__dict__)
         else:
-            result = run_backtest(
-                cfg["backtest"]["data_dir"],
-                cfg["backtest"]["start"],
-                cfg["backtest"]["end"],
-                cfg["backtest"]["initial_cash"],
-                cfg["backtest"]["commission_pct"],
-                interval=cfg["data"].get("interval"),
-                use_gpu=cfg["backtest"].get("use_gpu", True),
-            )
-            logging.info("Backtest result: %s", result)
+            initial_use_gpu = cfg["backtest"].get("use_gpu", True) and not is_gpu_disabled()
+            use_gpu_for_run = initial_use_gpu
+
+            for attempt in range(2): # Try once with initial setting, once with CPU if GPU fails
+                try:
+                    result = run_backtest(
+                        cfg["backtest"]["data_dir"],
+                        cfg["backtest"]["start"],
+                        cfg["backtest"]["end"],
+                        cfg["backtest"]["initial_cash"],
+                        cfg["backtest"]["commission_pct"],
+                        interval=cfg["data"].get("interval"),
+                        use_gpu=use_gpu_for_run,
+                    )
+                    logging.info("Backtest result: %s", result)
+                    break # Success, exit retry loop
+                except (torch.cuda.OutOfMemoryError, tf.errors.ResourceExhaustedError) as exc:
+                    if use_gpu_for_run: # If we were trying with GPU
+                        logging.warning("CUDA out of memory during backtest: %s. Falling back to CPU for current and future runs.", exc)
+                        disable_gpu_until_restart()
+                        use_gpu_for_run = False # Force CPU for next attempt
+                        continue # Retry with CPU
+                    else: # If we already tried with CPU and still failed
+                        logging.error("Backtest failed on CPU after GPU error: %s", exc)
+                        raise # Re-raise the error
+                except Exception as exc:
+                    logging.error("Unknown error during backtest: %s", exc)
+                    raise
         return
 
     if args.cmd == "api":

@@ -11,12 +11,15 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import tensorflow as tf # Added tensorflow import
 import torch
 
 from app.learning.train_rl import train_from_config
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 from app.utils.restart import should_restart
 from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
+from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart # Import GPU state utilities
+
 
 
 def _lock_path(cfg: dict) -> Path:
@@ -98,6 +101,10 @@ def _train_with_lock(loop_cfg: dict, resume: bool, cfg: dict, owner: str) -> Non
     def _run() -> None:
         try:
             train_from_config(loop_cfg, resume=resume)
+        except (torch.cuda.OutOfMemoryError, tf.errors.ResourceExhaustedError) as exc:
+            logging.warning("CUDA out of memory during online update training: %s. Disabling GPU globally.", exc)
+            disable_gpu_until_restart()
+            errors.append(exc)
         except BaseException as exc:
             errors.append(exc)
 
