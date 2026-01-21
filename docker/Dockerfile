@@ -5,10 +5,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    python3-jinja2 python3-markupsafe \
     && rm -rf /var/lib/apt/lists/*
 
+RUN pip install --upgrade pip
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
