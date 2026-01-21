@@ -24,6 +24,7 @@ flowchart LR
         Scanner[Dynamic Scanner]
         AIFilter[AI Symbol Filter PPO]
         News[News Catalysts]
+        Ollama[(Ollama LLM Gate)]
         MarketData[Market Data Providers<br/>yfinance / alpaca / brokers]
     end
     subgraph Cache[Market Cache]
@@ -60,7 +61,8 @@ flowchart LR
     Scanner --> Trader
     AIFilter --> Trader
     AIFilter --> MarketCache
-    News --> Strategies
+    News --> Ollama --> Strategies
+    Ollama --> AIFilter
     MarketData --> MarketCache
     MarketCache --> Trader
     MarketCache --> AIFilter
@@ -111,8 +113,9 @@ flowchart LR
 - `app/data/downloader.py`: yfinance historical download.
 - `app/data/ingestion.py`: ingestion from yfinance/alpaca/stooq/alphavantage.
 - `app/data/scanner.py`: symbol universe and price filter (Alpaca snapshots).
-- `app/data/ai_filter.py`: PPO-based symbol scorer with online updates; provider selects alpaca or yfinance bars.
+- `app/data/ai_filter.py`: PPO-based symbol scorer with Keras overlay for news-aware features and online updates; provider selects alpaca or yfinance bars.
 - `app/data/news.py`: broker-backed news/catalyst fetch.
+- `Ollama`: Local LLM gate for processing news catalysts.
 - `app/data/market_cache.py`: Redis + file cache client for live yfinance bars and filtered symbols.
 - `app/data/market_cache_service.py`: cache service that refreshes bars on the interval cadence.
 

@@ -10,7 +10,7 @@ Scores a large universe of symbols and returns an ordered list for trading.
 - Entry point: `app/data/ai_filter.py` via `TradingAgent._refresh_dynamic_symbols`.
 - Loads a PPO policy (stable-baselines3) from `model_path` if fresh; retrains if missing or stale. Metadata is stored in a `.meta.json` sidecar.
 - Builds features from the latest rolling window of returns and volumes.
-- Adds a news catalyst flag per symbol to the feature vector.
+- Adds a news catalyst flag (optionally processed via Ollama) per symbol to the feature vector.
 - Scores each symbol and sorts by descending score.
 - Fetches bars from the configured provider (`alpaca` or `yfinance`); yfinance reads from the market-cache service when enabled.
 - Optionally performs lightweight online updates on the latest bars.

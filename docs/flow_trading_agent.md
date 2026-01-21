@@ -11,7 +11,8 @@ This document describes the end-to-end flow for the trading agent in the master/
 flowchart TD
     A[Start Loop] --> B[Load Portfolio + Symbols]
     B --> C[Refresh News + Dynamic Symbols]
-    C --> D[Update Metrics + Open Orders]
+    C --> Ollama[Ollama LLM Gate]
+    Ollama --> D[Update Metrics + Open Orders]
     D --> E[Read Ops State]
     E --> F{Market Open?}
     F -- No --> G[Sleep Interval]
@@ -62,6 +63,7 @@ flowchart TD
 flowchart TD
     A[Universe Broker Active] --> B[AI Filter Score]
     Bars[Market Cache (Redis + file)] --> B
+    News[News Catalyst] --> B
     B --> C[Coverage Filter]
     C --> D[Cap to max_symbols]
     D --> E[Merge Positions + Open Orders]

@@ -34,6 +34,7 @@ flowchart LR
         Scan[Dynamic symbol scanner]
         AIFilter[AI symbol filter<br/>online updates + news]
         News[News catalyst fetcher<br/>broker-backed - Alpaca today]
+        Ollama[(Ollama LLM Gate)]
     end
     subgraph Cache["Market Cache"]
         MarketCache[Market Cache Service]
@@ -102,8 +103,9 @@ flowchart LR
     AIFilter --> Trader
     AIFilter --> MarketCache
     AIFilter --> AIFeatures --> Orchestrator
-    News --> Strat
-    News --> AIFilter
+    News --> Ollama
+    Ollama --> Strat
+    Ollama --> AIFilter
     Ingest --> AlpacaBars
     RLTrain --> ModelStore
     RLTrain --> ModelRegistry --> ActiveModel
@@ -117,8 +119,6 @@ flowchart LR
     Router --> IBKR
     Alpaca --> BrokerUniverse
     IBKR --> BrokerUniverse
-    Alpaca --> News
-    IBKR --> News
     Alpaca --> Queue
     IBKR --> Queue
     Queue --> Orchestrator
@@ -169,7 +169,7 @@ flowchart LR
 - Dynamic scanner and PPO-based AI filter for symbol selection
 - Optional Keras return overlay can contribute to AI symbol scores (TensorFlow/Keras installed in containers).
 - The AI filter can publish cached symbol lists so the trader reads from cache when available.
-- News catalyst support (Alpaca news)
+- News catalyst support (Alpaca news) via an optional Ollama-based LLM gate.
 
 ### Learning
 - Offline RL training and online updates

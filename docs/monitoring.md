@@ -9,6 +9,7 @@ Expose Prometheus metrics and Grafana dashboards.
 ## Implementation
 - Metrics: `app/monitoring/metrics.py`.
 - Prometheus config: `prometheus/prometheus.yml`.
+- Alertmanager config: `prometheus/alerts.yml` and `alertmanager/alertmanager.yml`.
 - Grafana dashboards: `grafana/provisioning/dashboards/*.json`.
 - Latency dashboard: `grafana/provisioning/dashboards/fricktrade_latency.json`.
 - Audit/compliance exports: `app/monitoring/audit.py`.

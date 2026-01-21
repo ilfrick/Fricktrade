@@ -7,6 +7,7 @@
 ```bash
 docker compose up -d --build
 ```
+Ensure your Docker build environment is non-interactive by setting `DEBIAN_FRONTEND=noninteractive` where necessary in Dockerfiles, and `pip` is up-to-date.
 
 ## GPU vs CPU
 - Default trader image is GPU-enabled.
@@ -24,6 +25,7 @@ docker compose -p fricktrade-dev up -d --build
 - API: `18081`
 - Grafana: `3002`
 - Prometheus: `9090`
+- Ollama: `11434`
 
 ## Restart / Redeploy
 ```bash

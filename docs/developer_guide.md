@@ -20,6 +20,7 @@
 ## AI Symbol Filter
 - PPO-based filter lives in `app/data/ai_filter.py`.
 - Config is under `data.dynamic_symbols.ai_filter.*` in `config/config.yaml`.
+- Supports Keras return overlay for advanced scoring.
 - Model output is a ranked symbol list; online updates run on refresh.
 
 ## Tests
@@ -35,7 +36,7 @@
 - Agents: `app/agents/trader.py` (loop) and `app/agents/orchestrator.py` (strategy selection).
 - Strategies: `app/strategies/` (rule-based + RL) wired in `strategy.params.*`.
 - Risk: `app/risk/manager.py`, `app/risk/haircut.py` (caps, VaR/CVaR, haircuts, kill switches).
-- Data: `app/data/` (scanner, AI symbol filter, news) and `app/utils/market.py` (market hours).
-- Execution: `app/execution/` (order sizing/algos/queues, broker routing).
+- Data: `app/data/` (scanner, AI symbol filter, news, Ollama for LLM gate) and `app/utils/market.py` (market hours).
+- Execution: `app/execution/` (order sizing/algos/queues, multi-broker routing).
 - Learning: `app/learning/` (env, features, training, drift, registry).
 - Monitoring/API: `app/api/`, `app/monitoring/metrics.py`, `docs/monitoring.md`.
