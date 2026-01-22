@@ -37,6 +37,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     window_size = learning_cfg.get("window_size", 50)
     timesteps = int(training_cfg.get("timesteps", 200_000))
     eval_split = float(training_cfg.get("eval_split", 0.2))
+    checkpoint_best_only = bool(training_cfg.get("checkpoint_best_only", True))
     time_penalty = float(
         training_cfg.get("reward_time_penalty_per_step", learning_cfg.get("reward_time_penalty_per_step", 0.0))
     )
@@ -107,6 +108,9 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
 
     checkpoint_interval = int(training_cfg.get("checkpoint_interval_steps", 0))
     publish_in_progress = bool(training_cfg.get("publish_in_progress", False))
+    if checkpoint_best_only and publish_in_progress:
+        logging.info("Checkpoint best-only enabled; disabling in-progress publishing.")
+        publish_in_progress = False
     callback = None
     if checkpoint_interval > 0:
         registry_cfg = learning_cfg.get("registry", {}) or {}
@@ -122,8 +126,18 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
 
     output_path = Path(model_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    model.save(str(output_path))
-    logging.info("Saved model to %s", output_path)
+    candidate_path = model_path
+    if model_path.endswith(".zip"):
+        candidate_path = model_path[:-4] + ".candidate.zip"
+    else:
+        candidate_path = model_path + ".candidate"
+    model.save(candidate_path)
+    candidate_file = Path(candidate_path)
+    if not candidate_file.exists() and not str(candidate_file).endswith(".zip"):
+        candidate_file = Path(f"{candidate_path}.zip")
+    if not candidate_file.exists():
+        raise FileNotFoundError(f"Saved RL model not found at {candidate_file}")
+    logging.info("Saved candidate model to %s", candidate_file)
 
     report_path = training_cfg.get("report_path", "/app/models/training_report.json")
     report_plot_dir = training_cfg.get("report_plot_dir", "/app/models/reports")
@@ -138,14 +152,25 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     )
     best_report_path = training_cfg.get("best_report_path", "/app/models/training_report_best.json")
     is_best = _is_better_report(report, best_report_path)
+    model_path_for_registry = str(candidate_file)
     if is_best:
         best_model_file = Path(best_model_path)
         best_model_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(model_path, best_model_file)
+        shutil.copy2(candidate_file, best_model_file)
         best_report_file = Path(best_report_path)
         best_report_file.parent.mkdir(parents=True, exist_ok=True)
         best_report_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        shutil.copy2(candidate_file, output_path)
+        model_path_for_registry = str(output_path)
         logging.info("Updated best model: %s", best_model_file)
+    elif checkpoint_best_only and Path(best_model_path).exists():
+        shutil.copy2(best_model_path, output_path)
+        model_path_for_registry = str(best_model_path)
+        logging.info("Candidate did not beat best; keeping best model at %s", output_path)
+    else:
+        shutil.copy2(candidate_file, output_path)
+        model_path_for_registry = str(output_path)
+        logging.info("Candidate did not beat best; keeping latest at %s", output_path)
     registry_cfg = learning_cfg.get("registry", {}) or {}
     if registry_cfg.get("enabled", True):
         drift_cfg = learning_cfg.get("drift", {}) or {}
@@ -167,7 +192,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
             "feature_config": feature_config,
         }
         record = register_model(
-            model_path=model_path,
+            model_path=model_path_for_registry,
             best_model_path=best_model_path,
             report=report,
             registry_path=str(registry_cfg.get("path", "/app/models/model_registry.json")),
@@ -181,6 +206,10 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
             active_path = registry_cfg.get("active_path", "/app/models/model_active.json")
             if publish_mode == "latest" or (publish_mode == "best" and is_best):
                 set_active_model(active_path, record, reason=publish_mode)
+    try:
+        candidate_file.unlink(missing_ok=True)
+    except Exception:
+        logging.debug("Failed to remove candidate model at %s", candidate_file)
     return str(output_path)
 
 
