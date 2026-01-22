@@ -512,3 +512,6 @@ Highest positive impact (testing/live trading):
 - Rebuilt all images with `docker compose build --no-cache` and restarted the full stack.
 - Restarted market-cache monitoring loop; new entries appended to `data/monitoring/market_cache_monitor.log`.
 - Checked risk blocks: no risk/blocked log entries since restart; Prometheus shows empty results for `orders_skipped_*`, `order_rejects_total`, and `pdt_blocks_total`.
+
+## Session update 2026-01-22 22:37:30 CET
+- Checked Ollama after restart: service is up, `ollama list` shows `llama3.1:8b` installed, `ollama ps` empty (no active model loaded yet).
