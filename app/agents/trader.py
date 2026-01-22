@@ -1716,6 +1716,7 @@ class TradingAgent:
         logging.warning("Drift detected (%s). Reloaded RL policies using best model.", ", ".join(reasons))
 
     def _reload_rl_strategies(self) -> None:
+        RLPolicyStrategy.clear_model_cache()
         for symbol, strategies in list(self._strategy_by_symbol.items()):
             for name in list(strategies.keys()):
                 if name in {"rl_policy", "rl_policy_fees"}:

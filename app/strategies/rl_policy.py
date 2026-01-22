@@ -17,6 +17,28 @@ if TYPE_CHECKING:
 
 
 class RLPolicyStrategy(Strategy):
+    _shared_models: dict[tuple[str, str], tuple[object, float]] = {}
+
+    @classmethod
+    def clear_model_cache(cls) -> None:
+        cls._shared_models.clear()
+
+    @classmethod
+    def _get_shared_model(cls, model_path: str, device: str):
+        path = Path(model_path)
+        if not path.exists():
+            raise FileNotFoundError(f"RL model not found at {model_path}")
+        cache_key = (str(path), device)
+        mtime = path.stat().st_mtime
+        cached = cls._shared_models.get(cache_key)
+        if cached and cached[1] == mtime:
+            return cached[0]
+        ppo_cls = _load_ppo()
+        model = ppo_cls.load(str(path), device=device, custom_objects=_sb3_custom_objects())
+        cls._shared_models[cache_key] = (model, mtime)
+        logging.info("Loaded RL model from %s", model_path)
+        return model
+
     def __init__(
         self,
         model_path: str,
@@ -41,11 +63,7 @@ class RLPolicyStrategy(Strategy):
         self._load_model(model_path)
 
     def _load_model(self, model_path: str) -> None:
-        path = Path(model_path)
-        if not path.exists():
-            raise FileNotFoundError(f"RL model not found at {model_path}")
-        ppo_cls = _load_ppo()
-        model = ppo_cls.load(str(path), device=self.device, custom_objects=_sb3_custom_objects())
+        model = self._get_shared_model(model_path, self.device)
         expected = observation_size(self.window_size, self.feature_config)
         actual = 0
         try:
@@ -57,7 +75,6 @@ class RLPolicyStrategy(Strategy):
         if actual and expected and actual != expected:
             raise ValueError(f"RL model observation size mismatch: {actual} != {expected}")
         self.model = model
-        logging.info("Loaded RL model from %s", model_path)
 
     def _update_state(self, market_state: dict) -> None:
         prices = market_state.get("prices", [])
