@@ -468,3 +468,6 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 20:46:15 CET
 - Summarized cache max-age settings (market cache multiplier, filtered-symbols TTL, news cache minutes, checkpoint retention, online-update lock age).
+
+## Session update 2026-01-22 20:50:55 CET
+- Set market cache max_age_multiplier to 1 in `config/config.yaml`.

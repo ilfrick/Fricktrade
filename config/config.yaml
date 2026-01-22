@@ -545,7 +545,7 @@ market_cache:
   file_dir: /data/market_cache
   batch_size: 500
   delay_seconds: 1.0
-  max_age_multiplier: 10
+  max_age_multiplier: 1
   cache_only: true
   ignore_staleness: true
   allow_pickle: false
