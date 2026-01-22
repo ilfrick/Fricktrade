@@ -484,3 +484,7 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-22 21:03:51 CET
 - Set market_cache.ignore_staleness=false, rebuilt images, restarted stack.
 - Staleness snapshot: 5m updated_at 21:02:22 CET (age ~86s), last_bar 21:00:00 CET (age ~228s). Filtered per-symbol cache directory missing (not populated yet).
+
+## Session update 2026-01-22 21:07:36 CET
+- Verified repo clean; pushed to origin/github (no pending changes).
+- Started background monitoring until US market close; log file: `data/monitoring/market_cache_monitor.log`.
