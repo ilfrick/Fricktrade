@@ -444,3 +444,9 @@ Highest positive impact (testing/live trading):
 - Checked market cache freshness: 1m cache files updated at 2026-01-22 19:37 CET; 5m cache files last updated at 2026-01-22 18:05 CET.
 - Market cache refresh logs show 1m refreshed at 18:37 and 5m at 18:05; current staleness warnings are expected with a 10k+ symbol universe and 5s per-batch delay.
 - Filtered symbols cache file `/data/market_cache/filtered/1m.json` last updated 2026-01-16 (age ~145h), so cached-symbols path is stale.
+
+## Session update 2026-01-22 20:05:45 CET
+- Market cache tuning: batch_size=500, delay_seconds=1.0, max_age_multiplier=10; AI filter cached symbols disabled.
+- Market cache reads now honor max-age multiplier and TTLs; yfinance provider uses increased cache max age.
+- `pytest` passed (34 passed, 9 skipped).
+- Committed and pushed to origin/github: f0bebb9.
