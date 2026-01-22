@@ -72,6 +72,7 @@ class AISymbolFilterConfig:
     market_cache_cache_only: bool
     market_cache_ignore_staleness: bool
     market_cache_allow_pickle: bool
+    market_cache_max_age_multiplier: int
     keras_enabled: bool
     keras_model_path: str
     keras_interval: str
@@ -290,6 +291,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     market_cache_cache_only = bool(cache_cfg.get("cache_only", True))
     market_cache_ignore_staleness = bool(cache_cfg.get("ignore_staleness", False))
     market_cache_allow_pickle = bool(cache_cfg.get("allow_pickle", False))
+    market_cache_max_age_multiplier = max(int(cache_cfg.get("max_age_multiplier", 1)), 1)
     keras_cfg = cfg.get("keras_returns", {}) or {}
     keras_enabled = bool(keras_cfg.get("enabled", False))
     keras_model_path = str(
@@ -343,6 +345,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         market_cache_cache_only=market_cache_cache_only,
         market_cache_ignore_staleness=market_cache_ignore_staleness,
         market_cache_allow_pickle=market_cache_allow_pickle,
+        market_cache_max_age_multiplier=market_cache_max_age_multiplier,
         keras_enabled=keras_enabled,
         keras_model_path=keras_model_path,
         keras_interval=keras_interval,
@@ -727,7 +730,7 @@ def _fetch_bars_yfinance(
     limit_symbols: int | None,
 ) -> dict[str, pd.DataFrame]:
     symbols = symbols[:limit_symbols] if limit_symbols else symbols
-    max_age = interval_to_seconds(cfg.interval)
+    max_age = interval_to_seconds(cfg.interval) * max(cfg.market_cache_max_age_multiplier, 1)
     if cfg.market_cache_enabled:
         cache = MarketCache(
             cfg.market_cache_redis_url,

@@ -28,6 +28,8 @@ class MarketCacheConfig:
     redis_url: str
     file_dir: str
     batch_size: int
+    delay_seconds: float
+    max_age_multiplier: int
     cache_only: bool
     ignore_staleness: bool
     filtered_symbols_enabled: bool
@@ -53,11 +55,19 @@ def build_market_cache_config(cfg: dict | None) -> MarketCacheConfig:
         redis_url=str(cfg.get("redis_url", "redis://redis:6379/0")),
         file_dir=str(cfg.get("file_dir", "/data/market_cache")),
         batch_size=int(cfg.get("batch_size", 100)),
+        delay_seconds=float(cfg.get("delay_seconds", 5.0)),
+        max_age_multiplier=max(int(cfg.get("max_age_multiplier", 1)), 1),
         cache_only=bool(cfg.get("cache_only", True)),
         ignore_staleness=bool(cfg.get("ignore_staleness", False)),
         filtered_symbols_enabled=bool(cfg.get("filtered_symbols", {}).get("enabled", True)),
         allow_pickle=bool(cfg.get("allow_pickle", False)),
     )
+
+
+def cache_max_age_seconds(interval: str, multiplier: int) -> int:
+    base = interval_to_seconds(interval)
+    mult = max(int(multiplier or 1), 1)
+    return base * mult
 
 
 def build_market_cache(cfg: dict | None) -> "MarketCache | None":

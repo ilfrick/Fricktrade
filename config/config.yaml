@@ -447,7 +447,7 @@ data:
       enabled: true
       provider: yfinance
       coverage_filter: true
-      use_cached_symbols: true
+      use_cached_symbols: false
       interval: 1m
       lookback_days: 2
       window: 20
@@ -543,7 +543,9 @@ market_cache:
   enabled: true
   redis_url: redis://redis:6379/0
   file_dir: /data/market_cache
-  batch_size: 100
+  batch_size: 500
+  delay_seconds: 1.0
+  max_age_multiplier: 10
   cache_only: true
   ignore_staleness: true
   allow_pickle: false

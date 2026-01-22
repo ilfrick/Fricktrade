@@ -11,7 +11,12 @@ from datetime import datetime
 from pathlib import Path
 
 from app.brokers.config_utils import get_alpaca_account_cfg
-from app.data.market_cache import MarketCache, build_market_cache_config, interval_to_seconds
+from app.data.market_cache import (
+    MarketCache,
+    build_market_cache_config,
+    cache_max_age_seconds,
+    interval_to_seconds,
+)
 from app.data.scanner import load_universe
 from app.data.yfinance_utils import fetch_yfinance_bars
 from app.utils.config import load_config
@@ -45,6 +50,8 @@ def main() -> None:
     intervals = _intervals_from_cfg(cfg)
     lookbacks = _lookbacks_from_cfg(cfg)
     batch_size = cache_cfg.batch_size
+    delay_seconds = cache_cfg.delay_seconds
+    max_age_multiplier = cache_cfg.max_age_multiplier
     
     yfinance_source_cfg = {}
     for source in cfg.get("data", {}).get("sources", []):
@@ -95,6 +102,7 @@ def main() -> None:
         for interval in intervals:
             now = datetime.utcnow()
             interval_seconds = interval_to_seconds(interval)
+            max_age_seconds = cache_max_age_seconds(interval, max_age_multiplier)
             last_at = last_run.get(interval)
             if last_at and (now - last_at).total_seconds() < interval_seconds:
                 continue
@@ -107,7 +115,7 @@ def main() -> None:
                 batch_size=batch_size,
                 lowercase=False,
                 drop_zero_volume=False,
-                delay_seconds=5.0,
+                delay_seconds=delay_seconds,
             )
             logging.debug("Market cache: Received newly_failed_symbols from fetch_yfinance_bars: %s", newly_failed_symbols)
             # Update temporary_failed_symbols with new failures
@@ -115,7 +123,7 @@ def main() -> None:
                 temporary_failed_symbols[s] = now
                 logging.warning("Market cache: Temporarily blacklisting symbol '%s' due to yfinance error.", s)
 
-            cache.set_bars(bars, interval, ttl_seconds=interval_seconds)
+            cache.set_bars(bars, interval, ttl_seconds=max_age_seconds)
             last_run[interval] = now
             logging.info(
                 "Market cache refreshed interval=%s symbols=%d lookback_days=%d",

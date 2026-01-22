@@ -24,7 +24,7 @@ from app.backtest.agent_engine import run_agent_backtest
 from app.data.downloader import download_yfinance
 from app.data.ingestion import ingest_from_config
 from app.data.yfinance_utils import fetch_yfinance_bars
-from app.data.market_cache import build_market_cache, build_market_cache_config
+from app.data.market_cache import build_market_cache, build_market_cache_config, cache_max_age_seconds
 from app.learning.train_rl import train_from_config
 from app.learning.pretrain_orchestrator import run_pretrain
 from app.learning.evaluate import evaluate_from_config
@@ -70,10 +70,12 @@ def _market_state_from_yf(
     session_gain_mode: str,
     cache=None,
     cache_only: bool = False,
+    cache_max_age_seconds: int | None = None,
 ):
     data = None
     if cache is not None:
-        cached = cache.get_bars([symbol], interval, max_age_seconds=_interval_seconds(interval), lowercase=False)
+        max_age = cache_max_age_seconds or _interval_seconds(interval)
+        cached = cache.get_bars([symbol], interval, max_age_seconds=max_age, lowercase=False)
         data = cached.get(symbol)
         if cache_only and (data is None or data.empty):
             return _empty_market_state()
@@ -425,6 +427,7 @@ class YFinanceMarketDataProvider:
         chunk_size: int = 100,
         cache=None,
         cache_only: bool = False,
+        cache_max_age_seconds: int | None = None,
     ):
         self._lookback = lookback_days
         self._interval = interval
@@ -432,6 +435,7 @@ class YFinanceMarketDataProvider:
         self._chunk_size = chunk_size
         self._market_cache = cache
         self._cache_only = cache_only
+        self._cache_max_age_seconds = cache_max_age_seconds
         self._cache: dict[str, dict] = {}
         self._cache_at: datetime | None = None
 
@@ -461,10 +465,11 @@ class YFinanceMarketDataProvider:
         cache: dict[str, dict] = {}
         missing = symbols
         if self._market_cache is not None:
+            max_age = self._cache_max_age_seconds or _interval_seconds(self._interval)
             cached = self._market_cache.get_bars(
                 symbols,
                 self._interval,
-                max_age_seconds=_interval_seconds(self._interval),
+                max_age_seconds=max_age,
                 lowercase=False,
             )
             for symbol, frame in cached.items():
@@ -493,7 +498,8 @@ class YFinanceMarketDataProvider:
                     self._session_gain_mode,
                 )
             if self._market_cache is not None and bars:
-                self._market_cache.set_bars(bars, self._interval, ttl_seconds=_interval_seconds(self._interval))
+                max_age = self._cache_max_age_seconds or _interval_seconds(self._interval)
+                self._market_cache.set_bars(bars, self._interval, ttl_seconds=max_age)
         return cache
 
     def _state_from_frame(self, frame: pd.DataFrame) -> dict | None:
@@ -771,6 +777,7 @@ def main():
         symbols = cfg["data"]["symbols"]
         cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
         market_cache = build_market_cache(cfg.get("market_cache", {}))
+        cache_max_age = cache_max_age_seconds(cfg["data"]["interval"], cache_cfg.max_age_multiplier)
         provider = str(cfg.get("data", {}).get("provider", "yfinance")).lower()
         if provider == "alpaca":
             alpaca_cfg = _primary_alpaca_cfg(cfg)
@@ -798,6 +805,7 @@ def main():
                     cfg["data"].get("session_gain_mode", "gap"),
                     cache=market_cache,
                     cache_only=cache_cfg.cache_only,
+                    cache_max_age_seconds=cache_max_age,
                 )
         elif provider == "brokers":
             providers: dict[str, object] = {}
@@ -860,6 +868,7 @@ def main():
                     cfg["data"].get("session_gain_mode", "gap"),
                     cache=market_cache,
                     cache_only=cache_cfg.cache_only,
+                    cache_max_age_seconds=cache_max_age,
                 )
         elif provider == "yfinance":
             market_data_provider = YFinanceMarketDataProvider(
@@ -868,6 +877,7 @@ def main():
                 cfg["data"].get("session_gain_mode", "gap"),
                 cache=market_cache,
                 cache_only=cache_cfg.cache_only,
+                cache_max_age_seconds=cache_max_age,
             )
         else:
             market_data_provider = YFinanceMarketDataProvider(
@@ -876,6 +886,7 @@ def main():
                 cfg["data"].get("session_gain_mode", "gap"),
                 cache=market_cache,
                 cache_only=cache_cfg.cache_only,
+                cache_max_age_seconds=cache_max_age,
             )
         agent.loop(symbols, market_data_provider, 60)
         return
