@@ -474,3 +474,6 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 20:54:07 CET
 - Rebuilt and restarted the full docker compose stack to apply max_age_multiplier=1.
+
+## Session update 2026-01-22 20:55:10 CET
+- Clarified cache staleness semantics: bars are evaluated per symbol+interval; filtered symbols cache is treated as a single blob per interval.
