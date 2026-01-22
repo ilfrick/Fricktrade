@@ -433,3 +433,9 @@ Highest positive impact (testing/live trading):
 - Cached RL policy models across symbols to avoid per-symbol reloads; `_reload_rl_strategies` now clears the shared cache so active model changes reload once.
 - `pytest` passed (34 passed, 9 skipped).
 - Committed and pushed to origin/github: 79c1046.
+
+## Session update 2026-01-22 17:49:45 CET
+- RL training now checkpoints/promotes models based on best evaluation performance; in-progress publishing disabled when best-only is enabled.
+- Candidate models save to a temp path, best is copied to `/app/models/ppo_policy_best.zip`, and only best (or latest if allowed) is promoted to `/app/models/ppo_policy.zip`.
+- `pytest` passed (34 passed, 9 skipped).
+- Committed and pushed to origin/github: 3f1b551.
