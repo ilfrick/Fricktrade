@@ -519,3 +519,6 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-22 22:39:30 CET
 - Updated docs to reflect risk enable switch, account flags gating, per-symbol filtered cache, market-cache staleness controls, and GPU fallback behavior.
 - Refreshed Mermaid diagrams in README/system_map/flow_trading_agent to include account flags and risk bypass.
+
+## Session update 2026-01-22 22:45:05 CET
+- Updated remaining docs (operator/developer/operations/monitoring/brokers/strategies/troubleshooting/getting-started) to reflect risk enable switch, account flags, cache staleness, and GPU fallback notes.
