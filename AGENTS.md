@@ -480,3 +480,7 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 20:59:18 CET
 - Changed filtered symbols cache to per-symbol keys/files with per-symbol staleness checks; kept legacy single-blob fallback.
+
+## Session update 2026-01-22 21:03:51 CET
+- Set market_cache.ignore_staleness=false, rebuilt images, restarted stack.
+- Staleness snapshot: 5m updated_at 21:02:22 CET (age ~86s), last_bar 21:00:00 CET (age ~228s). Filtered per-symbol cache directory missing (not populated yet).

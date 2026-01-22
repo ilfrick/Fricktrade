@@ -547,7 +547,7 @@ market_cache:
   delay_seconds: 1.0
   max_age_multiplier: 1
   cache_only: true
-  ignore_staleness: true
+  ignore_staleness: false
   allow_pickle: false
   filtered_symbols:
     enabled: true
