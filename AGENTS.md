@@ -460,3 +460,8 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 20:39:08 CET
 - Switched all config intervals to 5m (main data, AI filter, RL feature signal interval, RL training interval) across `config/config.yaml` and backtest case configs.
+
+## Session update 2026-01-22 20:44:32 CET
+- Rebuilt and restarted the full docker compose stack.
+- Cache cleanup attempt blocked by sandbox policy (unable to delete `data/market_cache/bars/1m`/filtered).
+- Staleness snapshot after restart: 5m updated_at 20:40:25 CET (age ~235s), last bar 20:40:00 CET (age ~260s). 1m updated_at 20:31:07 CET (age ~792s), last bar 20:30:00 CET (age ~860s). Filtered 5m cache missing.
