@@ -526,3 +526,7 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-22 23:03:50 CET
 - Fixed Mermaid rendering errors by quoting node labels with `<br/>` and parentheses in `README.md`, `docs/system_map.md`, and `docs/flow_trading_agent.md`.
 - Ran mermaid-cli with a no-sandbox Puppeteer config; all extracted diagrams rendered successfully (zenuml warning only).
+
+## Session update 2026-01-22 23:05:31 CET
+- Adjusted Mermaid diagram labels to avoid HTML `<br/>`/parentheses so GitHub's renderer parses them.
+- Simplified labels in `README.md`, `docs/system_map.md`, and `docs/flow_trading_agent.md` to single-line text.

@@ -23,7 +23,7 @@ flowchart TD
     J --> K[Orchestrator Direct Strategy Selection]
     K --> L[Guardrail Optional]
     L --> AccountFlags[Account Flags + Trading Limits]
-    AccountFlags --> M["Risk + VaR/CVaR + Caps<br/>(configurable disable)"]
+    AccountFlags --> M["Risk + VaR/CVaR + Caps - configurable disable"]
     M --> N[Execution Algo + Queue]
     N --> O[Broker Router Submit]
     O --> P[Order Feedback + Metrics]
@@ -69,6 +69,6 @@ flowchart TD
     C --> D[Cap to max_symbols]
     D --> E[Merge Positions + Open Orders]
     E --> F[Active Symbol List]
-    F --> FilteredCache["Filtered Symbols Cache<br/>(per symbol)"]
+    F --> FilteredCache["Filtered Symbols Cache - per symbol"]
     FilteredCache --> Bars
 ```
