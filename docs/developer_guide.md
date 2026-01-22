@@ -22,6 +22,7 @@
 - Config is under `data.dynamic_symbols.ai_filter.*` in `config/config.yaml`.
 - Supports Keras return overlay for advanced scoring.
 - Model output is a ranked symbol list; online updates run on refresh.
+- Filtered symbol cache is written per symbol (Redis + file) when enabled.
 
 ## Tests
 - Unit tests: `docker compose run --rm tests-when-closed python -m pytest`.
@@ -40,3 +41,4 @@
 - Execution: `app/execution/` (order sizing/algos/queues, multi-broker routing).
 - Learning: `app/learning/` (env, features, training, drift, registry).
 - Monitoring/API: `app/api/`, `app/monitoring/metrics.py`, `docs/monitoring.md`.
+- GPU fallback: `app/utils/gpu_state.py` disables GPU until restart when CUDA errors occur.

@@ -17,6 +17,7 @@ Expose Prometheus metrics and Grafana dashboards.
 ## Key Metrics
 - `trades_total`
 - `orders_skipped_total`
+- `orders_skipped_by_broker_total`
 - `pnl_percent`
 - `drawdown_percent`
 - `account_total`, `account_cash`, `account_buying_power`, `account_invested`

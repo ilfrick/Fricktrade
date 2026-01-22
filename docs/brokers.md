@@ -14,6 +14,7 @@ Provide a unified API for Alpaca and IBKR.
 ## Selection
 - Controlled by `brokers.ibkr.enabled`.
 - Alpaca uses `TRADING_MODE=paper` to decide paper vs live.
+- Broker account flags (blocked/suspended) are surfaced to the trader and can block orders even when `risk.enabled: false`.
 
 ## Multi-account
 Use `brokers.<name>.accounts[]` to configure multiple accounts per broker. Each entry becomes its
@@ -35,3 +36,4 @@ Invalid accounts are skipped and the Agent continues with the valid ones.
 - `brokers.alpaca.*`
 - `brokers.ibkr.*`
 - `brokers.<name>.fees.*`
+- `trading_limits.enforce_account_flags`

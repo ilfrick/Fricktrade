@@ -31,7 +31,7 @@ docker compose up -d --build
 - API health: `http://localhost:18081/health`
 - Config UI: `http://localhost:18081/ui`
 - Grafana: `http://localhost:3002`
-- Ollama: `http://localhost:11434` (Ollama UI, check if it's running)
+- Ollama API: `http://localhost:11434/api/version`
 
 ## First Backtest
 ```bash

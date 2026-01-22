@@ -20,6 +20,7 @@
 
 ## Trading Safety Controls
 - Risk limits: `risk.*` and `trading_limits.*`.
+- `risk.enabled: false` bypasses risk checks, but broker account flags still block orders.
 - Order queue guardrails: `execution.open_orders.*`.
 - Strategy performance kill switch: `strategy.performance.*`.
 - Manual kill switches: `kill_switch.*`.
@@ -28,9 +29,13 @@
 - Live data provider: `data.provider` (yfinance/alpaca/brokers). yfinance uses the market-cache service.
 - Dynamic symbols: `data.dynamic_symbols.*`.
 - AI symbol filter: `data.dynamic_symbols.ai_filter.*` (PPO-based).
+- `data.process_on_new_bar_only` skips per-symbol processing when bars have not advanced.
+- Market cache staleness: `market_cache.max_age_multiplier` + `market_cache.ignore_staleness`.
+- Filtered symbol cache uses per-symbol Redis/file entries when enabled.
 
 ## Models and Artifacts
-- Trading PPO policy: `/app/models/ppo_policy.zip`.
+- Trading PPO policy: `/app/models/ppo_policy.zip` (or `learning.registry.active_path`).
+- Model registry: `/app/models/model_registry.json` and `/app/models/registry/*`.
 - AI symbol filter PPO: `/data/ai_symbol_filter.zip` with `.meta.json`.
 - Orchestrator model: `/data/orchestrator_model.pt`.
 

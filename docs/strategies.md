@@ -22,6 +22,7 @@ market state and influence actions via the signal bias guard.
 - RL orchestrator consumes all strategy signals and chooses which strategy to apply.
 - The RL orchestrator uses a policy-gradient update with online learning and exploration (epsilon + entropy).
 - The orchestrator feature set includes `cash_pct` and `buying_power_pct` to reflect account capacity.
+- Broker account flags are included in RL feature vectors to reflect broker-level blocks.
 - Modes: `direct` (single strategy), `select` (top-k), or `weight` (weighted blend).
 - Combine mode: `priority` or `vote` (see `strategy.combine`).
 

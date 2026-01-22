@@ -8,6 +8,7 @@
 - Grafana dashboards for orders, PnL, positions, and broker status.
 - Trader logs for market-open gating and AI filter status.
 - Market-cache logs for yfinance fetch cadence and cache refresh.
+- If `risk.enabled: false`, confirm broker account flags still block orders.
 
 ## Checkpointing and Resilience
 - Checkpoint settings: `checkpointing.*` in `config/config.yaml`.
@@ -25,6 +26,8 @@
 
 ## Models and Artifacts
 - RL models: `/app/models` and `/data` (Docker volume).
+- Active model pointer: `/app/models/model_active.json` when registry is enabled.
+- Registry artifacts: `/app/models/registry/*`.
 - Orchestrator checkpoints: `orchestrator.rl.*_path`.
 - AI filter model: `data.dynamic_symbols.ai_filter.model_path`.
 
@@ -33,6 +36,7 @@
 - Use `docker compose logs -f market-cache` for yfinance cache refresh status.
 - Watch AI filter heartbeat and order queue messages.
 - Audit/compliance logs rotate based on `monitoring.*.retention_days`.
+- Cache staleness behavior is controlled by `market_cache.max_age_multiplier` and `market_cache.ignore_staleness`.
 
 ## Safe Restart
 ```bash
