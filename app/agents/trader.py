@@ -352,6 +352,7 @@ class TradingAgent:
                     except Exception as exc:
                         logging.warning("Unknown error during rl_policy build: %s", exc)
                         break
+            logging.debug("RL policy not enabled or failed to build.")
             return None
         if name == "rl_policy_fees":
             if self.learning_cfg.get("enabled"):
@@ -398,6 +399,7 @@ class TradingAgent:
                     except Exception as exc:
                         logging.warning("Unknown error during rl_policy_fees build: %s", exc)
                         break
+            logging.debug("RL policy fees not enabled or failed to build.")
             return None
         if name == "pattern_trading":
             return PatternTradingStrategy(self.cfg.get("pattern_trading", {}))
@@ -409,6 +411,7 @@ class TradingAgent:
             return StatArbPairsStrategy(params)
         if name == "market_maker":
             return MarketMakerStrategy(params)
+        logging.debug("Unknown strategy '%s' requested, returning None.", name)
         return IntradayMomentumStrategy(
             params["lookback_minutes"],
             params["entry_threshold_pct"],

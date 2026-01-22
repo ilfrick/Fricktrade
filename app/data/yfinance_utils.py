@@ -23,6 +23,7 @@ def fetch_yfinance_bars(
     symbols = [s for s in symbols if s]
     if not symbols:
         return {}
+
     bars_by_symbol: dict[str, pd.DataFrame] = {}
     for idx in range(0, len(symbols), batch_size):
         chunk = symbols[idx : idx + batch_size]
