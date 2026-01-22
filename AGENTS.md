@@ -439,3 +439,8 @@ Highest positive impact (testing/live trading):
 - Candidate models save to a temp path, best is copied to `/app/models/ppo_policy_best.zip`, and only best (or latest if allowed) is promoted to `/app/models/ppo_policy.zip`.
 - `pytest` passed (34 passed, 9 skipped).
 - Committed and pushed to origin/github: 3f1b551.
+
+## Session update 2026-01-22 20:02:30 CET
+- Checked market cache freshness: 1m cache files updated at 2026-01-22 19:37 CET; 5m cache files last updated at 2026-01-22 18:05 CET.
+- Market cache refresh logs show 1m refreshed at 18:37 and 5m at 18:05; current staleness warnings are expected with a 10k+ symbol universe and 5s per-batch delay.
+- Filtered symbols cache file `/data/market_cache/filtered/1m.json` last updated 2026-01-16 (age ~145h), so cached-symbols path is stale.
