@@ -428,3 +428,8 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 16:54:45 CET
 - Removed the global "Active Symbols" stat panel from the overview Grafana dashboard (`grafana/provisioning/dashboards/fricktrade.json`) to avoid misleading counts versus per-account panels.
+
+## Session update 2026-01-22 17:47:00 CET
+- Cached RL policy models across symbols to avoid per-symbol reloads; `_reload_rl_strategies` now clears the shared cache so active model changes reload once.
+- `pytest` passed (34 passed, 9 skipped).
+- Committed and pushed to origin/github: 79c1046.
