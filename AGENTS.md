@@ -465,3 +465,6 @@ Highest positive impact (testing/live trading):
 - Rebuilt and restarted the full docker compose stack.
 - Cache cleanup attempt blocked by sandbox policy (unable to delete `data/market_cache/bars/1m`/filtered).
 - Staleness snapshot after restart: 5m updated_at 20:40:25 CET (age ~235s), last bar 20:40:00 CET (age ~260s). 1m updated_at 20:31:07 CET (age ~792s), last bar 20:30:00 CET (age ~860s). Filtered 5m cache missing.
+
+## Session update 2026-01-22 20:46:15 CET
+- Summarized cache max-age settings (market cache multiplier, filtered-symbols TTL, news cache minutes, checkpoint retention, online-update lock age).
