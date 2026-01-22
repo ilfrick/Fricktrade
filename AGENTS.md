@@ -454,3 +454,6 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-22 20:26:30 CET
 - Market cache staleness snapshot: 1m cache age ~2829s (max_age 600s, stale), 5m cache age ~1128s (max_age 3000s, ok). Filtered symbols cache `data/market_cache/filtered/1m.json` age ~145h.
 - Log issues: RL policy build failures due to missing numpy module; LLM catalyst timeouts to ollama; yfinance delisted/404/rate-limit errors; market cache stale bars warnings.
+
+## Session update 2026-01-22 20:29:05 CET
+- Clarified 1m vs 5m bars: main trading interval is 5m while AI symbol filter and some signals use 1m; both caches exist to avoid extra fetches.
