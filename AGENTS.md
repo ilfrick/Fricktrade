@@ -495,3 +495,6 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-22 21:18:36 CET
 - Disabled risk manager in `config/config.yaml`, rebuilt images, and restarted stack.
 - Ensured monitoring running; `data/monitoring/market_cache_monitor.log` now contains fresh entries (monitor_start at 21:18:25 CET).
+
+## Session update 2026-01-22 21:20:10 CET
+- Clarified that risk disable currently bypasses broker account flags and trading_limits action blocks; non-risk checks (price, pending orders, etc.) still apply.
