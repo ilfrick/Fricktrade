@@ -477,3 +477,6 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 20:55:10 CET
 - Clarified cache staleness semantics: bars are evaluated per symbol+interval; filtered symbols cache is treated as a single blob per interval.
+
+## Session update 2026-01-22 20:59:18 CET
+- Changed filtered symbols cache to per-symbol keys/files with per-symbol staleness checks; kept legacy single-blob fallback.

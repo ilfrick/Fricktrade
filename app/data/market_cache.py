@@ -201,10 +201,44 @@ class MarketCache:
                 logging.warning("Market cache redis write failed: %s", exc)
 
     def get_filtered_symbols(self, interval: str, max_age_seconds: int) -> list[str] | None:
-        key = self._filtered_key(interval)
         now = time.time()
         if self._redis is not None:
             try:
+                prefix = self._filtered_symbol_key_prefix(interval)
+                keys = list(self._redis.scan_iter(match=f"{prefix}*"))
+                if keys:
+                    symbols: list[str] = []
+                    stale_count = 0
+                    max_stale_age = 0.0
+                    for key in keys:
+                        raw = self._redis.get(key)
+                        if not raw:
+                            continue
+                        record = self._deserialize(raw) or {}
+                        updated_at = float(record.get("updated_at", 0.0))
+                        age = now - updated_at
+                        symbol = self._filtered_symbol_from_key(key)
+                        if not symbol:
+                            continue
+                        if self._ignore_staleness:
+                            if age > max_age_seconds:
+                                stale_count += 1
+                                max_stale_age = max(max_stale_age, age)
+                            symbols.append(symbol)
+                        elif age <= max_age_seconds:
+                            symbols.append(symbol)
+                    if stale_count:
+                        logging.warning(
+                            "Market cache stale filtered symbols used; interval=%s stale=%d max_age_sec=%d",
+                            interval,
+                            stale_count,
+                            int(max_stale_age),
+                        )
+                        MARKET_CACHE_STALE_FILTERED.labels(interval=interval, source="redis").inc(stale_count)
+                    return symbols or None
+
+                # Legacy single-blob fallback.
+                key = self._filtered_key(interval)
                 raw = self._redis.get(key)
                 if raw:
                     record = self._deserialize(raw)
@@ -227,6 +261,43 @@ class MarketCache:
                                 return [str(s) for s in symbols if s]
             except Exception as exc:
                 logging.warning("Market cache redis filtered read failed: %s", exc)
+        per_symbol_dir = self._filtered_dir / interval
+        if per_symbol_dir.exists():
+            symbols: list[str] = []
+            stale_count = 0
+            max_stale_age = 0.0
+            for path in per_symbol_dir.glob("*.json"):
+                symbol = path.stem
+                updated_at = None
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(payload, dict):
+                        updated_at = payload.get("updated_at")
+                except Exception:
+                    updated_at = None
+                if updated_at is None:
+                    age = time.time() - path.stat().st_mtime
+                else:
+                    age = now - float(updated_at)
+                if self._ignore_staleness:
+                    if age > max_age_seconds:
+                        stale_count += 1
+                        max_stale_age = max(max_stale_age, age)
+                    symbols.append(symbol)
+                elif age <= max_age_seconds:
+                    symbols.append(symbol)
+            if stale_count:
+                logging.warning(
+                    "Market cache stale filtered symbols used; interval=%s stale=%d max_age_sec=%d",
+                    interval,
+                    stale_count,
+                    int(max_stale_age),
+                )
+                MARKET_CACHE_STALE_FILTERED.labels(interval=interval, source="file").inc(stale_count)
+            if symbols:
+                return symbols
+
+        # Legacy single-blob fallback.
         path = self._filtered_dir / f"{interval}.json"
         if self._ignore_staleness and path.exists():
             age = time.time() - path.stat().st_mtime
@@ -241,21 +312,42 @@ class MarketCache:
 
     def set_filtered_symbols(self, symbols: list[str], interval: str, ttl_seconds: int) -> None:
         symbols = [s for s in symbols if s]
-        record = {"updated_at": time.time(), "symbols": symbols}
+        record = {"updated_at": time.time()}
         payload = self._serialize(record)
-        key = self._filtered_key(interval)
         if self._redis is not None:
             try:
-                self._redis.setex(key, ttl_seconds, payload)
+                pipe = self._redis.pipeline()
+                for symbol in symbols:
+                    pipe.setex(self._filtered_symbol_key(interval, symbol), ttl_seconds, payload)
+                pipe.execute()
             except Exception as exc:
                 logging.warning("Market cache redis filtered write failed: %s", exc)
-        self._write_filtered_file(interval, record)
+        for symbol in symbols:
+            self._write_filtered_symbol_file(interval, symbol, record)
 
     def _bars_key(self, interval: str, symbol: str) -> str:
         return f"market_cache:bars:{interval}:{symbol}"
 
     def _filtered_key(self, interval: str) -> str:
         return f"market_cache:filtered:{interval}"
+
+    def _filtered_symbol_key_prefix(self, interval: str) -> str:
+        return f"{self._filtered_key(interval)}:"
+
+    def _filtered_symbol_key(self, interval: str, symbol: str) -> str:
+        return f"{self._filtered_key(interval)}:{symbol}"
+
+    def _filtered_symbol_from_key(self, key: object) -> str | None:
+        if key is None:
+            return None
+        if isinstance(key, bytes):
+            key = key.decode("utf-8", errors="ignore")
+        if not isinstance(key, str):
+            return None
+        parts = key.split(":")
+        if len(parts) < 4:
+            return None
+        return parts[-1] or None
 
     def _encode_record(self, record: dict) -> dict:
         if not isinstance(record, dict):
@@ -381,6 +473,17 @@ class MarketCache:
             os.replace(tmp, target)
         except Exception as exc:
             logging.warning("Market cache filtered file write failed: %s", exc)
+
+    def _write_filtered_symbol_file(self, interval: str, symbol: str, record: dict) -> None:
+        path = self._filtered_dir / interval
+        path.mkdir(parents=True, exist_ok=True)
+        target = path / f"{symbol}.json"
+        tmp = target.with_suffix(".tmp")
+        try:
+            tmp.write_text(json.dumps(record, indent=2), encoding="utf-8")
+            os.replace(tmp, target)
+        except Exception as exc:
+            logging.warning("Market cache filtered symbol file write failed for %s: %s", symbol, exc)
 
 
 def _normalize_frame(frame: pd.DataFrame, *, lowercase: bool) -> pd.DataFrame:
