@@ -19,12 +19,14 @@ def fetch_yfinance_bars(
     lowercase: bool = False,
     drop_zero_volume: bool = False,
     delay_seconds: float = 0.0,
-) -> dict[str, pd.DataFrame]:
+) -> tuple[dict[str, pd.DataFrame], list[str]]: # Changed return type hint
     symbols = [s for s in symbols if s]
     if not symbols:
-        return {}
+        return {}, [] # Return empty list of failed symbols
 
     bars_by_symbol: dict[str, pd.DataFrame] = {}
+    failed_symbols: list[str] = [] # Initialize list to track failed symbols
+
     for idx in range(0, len(symbols), batch_size):
         chunk = symbols[idx : idx + batch_size]
         try:
@@ -37,24 +39,40 @@ def fetch_yfinance_bars(
             )
         except Exception as exc:
             logging.warning("yfinance download failed for %d symbols: %s", len(chunk), exc)
+            failed_symbols.extend(chunk) # Add all symbols in chunk to failed_symbols
             continue
+        
         if data is None or data.empty:
+            logging.warning("yfinance returned no data for %d symbols in chunk.", len(chunk))
+            failed_symbols.extend(chunk) # Add all symbols in chunk to failed_symbols
             continue
+
         if getattr(data.columns, "nlevels", 1) > 1:
             for symbol in chunk:
                 if symbol not in data.columns.get_level_values(1):
+                    logging.warning("yfinance: no price data found for symbol '%s' in chunk.", symbol)
+                    failed_symbols.append(symbol) # Add individual failed symbol
                     continue
                 frame = data.xs(symbol, level=1, axis=1)
                 cleaned = _clean_yfinance_frame(frame, lowercase=lowercase, drop_zero_volume=drop_zero_volume)
                 if cleaned is not None:
                     bars_by_symbol[symbol] = cleaned
+                else:
+                    logging.warning("yfinance: cleaned data is None for symbol '%s'.", symbol)
+                    failed_symbols.append(symbol) # Add if cleaned data is None
         elif len(chunk) == 1:
+            symbol = chunk[0]
             cleaned = _clean_yfinance_frame(data, lowercase=lowercase, drop_zero_volume=drop_zero_volume)
             if cleaned is not None:
-                bars_by_symbol[chunk[0]] = cleaned
+                bars_by_symbol[symbol] = cleaned
+            else:
+                logging.warning("yfinance: cleaned data is None for single symbol '%s'.", symbol)
+                failed_symbols.append(symbol) # Add if cleaned data is None
+        
         if delay_seconds > 0 and idx + batch_size < len(symbols):
             time.sleep(delay_seconds)
-    return bars_by_symbol
+            
+    return bars_by_symbol, failed_symbols # Return both
 
 
 def _clean_yfinance_frame(

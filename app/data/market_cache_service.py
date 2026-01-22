@@ -44,14 +44,53 @@ def main() -> None:
     intervals = _intervals_from_cfg(cfg)
     lookbacks = _lookbacks_from_cfg(cfg)
     batch_size = cache_cfg.batch_size
+    
+    yfinance_source_cfg = {}
+    for source in cfg.get("data", {}).get("sources", []):
+        if source.get("provider") == "yfinance":
+            yfinance_source_cfg = source
+            break
+
+    # To implement dynamic filtering without a permanent blacklist:
+    # We maintain a temporary set of failed symbols for a certain duration.
+    # Symbols are removed from this set after a "retry_after" period.
+    temporary_failed_symbols: dict[str, datetime] = {} # {symbol: failed_timestamp}
+    # This value will determine how long a failed symbol is temporarily excluded.
+    # Using rate_limit_seconds from yfinance config as a proxy for retry_after.
+    # If not set, default to 5 minutes (300 seconds).
+    retry_after_seconds = yfinance_source_cfg.get("rate_limit_seconds", 300) * 2 # Give it a bit more time
 
     last_run: dict[str, datetime] = {}
     while True:
+        # Clean up temporary_failed_symbols: re-add symbols that are past their retry_after time
+        now = datetime.utcnow()
+        symbols_to_retry = [
+            s for s, timestamp in temporary_failed_symbols.items() 
+            if (now - timestamp).total_seconds() > retry_after_seconds
+        ]
+        for s in symbols_to_retry:
+            temporary_failed_symbols.pop(s)
+            logging.info("Market cache: Re-attempting previously failed symbol '%s'.", s)
+            
         universe = _resolve_universe(cfg, universe_cfg, max_universe)
         if not universe:
             logging.warning("Market cache: universe empty; sleeping.")
             time.sleep(60)
             continue
+
+        # Filter universe based on temporary_failed_symbols
+        effective_universe = [s for s in universe if s not in temporary_failed_symbols]
+        if len(effective_universe) < len(universe):
+            logging.info(
+                "Market cache: Temporarily filtered out %d symbols due to previous failures.",
+                len(universe) - len(effective_universe)
+            )
+        
+        if not effective_universe:
+            logging.warning("Market cache: effective universe empty after filtering; sleeping.")
+            time.sleep(60)
+            continue
+            
         for interval in intervals:
             now = datetime.utcnow()
             interval_seconds = interval_to_seconds(interval)
@@ -59,8 +98,9 @@ def main() -> None:
             if last_at and (now - last_at).total_seconds() < interval_seconds:
                 continue
             lookback_days = lookbacks.get(interval, 1)
-            bars = fetch_yfinance_bars(
-                universe,
+            # Fetch bars and also get the list of failed symbols from yfinance
+            bars, newly_failed_symbols = fetch_yfinance_bars(
+                effective_universe,
                 lookback_days,
                 interval,
                 batch_size=batch_size,
@@ -68,6 +108,11 @@ def main() -> None:
                 drop_zero_volume=False,
                 delay_seconds=5.0,
             )
+            # Update temporary_failed_symbols with new failures
+            for s in newly_failed_symbols:
+                temporary_failed_symbols[s] = now
+                logging.warning("Market cache: Temporarily blacklisting symbol '%s' due to yfinance error.", s)
+
             cache.set_bars(bars, interval, ttl_seconds=interval_seconds)
             last_run[interval] = now
             logging.info(
