@@ -425,3 +425,6 @@ Highest positive impact (testing/live trading):
 - Saved context/session after confirming trader stopped due to healthwatch market_shutdown (holiday) and pushed updates.
 ### 2026-01-21
 - **Fix: Resolve all remaining Docker build and runtime dependency issues.** Corrected backtrader version to 1.9.78.123 in requirements.txt. Added DEBIAN_FRONTEND=noninteractive to Dockerfiles to prevent interactive apt-get prompts. Upgraded pip in Dockerfiles to ensure robust dependency resolution. These changes resolve ModuleNotFoundError for backtrader and allow all core services (api, trader, learner) to start and run correctly.
+
+## Session update 2026-01-22 16:54:45 CET
+- Removed the global "Active Symbols" stat panel from the overview Grafana dashboard (`grafana/provisioning/dashboards/fricktrade.json`) to avoid misleading counts versus per-account panels.

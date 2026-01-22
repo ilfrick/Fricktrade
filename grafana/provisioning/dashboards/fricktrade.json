@@ -180,29 +180,6 @@
       }
     },
     {
-      "type": "stat",
-      "title": "Active Symbols",
-      "gridPos": {
-        "x": 0,
-        "y": 9,
-        "w": 6,
-        "h": 5
-      },
-      "targets": [
-        {
-          "expr": "count(symbol_active == 1)",
-          "refId": "A"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        }
-      }
-    },
-    {
       "type": "table",
       "title": "Active Strategies",
       "gridPos": {
