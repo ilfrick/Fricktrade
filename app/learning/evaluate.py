@@ -167,15 +167,19 @@ def evaluate_from_config(cfg: dict) -> dict:
 
 
 def _resolve_device(device: str) -> str:
+    from app.utils.gpu_state import is_gpu_disabled
+
+    if is_gpu_disabled():
+        if device != "cpu":
+            logging.warning("GPU disabled; forcing CPU for evaluation.")
+        return "cpu"
+    if device != "auto":
+        return device
     try:
         import torch
     except Exception:
         return "cpu"
-    if torch.cuda.is_available():
-        return "cuda"
-    if device != "auto":
-        return device
-    return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def _sb3_custom_objects() -> dict:

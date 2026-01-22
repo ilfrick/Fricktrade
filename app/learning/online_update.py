@@ -56,7 +56,7 @@ def _lock_is_fresh(lock: dict, max_age_minutes: int = 10) -> bool:
 def _ensure_exclusive(cfg: dict) -> tuple[bool, str]:
     path = _lock_path(cfg)
     lock = _read_lock(path)
-    gpu_available = torch.cuda.is_available()
+    gpu_available = torch.cuda.is_available() and not is_gpu_disabled()
     owner = "gpu" if gpu_available else "cpu"
     if lock:
         lock_owner = lock.get("owner")

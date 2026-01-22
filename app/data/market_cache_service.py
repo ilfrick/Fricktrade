@@ -30,6 +30,7 @@ def main() -> None:
         max_bytes=int(log_cfg.get("max_bytes", 5_000_000)),
         backup_count=int(log_cfg.get("backup_count", 5)),
     )
+    logging.getLogger("yfinance").setLevel(getattr(logging, cfg["app"]["log_level"].upper(), logging.INFO))
 
     cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
     if not cache_cfg.enabled:
@@ -108,6 +109,7 @@ def main() -> None:
                 drop_zero_volume=False,
                 delay_seconds=5.0,
             )
+            logging.debug("Market cache: Received newly_failed_symbols from fetch_yfinance_bars: %s", newly_failed_symbols)
             # Update temporary_failed_symbols with new failures
             for s in newly_failed_symbols:
                 temporary_failed_symbols[s] = now

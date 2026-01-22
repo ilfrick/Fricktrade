@@ -301,7 +301,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     keras_interval = str(keras_cfg.get("interval", "5m"))
     keras_weight = float(keras_cfg.get("weight", 0.5))
     keras_score_mode = str(keras_cfg.get("score_mode", "expected_return"))
-    device = str(cfg.get("device", "auto")) # Parse device from config
+    device = _resolve_device(str(cfg.get("device", "auto")))
     return AISymbolFilterConfig(
         interval=interval,
         lookback_days=lookback_days,
@@ -360,6 +360,17 @@ def _keras_score_from_signals(signals, mode: str) -> float:
     if mode == "downside_risk":
         return float(signals.downside_risk)
     return float(signals.expected_return)
+
+def _resolve_device(device: str) -> str:
+    if is_gpu_disabled():
+        if device != "cpu":
+            logging.warning("GPU disabled; forcing CPU for AI filter.")
+        return "cpu"
+    if device != "auto":
+        return device
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
 
 
 def _normalize_model_path(model_path: str, model_type: str) -> Path:

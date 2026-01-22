@@ -79,6 +79,12 @@ from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_
 from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart # Import GPU state utilities
 import tensorflow as tf # Import tensorflow for GPU error handling
 try:
+    import torch
+    _TORCH_OOM = (torch.cuda.OutOfMemoryError,)
+except Exception:
+    _TORCH_OOM = ()
+_OOM_ERRORS = (tf.errors.ResourceExhaustedError,) + _TORCH_OOM
+try:
     from app.data.ai_filter import score_symbols
 except Exception:
     score_symbols = None
@@ -338,7 +344,7 @@ class TradingAgent:
                     except (FileNotFoundError, ValueError) as exc:
                         logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
                         break # Model not found/invalid, no point in retrying with CPU
-                    except tf.errors.ResourceExhaustedError as exc:
+                    except _OOM_ERRORS as exc:
                         if current_device != "cpu":
                             logging.warning(
                                 "CUDA out of memory during rl_policy build: %s. Falling back to CPU.", exc
@@ -385,7 +391,7 @@ class TradingAgent:
                     except (FileNotFoundError, ValueError) as exc:
                         logging.warning("RL model unavailable, skipping rl_policy_fees: %s", exc)
                         break # Model not found/invalid, no point in retrying with CPU
-                    except tf.errors.ResourceExhaustedError as exc:
+                    except _OOM_ERRORS as exc:
                         if current_device != "cpu":
                             logging.warning(
                                 "CUDA out of memory during rl_policy_fees build: %s. Falling back to CPU.", exc

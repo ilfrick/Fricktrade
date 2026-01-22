@@ -46,32 +46,68 @@ def fetch_yfinance_bars(
             logging.warning("yfinance returned no data for %d symbols in chunk.", len(chunk))
             failed_symbols.extend(chunk) # Add all symbols in chunk to failed_symbols
             continue
+        
+        if logging.getLogger().isEnabledFor(logging.DEBUG):
+            nlevels = getattr(data.columns, "nlevels", 1)
+            logging.debug(
+                "yfinance chunk=%s rows=%d cols=%d nlevels=%d",
+                chunk,
+                len(data),
+                data.shape[1],
+                nlevels,
+            )
+            logging.debug("yfinance index sample for chunk %s: %s", chunk, data.index[:3])
+            if len(chunk) <= 5:
+                logging.debug("yfinance columns sample for chunk %s: %s", chunk, list(data.columns)[:10])
 
-        if getattr(data.columns, "nlevels", 1) > 1:
-            for symbol in chunk:
-                if symbol not in data.columns.get_level_values(1):
-                    logging.warning("yfinance: no price data found for symbol '%s' in chunk.", symbol)
-                    failed_symbols.append(symbol) # Add individual failed symbol
-                    continue
-                frame = data.xs(symbol, level=1, axis=1)
-                cleaned = _clean_yfinance_frame(frame, lowercase=lowercase, drop_zero_volume=drop_zero_volume)
+        try:
+            if getattr(data.columns, "nlevels", 1) > 1:
+                # Handle MultiIndex DataFrame (multiple symbols).
+                nlevels = int(data.columns.nlevels)
+                level_sets = [set(data.columns.get_level_values(i)) for i in range(nlevels)]
+                for symbol in chunk:
+                    level_idx = next((i for i, vals in enumerate(level_sets) if symbol in vals), None)
+                    if level_idx is None:
+                        logging.warning("yfinance: no price data found for symbol '%s' in chunk.", symbol)
+                        failed_symbols.append(symbol)
+                        continue
+                    frame = data.xs(symbol, level=level_idx, axis=1)
+                    cleaned = _clean_yfinance_frame(frame, lowercase=lowercase, drop_zero_volume=drop_zero_volume)
+                    if cleaned is not None:
+                        bars_by_symbol[symbol] = cleaned
+                    else:
+                        logging.warning("yfinance: cleaned data is None for symbol '%s'.", symbol)
+                        failed_symbols.append(symbol)
+            elif len(chunk) == 1:
+                # Handle single-symbol DataFrame
+                symbol = chunk[0]
+                cleaned = _clean_yfinance_frame(data, lowercase=lowercase, drop_zero_volume=drop_zero_volume)
                 if cleaned is not None:
                     bars_by_symbol[symbol] = cleaned
                 else:
-                    logging.warning("yfinance: cleaned data is None for symbol '%s'.", symbol)
-                    failed_symbols.append(symbol) # Add if cleaned data is None
-        elif len(chunk) == 1:
-            symbol = chunk[0]
-            cleaned = _clean_yfinance_frame(data, lowercase=lowercase, drop_zero_volume=drop_zero_volume)
-            if cleaned is not None:
-                bars_by_symbol[symbol] = cleaned
+                    logging.warning("yfinance: cleaned data is None for single symbol '%s'.", symbol)
+                    failed_symbols.append(symbol)
             else:
-                logging.warning("yfinance: cleaned data is None for single symbol '%s'.", symbol)
-                failed_symbols.append(symbol) # Add if cleaned data is None
+                # This case implies data was not empty, but neither MultiIndex nor single-symbol.
+                # This could happen if yf.download returns a malformed DataFrame for multiple symbols.
+                logging.warning(
+                    "yfinance returned unexpected data structure for %d symbols in chunk. Adding to failed_symbols.",
+                    len(chunk)
+                )
+                failed_symbols.extend(chunk)
+
+        except (AttributeError, KeyError, TypeError) as e:
+            logging.error(
+                "yfinance data processing error for chunk (symbols: %s): %s. Adding all to failed_symbols.",
+                ", ".join(chunk),
+                e
+            )
+            failed_symbols.extend(chunk)
         
         if delay_seconds > 0 and idx + batch_size < len(symbols):
             time.sleep(delay_seconds)
             
+    logging.debug("Final failed_symbols after processing all chunks: %s", failed_symbols) # Add this
     return bars_by_symbol, failed_symbols # Return both
 
 

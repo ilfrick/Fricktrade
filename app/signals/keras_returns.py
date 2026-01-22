@@ -12,6 +12,8 @@ import logging
 import numpy as np
 import pandas as pd
 
+from app.utils.gpu_state import is_gpu_disabled
+
 INSAMPLES = 12
 OUTSAMPLES = 12
 N_FEATURES = 5
@@ -37,11 +39,13 @@ def compute_keras_return_signals(
     model_path: str,
     interval: str = "5m",
     insamples: int = INSAMPLES,
+    device: str = "auto",
 ) -> KerasReturnSignals | None:
     window = _window_from_frame(frame, interval=interval, insamples=insamples)
     if window is None:
         return None
-    model = _load_model(model_path)
+    device = _resolve_device(device)
+    model = _load_model(model_path, device)
     if model is None:
         return None
     pred_log_returns = _predict_log_returns(window, model)
@@ -128,15 +132,33 @@ def _log_returns(values: np.ndarray) -> np.ndarray:
 
 
 @lru_cache(maxsize=4)
-def _load_model(model_path: str):
+def _load_model(model_path: str, device: str):
     try:
         import tensorflow as tf  # noqa: F401
         from tensorflow import keras
     except Exception as exc:
         logger.warning("TensorFlow not available; keras_returns disabled (%s)", exc)
         return None
+    _force_tf_cpu(tf, device)
     try:
         return keras.models.load_model(model_path)
     except Exception as exc:
         logger.warning("Failed to load Keras model at %s (%s)", model_path, exc)
         return None
+
+
+def _force_tf_cpu(tf, device: str) -> None:
+    if device != "cpu" and not is_gpu_disabled():
+        return
+    try:
+        tf.config.set_visible_devices([], "GPU")
+    except Exception as exc:
+        logger.debug("Failed to force TensorFlow CPU mode: %s", exc)
+
+
+def _resolve_device(device: str) -> str:
+    if is_gpu_disabled():
+        return "cpu"
+    if device == "auto":
+        return "cuda"
+    return device

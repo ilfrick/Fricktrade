@@ -10,6 +10,7 @@ from pathlib import Path
 
 from app.learning.features import build_observation, observation_size, risk_feature_vector
 from app.strategies.base import Strategy
+from app.utils.gpu_state import is_gpu_disabled
 
 if TYPE_CHECKING:
     from app.learning.drift import DriftMonitor
@@ -110,15 +111,17 @@ class RLPolicyStrategy(Strategy):
 
 
 def _resolve_device(device: str) -> str:
+    if is_gpu_disabled():
+        if device != "cpu":
+            logging.warning("GPU disabled; forcing CPU for RL policy.")
+        return "cpu"
+    if device != "auto":
+        return device
     try:
         import torch
     except Exception:
         return "cpu"
-    if torch.cuda.is_available():
-        return "cuda"
-    if device != "auto":
-        return device
-    return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def _load_ppo():

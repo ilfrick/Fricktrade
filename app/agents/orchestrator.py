@@ -1008,10 +1008,16 @@ def _order_feedback_vector(state: dict[str, float] | None) -> list[float]:
 
 
 def _resolve_device(device: str) -> str:
-    if torch is not None and torch.cuda.is_available():
-        return "cuda"
+    from app.utils.gpu_state import is_gpu_disabled
+
+    if is_gpu_disabled():
+        if device != "cpu":
+            logging.warning("GPU disabled; forcing CPU for orchestrator.")
+        return "cpu"
     if device != "auto":
         return device
+    if torch is not None and torch.cuda.is_available():
+        return "cuda"
     return "cpu"
 
 
