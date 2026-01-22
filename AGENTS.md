@@ -491,3 +491,7 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 21:12:55 CET
 - Added risk enabled switch (config + backtest cases), bypassed risk checks when disabled, and updated RiskManager to short-circuit when disabled.
+
+## Session update 2026-01-22 21:18:36 CET
+- Disabled risk manager in `config/config.yaml`, rebuilt images, and restarted stack.
+- Ensured monitoring running; `data/monitoring/market_cache_monitor.log` now contains fresh entries (monitor_start at 21:18:25 CET).
