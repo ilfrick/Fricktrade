@@ -518,7 +518,8 @@ data:
     interval: 5m
     lookback_days: 7
     rate_limit_seconds: 2
-    symbol_blacklist: []  - provider: alpaca
+    symbol_blacklist: []
+  - provider: alpaca
     enabled: true
     symbols: []
     universe: alpaca_active

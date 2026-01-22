@@ -34,6 +34,11 @@ class TradingEnv(gym.Env):
         self.time_penalty_per_step = float(time_penalty_per_step)
         self.feature_config = feature_config or {}
 
+        self.position_entry_price = 0.0 # Track entry price for current position
+        self.position_entry_qty = 0.0   # Track quantity for current position
+        self.total_realized_pnl = 0.0   # Track total realized PnL
+        self.last_portfolio_value = self.initial_cash # Keep track for overall change for flat periods
+
         self.action_space = gym.spaces.Discrete(3)
         obs_len = observation_size(window_size, self.feature_config)
         self.observation_space = gym.spaces.Box(
@@ -52,6 +57,10 @@ class TradingEnv(gym.Env):
         self.cash = self.initial_cash
         self.position_qty = 0.0
         self.last_value = self.initial_cash
+        self.position_entry_price = 0.0
+        self.position_entry_qty = 0.0
+        self.total_realized_pnl = 0.0
+        self.last_portfolio_value = self.initial_cash
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
@@ -84,25 +93,68 @@ class TradingEnv(gym.Env):
     def step(self, action: int):
         done = False
         price = self._get_price(self.step_index)
+        reward = -self.time_penalty_per_step # Start with time penalty
 
-        if action == 1 and self.position <= 0:
-            if self.position < 0:
-                self.cash += abs(self.position_qty) * price - self._trade_cost(price)
-                self.position_qty = 0.0
-            self.position = 1
-            self.position_qty = 1.0
-            self.cash -= price + self._trade_cost(price)
-        elif action == 2 and self.position >= 0:
-            if self.position > 0:
-                self.cash += self.position_qty * price - self._trade_cost(price)
-                self.position_qty = 0.0
-            self.position = -1
-            self.position_qty = -1.0
-            self.cash += price - self._trade_cost(price)
+        # Variables to store realized PnL for the current step, if any
+        realized_pnl_this_step = 0.0
 
-        portfolio_value = self.cash + self.position_qty * price
-        reward = portfolio_value - self.last_value - self.time_penalty_per_step
-        self.last_value = portfolio_value
+        # Current position status before action
+        current_position = self.position
+        
+        # Determine if a position is being closed
+        is_closing_long = (action == 2 or action == 0) and current_position == 1
+        is_closing_short = (action == 1 or action == 0) and current_position == -1
+
+        if is_closing_long:
+            # Calculate realized PnL for closed long trade
+            closed_pnl = (price - self.position_entry_price) * self.position_entry_qty
+            trade_cost = self._trade_cost(self.position_entry_price) * self.position_entry_qty + \
+                         self._trade_cost(price) * self.position_entry_qty
+            realized_pnl_this_step += closed_pnl - trade_cost
+            self.total_realized_pnl += realized_pnl_this_step
+            self.cash += self.position_qty * price - self._trade_cost(price)
+            # Reset position tracking
+            self.position = 0
+            self.position_qty = 0.0
+            self.position_entry_price = 0.0
+            
+        elif is_closing_short:
+            # Calculate realized PnL for closed short trade
+            closed_pnl = (self.position_entry_price - price) * abs(self.position_entry_qty)
+            trade_cost = self._trade_cost(self.position_entry_price) * abs(self.position_entry_qty) + \
+                         self._trade_cost(price) * abs(self.position_entry_qty)
+            realized_pnl_this_step += closed_pnl - trade_cost
+            self.total_realized_pnl += realized_pnl_this_step
+            self.cash += abs(self.position_qty) * price - self._trade_cost(price)
+            # Reset position tracking
+            self.position = 0
+            self.position_qty = 0.0
+            self.position_entry_price = 0.0
+
+        # Apply action to open new position or change existing one
+        if action == 1:  # Go long
+            if self.position == 0: # Only open if currently flat
+                self.position = 1
+                self.position_qty = 1.0 # Assume fixed quantity
+                self.position_entry_price = price
+                self.cash -= price + self._trade_cost(price)
+            # If already long, do nothing (hold long)
+        elif action == 2:  # Go short
+            if self.position == 0: # Only open if currently flat
+                self.position = -1
+                self.position_qty = -1.0 # Assume fixed quantity
+                self.position_entry_price = price
+                self.cash += price - self._trade_cost(price)
+            # If already short, do nothing (hold short)
+        # If action is 0 (flat), and position was closed above, we are now flat.
+        # If action is 0 and we were already flat, we remain flat.
+
+        # Add realized PnL from closed trades to the reward for this step
+        reward += realized_pnl_this_step
+
+        # Update last_value for portfolio_value tracking, though not directly used for reward in this scheme
+        portfolio_value = self.cash + (self.position_qty * price if self.position != 0 else 0)
+        self.last_value = portfolio_value # Keep for consistency or future use
 
         self.step_index += 1
         if self.step_index >= len(self.data) - 1:
@@ -113,5 +165,6 @@ class TradingEnv(gym.Env):
             "portfolio_value": portfolio_value,
             "position": self.position,
             "cash": self.cash,
+            "total_realized_pnl": self.total_realized_pnl # Add to info for monitoring
         }
         return obs, float(reward), done, False, info
