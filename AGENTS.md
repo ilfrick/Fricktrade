@@ -515,3 +515,7 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 22:37:30 CET
 - Checked Ollama after restart: service is up, `ollama list` shows `llama3.1:8b` installed, `ollama ps` empty (no active model loaded yet).
+
+## Session update 2026-01-22 22:39:30 CET
+- Updated docs to reflect risk enable switch, account flags gating, per-symbol filtered cache, market-cache staleness controls, and GPU fallback behavior.
+- Refreshed Mermaid diagrams in README/system_map/flow_trading_agent to include account flags and risk bypass.
