@@ -507,3 +507,8 @@ Highest positive impact (testing/live trading):
 - Archived RL model artifacts (ppo_policy zips, model registry/active, training reports) into `models/archived_wrong_size` after `rm` was blocked by policy.
 - Renamed `models/registry` and `models/reports` to `.old` due to permission errors moving into the archive.
 - Cleared the learner checkpoint via one-off container run, restarted `learner`, and confirmed online update started (1000 timesteps).
+
+## Session update 2026-01-22 22:10:12 CET
+- Rebuilt all images with `docker compose build --no-cache` and restarted the full stack.
+- Restarted market-cache monitoring loop; new entries appended to `data/monitoring/market_cache_monitor.log`.
+- Checked risk blocks: no risk/blocked log entries since restart; Prometheus shows empty results for `orders_skipped_*`, `order_rejects_total`, and `pdt_blocks_total`.
