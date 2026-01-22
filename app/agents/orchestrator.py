@@ -933,7 +933,12 @@ _FEATURE_NAMES = [
 def _feature_vector(market_state: dict, risk_cfg: dict | None = None) -> list[float]:
     features = _extract_features(market_state) if market_state else {}
     vec = [float(features.get(name, 0.0) or 0.0) for name in _FEATURE_NAMES]
-    risk_vec = risk_feature_vector(risk_cfg or {}, market_state.get("risk_outcome") if market_state else None, True)
+    risk_vec = risk_feature_vector(
+        risk_cfg or {},
+        market_state.get("risk_outcome") if market_state else None,
+        account_flags=market_state.get("account_flags") if market_state else None,
+        include_decision=True,
+    )
     return vec + risk_vec
 
 

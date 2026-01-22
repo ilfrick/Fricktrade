@@ -99,7 +99,10 @@ class RLPolicyStrategy(Strategy):
         cash_pct = float(portfolio.get("cash_pct", 1.0) or 1.0)
         buying_power_pct = float(portfolio.get("buying_power_pct", cash_pct) or cash_pct)
         risk_outcome = market_state.get("risk_outcome") if isinstance(market_state, dict) else None
-        risk_features = risk_feature_vector(self._risk_cfg, risk_outcome, include_decision=True)
+        account_flags = market_state.get("account_flags") if isinstance(market_state, dict) else None
+        risk_features = risk_feature_vector(
+            self._risk_cfg, risk_outcome, account_flags=account_flags, include_decision=True
+        )
         obs = build_observation(
             closes=closes,
             volumes=volumes,

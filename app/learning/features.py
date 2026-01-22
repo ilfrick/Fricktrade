@@ -37,6 +37,12 @@ _RISK_FEATURE_FIELDS = [
     ("kill_switch_profiles.enabled", 0.0),
 ]
 
+_ACCOUNT_FLAG_FIELDS = [
+    "account_blocked",
+    "trading_blocked",
+    "trade_suspended_by_user",
+]
+
 _RISK_REASON_CODES = {
     "ok": 0.0,
     "risk_block": 1.0,
@@ -50,6 +56,7 @@ _RISK_REASON_CODES = {
     "cooldown": 6.0,
     "shorting_disabled": 7.0,
     "account_blocked": 8.0,
+    "risk_disabled": 9.0,
 }
 
 
@@ -190,7 +197,7 @@ def build_observation(
 
 
 def risk_feature_size(include_decision: bool = True) -> int:
-    size = len(_RISK_FEATURE_FIELDS)
+    size = len(_RISK_FEATURE_FIELDS) + len(_ACCOUNT_FLAG_FIELDS)
     if include_decision:
         size += 3  # allowed flag, action code, reason code
     return size
@@ -199,6 +206,7 @@ def risk_feature_size(include_decision: bool = True) -> int:
 def risk_feature_vector(
     risk_cfg: dict | None,
     risk_outcome: dict | None = None,
+    account_flags: dict | None = None,
     include_decision: bool = True,
 ) -> list[float]:
     """
@@ -226,6 +234,9 @@ def risk_feature_vector(
             values.append(1.0 if bool(_get(path, default)) else 0.0)
         else:
             values.append(_get(path, default))
+    flags = account_flags or {}
+    for key in _ACCOUNT_FLAG_FIELDS:
+        values.append(1.0 if bool(flags.get(key, False)) else 0.0)
 
     if not include_decision:
         return values

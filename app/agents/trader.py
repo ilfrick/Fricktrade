@@ -930,7 +930,7 @@ class TradingAgent:
             trace["exposure_pct"] = market_state.get("exposure_pct")
             trace["short_exposure_pct"] = market_state.get("short_exposure_pct")
             trace["leverage"] = market_state.get("leverage")
-        if not risk_disabled and self._is_account_blocked(broker_name):
+        if self._is_account_blocked(broker_name):
             self._record_risk_outcome(symbol, action, False, "account_blocked", broker_name)
             self._record_skip(symbol, action, "account_blocked", broker_name)
             logging.info("Skipping %s for %s: account blocked", action, symbol)
@@ -2887,6 +2887,15 @@ class TradingAgent:
         market_state["short_exposure_pct"] = (short_exposure / equity * 100.0) if equity else 0.0
         market_state["leverage"] = (gross_exposure / equity) if equity else 1.0
         market_state["portfolio"] = portfolio
+        account = self._account_for_broker(portfolio.get("broker"))
+        def _flag_value(key: str) -> bool:
+            val = account.get(key)
+            return str(val).lower() in {"true", "1", "yes"} or val is True
+        market_state["account_flags"] = {
+            "account_blocked": _flag_value("account_blocked"),
+            "trading_blocked": _flag_value("trading_blocked"),
+            "trade_suspended_by_user": _flag_value("trade_suspended_by_user"),
+        }
         market_state["catalyst"] = self._news_cache.get(symbol, False)
         market_state["open_orders"] = self._open_orders_cache
         market_state["symbol"] = symbol

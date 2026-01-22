@@ -498,3 +498,7 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 21:20:10 CET
 - Clarified that risk disable currently bypasses broker account flags and trading_limits action blocks; non-risk checks (price, pending orders, etc.) still apply.
+
+## Session update 2026-01-22 21:25:20 CET
+- Ensured broker account flags still block orders even when risk is disabled.
+- Added account flags to RL feature vectors and market_state; updated risk feature size and reason codes.
