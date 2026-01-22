@@ -78,4 +78,17 @@ def _cfg() -> ai_filter.AISymbolFilterConfig:
         time_penalty_per_bar=0.0,
         feed="iex",
         provider="alpaca",
+        # Add the missing arguments with default or sensible test values
+        market_cache_enabled=False,
+        market_cache_redis_url="redis://localhost:6379/0", # Using localhost for test
+        market_cache_file_dir="/tmp/market_cache",
+        market_cache_cache_only=False,
+        market_cache_ignore_staleness=False,
+        market_cache_allow_pickle=False,
+        keras_enabled=False,
+        keras_model_path="/tmp/keras_model.keras",
+        keras_interval="5m",
+        keras_weight=0.0,
+        keras_score_mode="expected_return",
+        device="cpu", # Default to CPU for tests
     )
