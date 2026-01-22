@@ -15,7 +15,8 @@ flowchart LR
         Trader[TradingAgent]
         Strategies[Strategies]
         Orchestrator[RL Orchestrator]
-        Risk[Risk Manager]
+        AccountFlags[Account Flags + Trading Limits]
+        Risk[Risk Manager<br/>(configurable disable)]
         Exec[Execution Engine]
         Queue[Order Queue]
         Routing[Broker Routing]
@@ -57,7 +58,7 @@ flowchart LR
 
     CLI --> Trader
     Compose --> Trader
-    Trader --> Strategies --> Orchestrator --> Risk --> Exec --> Queue --> Routing --> Brokers
+    Trader --> Strategies --> Orchestrator --> AccountFlags --> Risk --> Exec --> Queue --> Routing --> Brokers
     Scanner --> Trader
     AIFilter --> Trader
     AIFilter --> MarketCache
@@ -99,8 +100,9 @@ flowchart LR
   features and order feedback; online updates + pretraining.
 
 ## Risk
-- `app/risk/manager.py`: core limits (exposure, leverage, daily loss).
+- `app/risk/manager.py`: core limits (exposure, leverage, daily loss) and guardrails.
 - `app/risk/haircut.py`: stress/liquidity haircuts.
+- `risk.enabled: false` bypasses risk checks, but broker account flags and trading limits still block orders.
 - Risk gating is integrated in `app/agents/trader.py`.
 
 ## Execution
@@ -113,7 +115,7 @@ flowchart LR
 - `app/data/downloader.py`: yfinance historical download.
 - `app/data/ingestion.py`: ingestion from yfinance/alpaca/stooq/alphavantage.
 - `app/data/scanner.py`: symbol universe and price filter (Alpaca snapshots).
-- `app/data/ai_filter.py`: PPO-based symbol scorer with Keras overlay for news-aware features and online updates; provider selects alpaca or yfinance bars.
+- `app/data/ai_filter.py`: PPO-based symbol scorer with optional Keras returns overlay and online updates; provider selects alpaca or yfinance bars.
 - `app/data/news.py`: broker-backed news/catalyst fetch.
 - `Ollama`: Local LLM gate for processing news catalysts.
 - `app/data/market_cache.py`: Redis + file cache client for live yfinance bars and filtered symbols.

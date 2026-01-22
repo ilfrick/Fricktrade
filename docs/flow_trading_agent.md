@@ -22,7 +22,8 @@ flowchart TD
     I --> J[Drift Monitor + Auto Rollback]
     J --> K[Orchestrator Direct Strategy Selection]
     K --> L[Guardrail Optional]
-    L --> M[Risk + Limits + VaR/CVaR + Caps]
+    L --> AccountFlags[Account Flags + Trading Limits]
+    AccountFlags --> M[Risk + VaR/CVaR + Caps<br/>(configurable disable)]
     M --> N[Execution Algo + Queue]
     N --> O[Broker Router Submit]
     O --> P[Order Feedback + Metrics]
@@ -68,5 +69,6 @@ flowchart TD
     C --> D[Cap to max_symbols]
     D --> E[Merge Positions + Open Orders]
     E --> F[Active Symbol List]
-    F --> Bars
+    F --> FilteredCache[Filtered Symbols Cache<br/>(per symbol)]
+    FilteredCache --> Bars
 ```

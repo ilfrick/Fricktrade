@@ -16,6 +16,7 @@ Scores a large universe of symbols and returns an ordered list for trading.
 - Optionally performs lightweight online updates on the latest bars.
 - While a refresh is in-flight, the trading loop keeps using the last valid symbol list.
 - On startup, the trader seeds the symbol list from the last saved checkpoint while the filter runs.
+- Cached symbol output is stored per symbol (Redis + file) and read by the trader when `use_cached_symbols` is enabled.
 
 ## Feature Window
 - Uses the last `window` returns and volumes for each symbol.
@@ -69,6 +70,7 @@ Keras return overlay (optional):
 - `data.dynamic_symbols.ai_filter.keras_returns.interval` (expects 5m inputs)
 - `data.dynamic_symbols.ai_filter.keras_returns.score_mode` (`expected_return`, `short_term`, `up_prob`, `downside_risk`)
 - `data.dynamic_symbols.ai_filter.keras_returns.weight` (score contribution scalar)
+- If Keras scoring runs out of GPU memory, the overlay is disabled for the remainder of that run.
 
 Universe selection:
 - `data.dynamic_symbols.universe` (use `brokers_active` to start from Alpaca active universe today plus positions/orders)

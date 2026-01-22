@@ -17,7 +17,8 @@ execution, and metrics updates.
 - The dynamic symbol cap is limited to the tradeable universe size (plus any held/open-order symbols).
 - Live market data uses `data.provider` (yfinance, alpaca, or brokers); yfinance runs through the market-cache service (Redis + file fallback).
 - When `data.dynamic_symbols.ai_filter.use_cached_symbols` is enabled, the trader consumes cached AI-filter symbol lists if available.
-- Keras overlay for AI symbol filter requires `TF_USE_LEGACY_KERAS=1` environment variable for compatibility.
+- Keras overlay for AI symbol filter uses TensorFlow/Keras and falls back to CPU if GPU is disabled.
+- `data.process_on_new_bar_only` skips per-symbol processing when bars have not advanced.
 - Skips trading when markets are closed (extended hours included when enabled).
 - Runs per-symbol signals, combines them, applies guardrails, sizes orders,
   and submits via `ExecutionEngine`.
@@ -26,6 +27,7 @@ execution, and metrics updates.
 - `sell` actions are ignored when no long position exists (prevents short attempts).
 - Multi-broker routing uses `execution.brokers.routing` to choose the broker per symbol and supports optional fallback when a broker is down.
 - Saves periodic checkpoints of in-memory state for reboot resilience.
+- `risk.enabled: false` bypasses risk checks, but broker account flags and trading limits still block orders.
 
 ## Key Components
 - Strategy selection: `strategy.name` or `strategy.names`.

@@ -52,13 +52,16 @@ Centralize runtime settings for all subsystems.
 - Strategy selection: `strategy.name` or `strategy.names`.
 - Dynamic symbols: `data.dynamic_symbols.enabled`.
 - Live market data provider: `data.provider` (yfinance, alpaca, or brokers). yfinance uses the market-cache service.
+- Skip per-symbol work on stale bars: `data.process_on_new_bar_only`.
 - Market cache: `market_cache.*` (Redis + file fallback, cache-only reads, batch size).
+- Market cache staleness: `market_cache.max_age_multiplier` + `market_cache.ignore_staleness`.
+- Filtered symbol cache: `market_cache.filtered_symbols.enabled` (per-symbol Redis/file entries).
 - AI filter: `data.dynamic_symbols.ai_filter.enabled` (PPO-based by default).
 - AI filter model: `data.dynamic_symbols.ai_filter.model_type` and `data.dynamic_symbols.ai_filter.rl.*`.
 - AI filter provider: `data.dynamic_symbols.ai_filter.provider` (alpaca or yfinance).
 - AI filter coverage filter: `data.dynamic_symbols.ai_filter.coverage_filter` (drop symbols without bars).
 - AI filter cached symbols: `data.dynamic_symbols.ai_filter.use_cached_symbols`.
-- Keras return overlay: `data.dynamic_symbols.ai_filter.keras_returns.*` (optional scoring feature). Requires `TF_USE_LEGACY_KERAS=1` environment variable for compatibility.
+- Keras return overlay: `data.dynamic_symbols.ai_filter.keras_returns.*` (optional scoring feature).
 - Data quality validation: `data.quality.enabled`.
 - Data adjustments: `data.adjustments.enabled`.
 - Broker universe: `data.dynamic_symbols.universe: brokers_active` (Alpaca active universe today).
@@ -88,6 +91,7 @@ Centralize runtime settings for all subsystems.
 - Impact model: `execution.impact.*`.
 - Retry policy: `execution.retry.*`.
 - Volatility targeting: `risk.vol_targeting.enabled`.
+- Risk bypass (keeps broker flags): `risk.enabled`.
 - VaR/CVaR gating: `risk.var.enabled`.
 - Exposure caps: `risk.exposure_caps.enabled`.
 - Kill switch profiles: `risk.kill_switch_profiles.enabled`.

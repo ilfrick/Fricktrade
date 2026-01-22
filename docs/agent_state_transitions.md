@@ -72,6 +72,7 @@ stateDiagram-v2
 Notes:
 - When `healthwatch.market_shutdown.write_state` is enabled, tests-when-closed respects ops state first,
   then falls back to `is_market_open`.
+- `risk.enabled: false` bypasses risk-triggered halts; broker account flags still block orders.
 
 ## Learner Service (Online Updates)
 

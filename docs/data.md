@@ -17,8 +17,13 @@ Acquire bars, scan symbols, and support AI filtering.
 ## Configuration
 `config/config.yaml`:
 - `data.provider` (yfinance/alpaca/brokers; yfinance uses batched caching).
+- `data.process_on_new_bar_only` (skip per-symbol processing when bar timestamps have not advanced).
 - `market_cache.*` (Redis + file cache for live yfinance bars; optional cache-only reads)
   - `market_cache.cache_only: true` disables direct yfinance calls in the trader/AI filter
+  - `market_cache.max_age_multiplier` scales staleness thresholds for cached bars
+  - `market_cache.ignore_staleness: false` enforces staleness checks instead of reusing old bars
+  - `market_cache.filtered_symbols.enabled` controls caching of AI-filter symbol lists
+  - Filtered symbol cache is per symbol (Redis + file) and used by the trader when enabled
 - `data.interval`
 - `data.lookback_days`
 - `data.symbols`

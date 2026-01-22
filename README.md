@@ -51,7 +51,8 @@ flowchart LR
         Strat[Strategies<br/>rl_policy / rl_policy_fees / intraday_momentum / pattern_trading / trend_following / factor_model / stat_arb_pairs / market_maker]
         Orchestrator[RL Strategy Orchestrator]
         Drift[Drift Monitor<br/>feature + PnL]
-        Risk[Risk Manager<br/>vol targeting + VaR/CVaR + caps]
+        AccountFlags[Account Flags + Trading Limits]
+        Risk[Risk Manager<br/>vol targeting + VaR/CVaR + caps<br/>(configurable disable)]
         Algo[Execution Algos<br/>TWAP / VWAP / POV]
         Impact[Market Impact Model]
         Exec[Execution Engine]
@@ -111,7 +112,7 @@ flowchart LR
     RLTrain --> ModelRegistry --> ActiveModel
     OrchPretrain --> ModelStore
     AIFilterTrain --> ModelStore
-    Trader --> Strat --> Drift --> Orchestrator --> Risk --> Impact --> Algo --> Queue --> Orders --> Exec --> Router
+    Trader --> Strat --> Drift --> Orchestrator --> AccountFlags --> Risk --> Impact --> Algo --> Queue --> Orders --> Exec --> Router
     OpsState --> Trader
     OpsState --> RLTrain
     OpsState --> TestsWhenClosed
@@ -141,6 +142,7 @@ flowchart LR
 - Runs strategies, orchestrator selection, and risk checks
 - Submits orders via the execution engine and order queue
 - Updates metrics and checkpointed state
+- `risk.enabled` can bypass risk checks, but broker account flags still block orders.
 
 ### Strategies
 - `rl_policy`: RL policy inference with optional GPU acceleration
@@ -170,10 +172,13 @@ flowchart LR
 - Optional Keras return overlay can contribute to AI symbol scores (TensorFlow/Keras installed in containers).
 - The AI filter can publish cached symbol lists so the trader reads from cache when available.
 - News catalyst support (Alpaca news) via an optional Ollama-based LLM gate.
+- `data.process_on_new_bar_only` skips per-symbol processing when bars have not advanced.
+- Filtered symbol cache is stored per symbol in Redis/file with staleness controls (`market_cache.max_age_multiplier`, `market_cache.ignore_staleness`).
 
 ### Learning
 - Offline RL training and online updates
 - GPU acceleration if available
+- CUDA errors in TensorFlow/torch disable GPU usage until the next restart (automatic CPU fallback).
 - Best-model selection via `learning.use_best_model`
 - Model registry snapshots and drift monitoring with auto rollback
 
