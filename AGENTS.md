@@ -522,3 +522,7 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 22:45:05 CET
 - Updated remaining docs (operator/developer/operations/monitoring/brokers/strategies/troubleshooting/getting-started) to reflect risk enable switch, account flags, cache staleness, and GPU fallback notes.
+
+## Session update 2026-01-22 23:03:50 CET
+- Fixed Mermaid rendering errors by quoting node labels with `<br/>` and parentheses in `README.md`, `docs/system_map.md`, and `docs/flow_trading_agent.md`.
+- Ran mermaid-cli with a no-sandbox Puppeteer config; all extracted diagrams rendered successfully (zenuml warning only).

@@ -17,13 +17,13 @@ flowchart TD
     E --> F{Market Open?}
     F -- No --> G[Sleep Interval]
     G --> A
-    F -- Yes --> H[Per-Symbol Market Data (market-cache)]
+    F -- Yes --> H["Per-Symbol Market Data (market-cache)"]
     H --> I[Generate Strategy Signals + Features]
     I --> J[Drift Monitor + Auto Rollback]
     J --> K[Orchestrator Direct Strategy Selection]
     K --> L[Guardrail Optional]
     L --> AccountFlags[Account Flags + Trading Limits]
-    AccountFlags --> M[Risk + VaR/CVaR + Caps<br/>(configurable disable)]
+    AccountFlags --> M["Risk + VaR/CVaR + Caps<br/>(configurable disable)"]
     M --> N[Execution Algo + Queue]
     N --> O[Broker Router Submit]
     O --> P[Order Feedback + Metrics]
@@ -63,12 +63,12 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[Universe Broker Active] --> B[AI Filter Score]
-    Bars[Market Cache (Redis + file)] --> B
+    Bars["Market Cache (Redis + file)"] --> B
     News[News Catalyst] --> B
     B --> C[Coverage Filter]
     C --> D[Cap to max_symbols]
     D --> E[Merge Positions + Open Orders]
     E --> F[Active Symbol List]
-    F --> FilteredCache[Filtered Symbols Cache<br/>(per symbol)]
+    F --> FilteredCache["Filtered Symbols Cache<br/>(per symbol)"]
     FilteredCache --> Bars
 ```

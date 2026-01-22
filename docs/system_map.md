@@ -16,7 +16,7 @@ flowchart LR
         Strategies[Strategies]
         Orchestrator[RL Orchestrator]
         AccountFlags[Account Flags + Trading Limits]
-        Risk[Risk Manager<br/>(configurable disable)]
+        Risk["Risk Manager<br/>(configurable disable)"]
         Exec[Execution Engine]
         Queue[Order Queue]
         Routing[Broker Routing]
@@ -26,7 +26,7 @@ flowchart LR
         AIFilter[AI Symbol Filter PPO]
         News[News Catalysts]
         Ollama[(Ollama LLM Gate)]
-        MarketData[Market Data Providers<br/>yfinance / alpaca / brokers]
+        MarketData["Market Data Providers<br/>yfinance / alpaca / brokers"]
     end
     subgraph Cache[Market Cache]
         MarketCache[Market Cache Service]
