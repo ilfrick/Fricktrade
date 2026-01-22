@@ -457,3 +457,6 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 20:29:05 CET
 - Clarified 1m vs 5m bars: main trading interval is 5m while AI symbol filter and some signals use 1m; both caches exist to avoid extra fetches.
+
+## Session update 2026-01-22 20:39:08 CET
+- Switched all config intervals to 5m (main data, AI filter, RL feature signal interval, RL training interval) across `config/config.yaml` and backtest case configs.

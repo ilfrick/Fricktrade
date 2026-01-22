@@ -259,7 +259,7 @@ learning:
     eval_split: 0.1
   training:
     data_dir: /data
-    interval: 1m
+    interval: 5m
     timesteps: 200000
     initial_cash: 200
     commission_pct: 0.05

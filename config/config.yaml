@@ -309,7 +309,7 @@ learning:
   features:
     include_returns: true
     include_signal_features: true
-    signal_interval: 1m
+    signal_interval: 5m
     sma_periods:
     - 5
     - 20
@@ -353,7 +353,7 @@ learning:
     respect_ops_state: true
   training:
     data_dir: /data/rl_train_small
-    interval: 1m
+    interval: 5m
     timesteps: 5000
     initial_cash: 200
     commission_pct: 0.05
@@ -448,7 +448,7 @@ data:
       provider: yfinance
       coverage_filter: true
       use_cached_symbols: false
-      interval: 1m
+      interval: 5m
       lookback_days: 2
       window: 20
       retrain_hours: 6
