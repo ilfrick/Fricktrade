@@ -471,3 +471,6 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-22 20:50:55 CET
 - Set market cache max_age_multiplier to 1 in `config/config.yaml`.
+
+## Session update 2026-01-22 20:54:07 CET
+- Rebuilt and restarted the full docker compose stack to apply max_age_multiplier=1.
