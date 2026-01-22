@@ -530,3 +530,7 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-22 23:05:31 CET
 - Adjusted Mermaid diagram labels to avoid HTML `<br/>`/parentheses so GitHub's renderer parses them.
 - Simplified labels in `README.md`, `docs/system_map.md`, and `docs/flow_trading_agent.md` to single-line text.
+
+## Session update 2026-01-22 23:06:33 CET
+- Verified no Mermaid `<br/>` labels remain in repo; README/system_map/flow_trading_agent show single-line risk labels.
+- Error likely from viewing an older commit or cached render; current v3.0 head is `12f7f6e`.
