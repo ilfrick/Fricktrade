@@ -114,6 +114,7 @@ brokers:
       min_fee: 0.0
       spread_pct: 0.0
 risk:
+  enabled: true
   max_daily_loss_pct: 2.0
   max_position_size_pct: 25.0
   max_portfolio_leverage: 1.5

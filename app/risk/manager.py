@@ -6,7 +6,12 @@ class RiskManager:
         self.cfg = cfg
         self.daily_loss = 0.0
 
+    def _enabled(self) -> bool:
+        return bool(self.cfg.get("enabled", True))
+
     def can_open_trade(self, exposure_pct: float, short_exposure_pct: float, leverage: float) -> bool:
+        if not self._enabled():
+            return True
         max_daily_loss = float(self.cfg.get("max_daily_loss_pct", 0.0) or 0.0)
         if max_daily_loss > 0 and self.daily_loss <= -max_daily_loss:
             return False
@@ -25,4 +30,6 @@ class RiskManager:
         self.daily_loss = min(0.0, float(pnl_pct))
 
     def should_circuit_break(self, drawdown_pct: float) -> bool:
+        if not self._enabled():
+            return False
         return drawdown_pct >= self.cfg["circuit_breaker_drawdown_pct"]

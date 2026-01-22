@@ -488,3 +488,6 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-22 21:07:36 CET
 - Verified repo clean; pushed to origin/github (no pending changes).
 - Started background monitoring until US market close; log file: `data/monitoring/market_cache_monitor.log`.
+
+## Session update 2026-01-22 21:12:55 CET
+- Added risk enabled switch (config + backtest cases), bypassed risk checks when disabled, and updated RiskManager to short-circuit when disabled.
