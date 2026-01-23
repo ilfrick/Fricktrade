@@ -135,7 +135,6 @@ strategy:
   names:
   - rl_policy
   - rl_policy_fees
-  - pattern_trading
   combine: vote
   fee_aware:
     min_edge_pct: 0.005

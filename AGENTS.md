@@ -563,3 +563,6 @@ Highest positive impact (testing/live trading):
 - Checked GPU usage: `ollama` logs show CUDA offload (30/33 layers) and `nvidia-smi` shows /usr/bin/ollama using ~5GB.
 - `trader` has CUDA available (`torch.cuda.is_available()` true); trader log reports AI filter device=cuda.
 - `learner` logs show "Using cuda device".
+
+## Session update 2026-01-23 22:31:16 CET
+- Disabled non-RL strategies in configs: `config/config.yaml` now only lists `rl_policy` and `rl_policy_fees`; removed `pattern_trading` from `config/backtest_case4.yaml`.
