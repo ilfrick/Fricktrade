@@ -550,3 +550,7 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-23 10:00:55 CET
 - User requested context/session save before shutdown.
+
+## Session update 2026-01-23 11:46:41 CET
+- Found GPU devices missing inside containers; added `docker-compose.gpu.yml` with explicit `/dev/nvidia*` mappings and updated `scripts/compose_up.sh` to enable GPU when `/dev/nvidia0` exists.
+- Recreated stack with GPU overlay; `trader` now sees CUDA (`torch.cuda.is_available()` true) and `ollama` reports GPU discovery (CUDA0 GTX 1060 6GB).
