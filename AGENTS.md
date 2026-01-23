@@ -534,3 +534,7 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-22 23:06:33 CET
 - Verified no Mermaid `<br/>` labels remain in repo; README/system_map/flow_trading_agent show single-line risk labels.
 - Error likely from viewing an older commit or cached render; current v3.0 head is `12f7f6e`.
+
+## Session update 2026-01-23 01:02:50 CET
+- Checked `config/config.yaml`: `market.extended_hours.enabled: true` and `market.open_mode: any`, so healthwatch keeps the stack running during US extended hours.
+- Confirmed `healthwatch.market_shutdown.enabled: true` with state tracked in `data/system_state.json`.
