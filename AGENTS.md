@@ -547,3 +547,6 @@ Highest positive impact (testing/live trading):
 - Found `trader`, `learner`, and `ollama` exited due to CDI GPU injection error (`runtime.nvidia.com/gpu=all`).
 - Made NVIDIA env vars optional in `docker-compose.yml`, added `scripts/compose_up.sh` to auto-detect GPU and fallback to CPU, and recreated the stack.
 - Stack is now fully up; `trader`, `learner`, and `ollama` running (healthchecks starting).
+
+## Session update 2026-01-23 10:00:55 CET
+- User requested context/session save before shutdown.
