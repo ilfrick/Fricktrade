@@ -570,3 +570,9 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-23 22:34:35 CET
 - Rebuilt and restarted the stack with GPU auto-detection via `./scripts/compose_up.sh --build`.
 - Updated docs to use `scripts/compose_up.sh` as the default start procedure with GPU/CPU fallback notes.
+
+## Session update 2026-01-23 22:54:59 CET
+- Fixed GPU fallback issues: added missing torch import in RL training, corrected AI filter device handling to use model device and switch to CPU after GPU disable, and added helper to move AI filter models to CPU.
+- Moved GPU disable state file default to `/data/gpu_state.json` for cross-container persistence.
+- Added per-symbol filtered cache staleness test.
+- Ran `pytest tests/test_market_cache.py` (skipped: `prometheus_client` missing; exit code 5).

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-GPU_STATE_FILE = Path(os.environ.get("FRICKTRADE_GPU_STATE_FILE", "/tmp/gpu_state.json"))
+GPU_STATE_FILE = Path(os.environ.get("FRICKTRADE_GPU_STATE_FILE", "/data/gpu_state.json"))
 
 def _load_gpu_state() -> dict:
     if not GPU_STATE_FILE.exists():

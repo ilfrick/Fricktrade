@@ -112,6 +112,9 @@ def score_symbols(
     
     # Retry loop for model loading/training/scoring with GPU fallback
     for attempt in range(2): # Try twice: once with initial device, once with CPU if error
+        if is_gpu_disabled() and current_device != "cpu":
+            logging.warning("GPU disabled; forcing CPU for AI filter run.")
+            current_device = "cpu"
         try:
             model_path = _normalize_model_path(config.model_path, config.model_type)
             if config.model_type == "ppo":
@@ -185,8 +188,12 @@ def score_symbols(
                         )
                     except tf.errors.ResourceExhaustedError as exc:
                         if current_device != "cpu":
-                            logging.warning("CUDA out of memory during Keras scoring for %s: %s. Keras overlay disabled for current run.", symbol, exc)
-                            disable_gpu_until_restart()
+                            logging.warning(
+                                "CUDA out of memory during Keras scoring for %s: %s. Disabling GPU and switching to CPU.",
+                                symbol,
+                                exc,
+                            )
+                            current_device = _downgrade_device(current_device, model)
                             keras_score_fn = None # Disable Keras for the rest of this run
                         else:
                             logging.error("Keras overlay failed on CPU for %s after GPU error: %s", symbol, exc)
@@ -373,6 +380,21 @@ def _resolve_device(device: str) -> str:
         return device
     if torch.cuda.is_available():
         return "cuda"
+    return "cpu"
+
+
+def _downgrade_device(current_device: str, model) -> str:
+    if current_device == "cpu":
+        return "cpu"
+    disable_gpu_until_restart()
+    try:
+        if hasattr(model, "policy"):
+            model.policy.to("cpu")
+            model.device = torch.device("cpu")
+        elif hasattr(model, "to"):
+            model.to("cpu")
+    except Exception as exc:
+        logging.warning("Failed to move AI filter model to CPU after GPU disable: %s", exc)
     return "cpu"
 
 
@@ -953,7 +975,16 @@ def _predict_linear(model, stats: dict, features: np.ndarray, device: str) -> fl
     std = np.array(stats.get("std", []), dtype=float)
     if mean.size and std.size:
         features = (features - mean) / std
-    x = torch.tensor(features, dtype=torch.float32, device=device).view(1, -1)
+    model_device = None
+    try:
+        params = getattr(model, "parameters", None)
+        if params is not None:
+            model_device = next(params()).device
+    except StopIteration:
+        model_device = None
+    if model_device is None:
+        model_device = torch.device(device)
+    x = torch.tensor(features, dtype=torch.float32, device=model_device).view(1, -1)
     with torch.no_grad():
         score = model(x).item()
     if math.isnan(score) or math.isinf(score):
@@ -967,11 +998,10 @@ def _predict_ppo(model: PPO, stats: dict, features: np.ndarray, device: str) -> 
     if mean.size and std.size:
         features = (features - mean) / std
     obs = np.array(features, dtype=np.float32).reshape(1, -1)
-    # Ensure obs_to_tensor uses the correct device
     obs_tensor, _ = model.policy.obs_to_tensor(obs)
-    # Move obs_tensor to the specified device if it's not already there
-    if obs_tensor.device.type != device:
-        obs_tensor = obs_tensor.to(device)
+    policy_device = getattr(model.policy, "device", None)
+    if policy_device is not None and obs_tensor.device != policy_device:
+        obs_tensor = obs_tensor.to(policy_device)
     dist = model.policy.get_distribution(obs_tensor)
     probs = dist.distribution.probs.detach().cpu().numpy()
     if probs.ndim == 2 and probs.shape[1] >= 2:
