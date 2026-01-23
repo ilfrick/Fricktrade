@@ -538,3 +538,7 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-23 01:02:50 CET
 - Checked `config/config.yaml`: `market.extended_hours.enabled: true` and `market.open_mode: any`, so healthwatch keeps the stack running during US extended hours.
 - Confirmed `healthwatch.market_shutdown.enabled: true` with state tracked in `data/system_state.json`.
+
+## Session update 2026-01-23 09:01:19 CET
+- Checked stack status: `trader`, `learner`, and `ollama` are exited (code 128); other core services are up.
+- `docker inspect` shows failure to inject CDI GPU devices (`runtime.nvidia.com/gpu=all`), so containers fail to start without NVIDIA CDI config.
