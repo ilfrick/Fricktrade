@@ -558,3 +558,8 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-23 16:47:09 CET
 - Started cache latency + container failure monitoring via `scripts/monitor_cache_latency.py` (1-minute interval) with logs at `data/monitoring/cache_latency_monitor.log` and `data/monitoring/container_failures.log`.
 - Monitor auto-stops at NYSE close (uses extended_close when enabled).
+
+## Session update 2026-01-23 21:11:58 CET
+- Checked GPU usage: `ollama` logs show CUDA offload (30/33 layers) and `nvidia-smi` shows /usr/bin/ollama using ~5GB.
+- `trader` has CUDA available (`torch.cuda.is_available()` true); trader log reports AI filter device=cuda.
+- `learner` logs show "Using cuda device".
