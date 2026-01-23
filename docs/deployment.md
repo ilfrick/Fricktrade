@@ -5,8 +5,9 @@
 
 ## Docker Compose (Default)
 ```bash
-docker compose up -d --build
+./scripts/compose_up.sh --build
 ```
+This auto-enables GPU if available and falls back to CPU otherwise. Use `docker compose up -d --build` for a CPU-only start.
 Ensure your Docker build environment is non-interactive by setting `DEBIAN_FRONTEND=noninteractive` where necessary in Dockerfiles, and `pip` is up-to-date.
 
 ## GPU vs CPU
@@ -31,7 +32,7 @@ docker compose -p fricktrade-dev up -d --build
 
 ## Restart / Redeploy
 ```bash
-docker compose up -d --build
+./scripts/compose_up.sh --build
 ```
 
 ## Rollbacks

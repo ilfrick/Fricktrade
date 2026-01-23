@@ -4,7 +4,8 @@
 # Operator Guide
 
 ## Start and Stop
-- Full stack: `docker compose up -d --build`
+- Full stack (auto GPU/CPU): `./scripts/compose_up.sh --build`
+- Full stack (CPU only): `docker compose up -d --build`
 - Stop stack: `docker compose down`
 - Minimal services (closed markets): autoheal, healthwatch, prometheus, daily-report, tests-when-closed.
 

@@ -46,7 +46,7 @@ Centralize runtime settings for all subsystems.
 - Edit `config/config.yaml` directly or use the web UI at `/ui`.
 - Most keys support `${ENV_VAR}` interpolation.
 - The web UI rejects unknown keys and shows an error instead of applying changes.
-- After changes, rebuild/restart containers to apply: `docker compose up -d --build`.
+- After changes, rebuild/restart containers to apply: `./scripts/compose_up.sh --build` (auto GPU/CPU), or `docker compose up -d --build` for CPU only.
 
 ## Common Toggles
 - Strategy selection: `strategy.name` or `strategy.names`.

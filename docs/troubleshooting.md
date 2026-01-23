@@ -20,6 +20,7 @@
 
 ## GPU not used
 - Confirm NVIDIA runtime is available.
+- Start the stack with `./scripts/compose_up.sh --build` so GPU devices are mapped into containers.
 - Set `learning.device: auto` and use GPU profile if needed.
 - If a CUDA error occurred, GPU usage is disabled until the next restart.
 

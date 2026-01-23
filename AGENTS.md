@@ -566,3 +566,7 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-23 22:31:16 CET
 - Disabled non-RL strategies in configs: `config/config.yaml` now only lists `rl_policy` and `rl_policy_fees`; removed `pattern_trading` from `config/backtest_case4.yaml`.
+
+## Session update 2026-01-23 22:34:35 CET
+- Rebuilt and restarted the stack with GPU auto-detection via `./scripts/compose_up.sh --build`.
+- Updated docs to use `scripts/compose_up.sh` as the default start procedure with GPU/CPU fallback notes.

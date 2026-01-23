@@ -40,8 +40,9 @@
 
 ## Safe Restart
 ```bash
-docker compose up -d --build
+./scripts/compose_up.sh --build
 ```
+This auto-enables GPU if available and falls back to CPU otherwise. Use `docker compose up -d --build` for a CPU-only start.
 State will reload from checkpoints when available.
 
 ## Storage Hygiene
