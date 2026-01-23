@@ -35,6 +35,7 @@ except Exception:
 
 from app.learning.features import risk_feature_vector, risk_feature_size
 from app.brokers.config_utils import get_alpaca_account_cfg
+from app.data.yfinance_utils import fetch_yfinance_bars
 
 
 @dataclass
@@ -1031,14 +1032,6 @@ def _require_torch() -> None:
         raise ImportError("torch is required for RL orchestrator features; install torch to enable it.")
 
 
-def _load_yfinance():
-    try:
-        import yfinance as yf
-    except Exception as exc:
-        raise ImportError("yfinance is required for orchestrator pretrain; install yfinance.") from exc
-    return yf
-
-
 def _last_price(market_state: dict) -> float | None:
     if not market_state:
         return None
@@ -1064,18 +1057,25 @@ def _download_yf(
     timeout_seconds: int,
     retries: int,
 ):
+    def _fetch():
+        bars, _ = fetch_yfinance_bars(
+            [symbol],
+            lookback_days,
+            interval,
+            batch_size=1,
+            lowercase=False,
+            drop_zero_volume=False,
+            use_ticker_history=True,
+        )
+        return bars.get(symbol)
+
     for attempt in range(retries + 1):
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                _load_yfinance().download,
-                tickers=symbol,
-                period=f"{lookback_days}d",
-                interval=interval,
-                auto_adjust=True,
-                progress=False,
-            )
+            future = executor.submit(_fetch)
             try:
-                return future.result(timeout=timeout_seconds)
+                data = future.result(timeout=timeout_seconds)
+                if data is not None and not data.empty:
+                    return data
             except TimeoutError:
                 if attempt >= retries:
                     return None
@@ -1159,19 +1159,29 @@ def _download_yf_range(
     timeout_seconds: int,
     retries: int,
 ):
+    lookback_days = max((end - start).days, 1)
+
+    def _fetch():
+        bars, _ = fetch_yfinance_bars(
+            [symbol],
+            lookback_days,
+            interval,
+            batch_size=1,
+            lowercase=False,
+            drop_zero_volume=False,
+            start=start,
+            end=end,
+            use_ticker_history=True,
+        )
+        return bars.get(symbol)
+
     for attempt in range(retries + 1):
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                yf.download,
-                tickers=symbol,
-                start=start,
-                end=end,
-                interval=interval,
-                auto_adjust=True,
-                progress=False,
-            )
+            future = executor.submit(_fetch)
             try:
-                return future.result(timeout=timeout_seconds)
+                data = future.result(timeout=timeout_seconds)
+                if data is not None and not data.empty:
+                    return data
             except TimeoutError:
                 if attempt >= retries:
                     return None

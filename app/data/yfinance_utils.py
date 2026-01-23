@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
+from typing import Any
 
 import pandas as pd
 import yfinance as yf
@@ -19,6 +21,11 @@ def fetch_yfinance_bars(
     lowercase: bool = False,
     drop_zero_volume: bool = False,
     delay_seconds: float = 0.0,
+    proxy: str | None = None,
+    start: str | datetime | None = None,
+    end: str | datetime | None = None,
+    retries: int = 0,
+    use_ticker_history: bool = False,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]: # Changed return type hint
     symbols = [s for s in symbols if s]
     if not symbols:
@@ -27,24 +34,52 @@ def fetch_yfinance_bars(
     bars_by_symbol: dict[str, pd.DataFrame] = {}
     failed_symbols: list[str] = [] # Initialize list to track failed symbols
 
+    proxy_args = {"proxy": proxy} if proxy else {}
+
     for idx in range(0, len(symbols), batch_size):
         chunk = symbols[idx : idx + batch_size]
-        try:
-            data = yf.download(
-                tickers=" ".join(chunk),
-                period=f"{lookback_days}d",
-                interval=interval,
-                auto_adjust=True,
-                progress=False,
-            )
-        except Exception as exc:
-            logging.warning("yfinance download failed for %d symbols: %s", len(chunk), exc)
-            failed_symbols.extend(chunk) # Add all symbols in chunk to failed_symbols
-            continue
+        data = None
+        for attempt in range(retries + 1):
+            try:
+                kwargs: dict[str, Any] = {
+                    "tickers": " ".join(chunk),
+                    "interval": interval,
+                    "auto_adjust": True,
+                    "progress": False,
+                }
+                if start:
+                    kwargs["start"] = start
+                    kwargs["end"] = end or None
+                else:
+                    kwargs["period"] = f"{lookback_days}d"
+                kwargs.update(proxy_args)
+                data = yf.download(**kwargs)
+                if data is not None and not data.empty:
+                    break
+            except Exception as exc:
+                logging.warning("yfinance download failed for %d symbols: %s", len(chunk), exc)
+            if attempt < retries:
+                time.sleep((attempt + 1) * 2)
         
         if data is None or data.empty:
             logging.warning("yfinance returned no data for %d symbols in chunk.", len(chunk))
             failed_symbols.extend(chunk) # Add all symbols in chunk to failed_symbols
+            if use_ticker_history and len(chunk) == 1:
+                symbol = chunk[0]
+                fallback = _fetch_ticker_history(
+                    symbol,
+                    lookback_days,
+                    interval,
+                    start=start,
+                    end=end,
+                    proxy_args=proxy_args,
+                    lowercase=lowercase,
+                    drop_zero_volume=drop_zero_volume,
+                )
+                if fallback is not None:
+                    bars_by_symbol[symbol] = fallback
+                    if symbol in failed_symbols:
+                        failed_symbols.remove(symbol)
             continue
         
         if logging.getLogger().isEnabledFor(logging.DEBUG):
@@ -103,12 +138,64 @@ def fetch_yfinance_bars(
                 e
             )
             failed_symbols.extend(chunk)
+
+        if use_ticker_history:
+            missing = [s for s in chunk if s not in bars_by_symbol]
+            for symbol in missing:
+                fallback = _fetch_ticker_history(
+                    symbol,
+                    lookback_days,
+                    interval,
+                    start=start,
+                    end=end,
+                    proxy_args=proxy_args,
+                    lowercase=lowercase,
+                    drop_zero_volume=drop_zero_volume,
+                )
+                if fallback is not None:
+                    bars_by_symbol[symbol] = fallback
+                    if symbol in failed_symbols:
+                        failed_symbols.remove(symbol)
         
         if delay_seconds > 0 and idx + batch_size < len(symbols):
             time.sleep(delay_seconds)
             
     logging.debug("Final failed_symbols after processing all chunks: %s", failed_symbols) # Add this
     return bars_by_symbol, failed_symbols # Return both
+
+
+def _fetch_ticker_history(
+    symbol: str,
+    lookback_days: int,
+    interval: str,
+    *,
+    start: str | datetime | None = None,
+    end: str | datetime | None = None,
+    proxy_args: dict[str, Any] | None = None,
+    lowercase: bool = False,
+    drop_zero_volume: bool = False,
+) -> pd.DataFrame | None:
+    try:
+        ticker = yf.Ticker(symbol)
+        kwargs: dict[str, Any] = {
+            "interval": interval,
+            "auto_adjust": True,
+            "actions": False,
+        }
+        if start:
+            kwargs["start"] = start
+            kwargs["end"] = end or None
+        else:
+            kwargs["period"] = f"{lookback_days}d"
+        if proxy_args:
+            kwargs.update(proxy_args)
+        data = ticker.history(**kwargs)
+    except Exception as exc:
+        logging.warning("yfinance history failed for %s: %s", symbol, exc)
+        return None
+    if data is None or data.empty:
+        return None
+    return _clean_yfinance_frame(data, lowercase=lowercase, drop_zero_volume=drop_zero_volume)
 
 
 def _clean_yfinance_frame(

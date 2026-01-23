@@ -576,3 +576,10 @@ Highest positive impact (testing/live trading):
 - Moved GPU disable state file default to `/data/gpu_state.json` for cross-container persistence.
 - Added per-symbol filtered cache staleness test.
 - Ran `pytest tests/test_market_cache.py` (skipped: `prometheus_client` missing; exit code 5).
+
+## Session update 2026-01-23 22:57:04 CET
+- Rebuilt and restarted the stack with GPU auto-detection (`./scripts/compose_up.sh --build`).
+- Ran `pytest tests/test_market_cache.py` inside `trader` container: 3 passed.
+
+## Session update 2026-01-23 23:25:29 CET
+- Routed orchestrator and downloader yfinance calls through `fetch_yfinance_bars`, added helper support for start/end/proxy and optional ticker.history fallback, and fixed yfinance helper call sites to unpack the returned tuple.

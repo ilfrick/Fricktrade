@@ -80,7 +80,7 @@ def _market_state_from_yf(
         if cache_only and (data is None or data.empty):
             return _empty_market_state()
     if data is None or data.empty:
-        bars = fetch_yfinance_bars([symbol], lookback, interval, batch_size=1, lowercase=False)
+        bars, _ = fetch_yfinance_bars([symbol], lookback, interval, batch_size=1, lowercase=False)
         data = bars.get(symbol)
     if data is None or data.empty:
         return _empty_market_state()
@@ -483,7 +483,7 @@ class YFinanceMarketDataProvider:
             if self._cache_only:
                 return cache
         if missing:
-            bars = fetch_yfinance_bars(
+            bars, _ = fetch_yfinance_bars(
                 missing,
                 self._lookback,
                 self._interval,

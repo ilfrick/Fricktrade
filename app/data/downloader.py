@@ -8,57 +8,39 @@ from datetime import datetime
 
 import pandas as pd
 
-
-def _load_yfinance():
-    try:
-        import yfinance as yf
-    except Exception as exc:
-        raise ImportError("yfinance is required for yfinance downloads") from exc
-    return yf
+from app.data.yfinance_utils import fetch_yfinance_bars
 
 
 def _download_with_retries(
     symbol: str,
-    period: str,
+    lookback_days: int,
     interval: str,
     proxy: str | None,
+    start: str | None = None,
+    end: str | None = None,
     retries: int = 3,
 ):
     last_err = None
-    yf = _load_yfinance()
-    proxy_args = {"proxy": proxy} if proxy else {}
     for attempt in range(1, retries + 1):
         try:
-            data = yf.download(
-                tickers=symbol,
-                period=period,
-                interval=interval,
-                auto_adjust=True,
-                progress=False,
-                threads=False,
-                **proxy_args,
+            bars, _ = fetch_yfinance_bars(
+                [symbol],
+                lookback_days,
+                interval,
+                batch_size=1,
+                lowercase=False,
+                drop_zero_volume=False,
+                proxy=proxy,
+                start=start,
+                end=end,
+                use_ticker_history=True,
             )
+            data = bars.get(symbol)
             if data is not None and not data.empty:
                 return data
         except Exception as exc:
             last_err = exc
             logging.warning("yfinance download failed for %s (attempt %d/%d): %s", symbol, attempt, retries, exc)
-        time.sleep(attempt * 2)
-    for attempt in range(1, retries + 1):
-        try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(
-                period=period,
-                interval=interval,
-                auto_adjust=True,
-                actions=False,
-                **proxy_args,
-            )
-            if data is not None and not data.empty:
-                return data
-        except Exception as exc:
-            last_err = exc
-            logging.warning("yfinance history failed for %s (attempt %d/%d): %s", symbol, attempt, retries, exc)
         time.sleep(attempt * 2)
     if last_err:
         raise last_err
@@ -86,40 +68,23 @@ def download_yfinance(
     start: str = "",
     end: str = "",
 ) -> list[Path]:
-    yf = _load_yfinance()
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     files = []
     clamped_days = _clamp_lookback(interval, lookback_days)
-    period = f"{clamped_days}d"
-    proxy_args = {"proxy": proxy} if proxy else {}
+    start = start or None
+    end = end or None
     for symbol in symbols:
-        if start:
-            data = yf.download(
-                tickers=symbol,
-                start=start,
-                end=end or None,
-                interval=interval,
-                auto_adjust=True,
-                progress=False,
-                threads=False,
-                **proxy_args,
-            )
-        else:
-            data = _download_with_retries(symbol, period, interval, proxy)
+        data = _download_with_retries(
+            symbol,
+            clamped_days,
+            interval,
+            proxy,
+            start=start,
+            end=end,
+        )
         if data is None or data.empty:
             continue
-        if isinstance(data.columns, pd.MultiIndex):
-            data = data.copy()
-            level0 = data.columns.get_level_values(0)
-            level1 = data.columns.get_level_values(-1)
-            required = {"Open", "High", "Low", "Close", "Volume"}
-            if required.issubset(set(level0)):
-                data.columns = level0
-            elif required.issubset(set(level1)):
-                data.columns = level1
-            else:
-                data.columns = level0
         ordered = ["Open", "High", "Low", "Close", "Volume"]
         if all(col in data.columns for col in ordered):
             data = data[ordered]

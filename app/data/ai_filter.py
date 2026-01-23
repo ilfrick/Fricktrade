@@ -774,7 +774,7 @@ def _fetch_bars_yfinance(
         cached = {}
         missing = symbols
     if missing:
-        fetched = fetch_yfinance_bars(
+        fetched, _ = fetch_yfinance_bars(
             missing,
             cfg.lookback_days,
             cfg.interval,
