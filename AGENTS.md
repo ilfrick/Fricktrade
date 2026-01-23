@@ -542,3 +542,8 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-23 09:01:19 CET
 - Checked stack status: `trader`, `learner`, and `ollama` are exited (code 128); other core services are up.
 - `docker inspect` shows failure to inject CDI GPU devices (`runtime.nvidia.com/gpu=all`), so containers fail to start without NVIDIA CDI config.
+
+## Session update 2026-01-23 09:29:29 CET
+- Found `trader`, `learner`, and `ollama` exited due to CDI GPU injection error (`runtime.nvidia.com/gpu=all`).
+- Made NVIDIA env vars optional in `docker-compose.yml`, added `scripts/compose_up.sh` to auto-detect GPU and fallback to CPU, and recreated the stack.
+- Stack is now fully up; `trader`, `learner`, and `ollama` running (healthchecks starting).
