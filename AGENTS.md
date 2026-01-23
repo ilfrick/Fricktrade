@@ -554,3 +554,7 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-23 11:46:41 CET
 - Found GPU devices missing inside containers; added `docker-compose.gpu.yml` with explicit `/dev/nvidia*` mappings and updated `scripts/compose_up.sh` to enable GPU when `/dev/nvidia0` exists.
 - Recreated stack with GPU overlay; `trader` now sees CUDA (`torch.cuda.is_available()` true) and `ollama` reports GPU discovery (CUDA0 GTX 1060 6GB).
+
+## Session update 2026-01-23 16:47:09 CET
+- Started cache latency + container failure monitoring via `scripts/monitor_cache_latency.py` (1-minute interval) with logs at `data/monitoring/cache_latency_monitor.log` and `data/monitoring/container_failures.log`.
+- Monitor auto-stops at NYSE close (uses extended_close when enabled).
