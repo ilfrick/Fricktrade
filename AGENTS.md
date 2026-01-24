@@ -601,3 +601,6 @@ Highest positive impact (testing/live trading):
 - docker compose ps shows all services up; api/trader/healthwatch still in health: starting right after restart.
 - GPU check: torch in trader reports CUDA available (GTX 1060 6GB); ollama logs show CUDA GPU detected.
 - Logs in last 10m show no errors beyond compose version warning.
+## Session update 2026-01-24 04:36:19 CET
+- Post-restart health check: only keep_services containers running (autoheal, daily-report, healthwatch, prometheus, tests-when-closed).
+- data/system_state.json reports state=stopped with next_open 2026-01-26T09:00:00+01:00 (healthwatch market shutdown).
