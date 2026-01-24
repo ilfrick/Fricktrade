@@ -371,6 +371,11 @@ backtest:
   use_gpu: true
   mode: agent
   symbols_source: data_dir
+  cache:
+    enabled: true
+    format: npz
+    dir: /data/backtest_cache
+    compress: false
   dynamic_symbols_enabled: true
   news_enabled: false
   news_source: none

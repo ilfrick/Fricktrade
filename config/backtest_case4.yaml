@@ -279,6 +279,11 @@ backtest:
   use_gpu: true
   mode: agent
   symbols_source: data_dir
+  cache:
+    enabled: true
+    format: npz
+    dir: /data/backtest_cache
+    compress: false
 data:
   provider: yfinance
   symbols: []

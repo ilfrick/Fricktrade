@@ -21,6 +21,10 @@ Run historical simulations with the real trading loop or legacy SMA engine.
 - `backtest.commission_pct`
 - `backtest.use_gpu`
 - `backtest.symbols_source` (data_dir, data, dynamic)
+- `backtest.cache.enabled` (cache parsed bars as `.npz` to speed repeated runs)
+- `backtest.cache.format` (npz)
+- `backtest.cache.dir` (default `/data/backtest_cache`)
+- `backtest.cache.compress` (use compressed npz, slower but smaller)
 - `backtest.dynamic_symbols_enabled`
 - If enabled and `data.symbols` is empty, the backtest falls back to symbols in `backtest.data_dir`.
 - `backtest.news_enabled`

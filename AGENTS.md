@@ -589,3 +589,10 @@ Highest positive impact (testing/live trading):
 - In-memory preload profile (no CSV): total ~0.126s; top costs run_once (~0.072s), decision trace (~0.034s), market cache/Redis (~0.029s).
 - Polars CSV profile using polars[rtcompat]+pyarrow: total ~0.178s; _load_csv_polars ~0.064s, run_once ~0.063s, decision trace ~0.030s, Redis ~0.027s.
 - Saved profiles: data/profiles/profile_backtest_noorch.cprof, data/profiles/profile_backtest_preload2.cprof, data/profiles/profile_backtest_polars.cprof.
+
+## Session update 2026-01-24 04:28:19 CET
+- Added backtest CSV binary cache support (npz) with mtime invalidation in ; cache settings now configurable via .
+- Enabled backtest cache defaults in  and backtest case configs; documented cache settings in .
+## Session update 2026-01-24 04:28:27 CET
+- Added backtest CSV binary cache support (npz) with mtime invalidation in app/backtest/agent_engine.py; cache settings now configurable via backtest.cache.*.
+- Enabled backtest cache defaults in config/config.yaml and backtest case configs; documented cache settings in docs/backtesting.md.

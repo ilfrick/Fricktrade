@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 import json
+import logging
 
+import numpy as np
 import pandas as pd
 
 from app.agents.trader import TradingAgent
@@ -204,12 +206,38 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
     if backtest_cfg.get("download_missing_symbols", False):
         _download_missing_bars(cfg, symbols, interval, data_dir)
 
+    cache_cfg = backtest_cfg.get("cache", {})
+    if not isinstance(cache_cfg, dict):
+        cache_cfg = {}
+    cache_enabled = bool(cache_cfg.get("enabled", True))
+    cache_format = str(cache_cfg.get("format", "npz")).lower()
+    cache_compress = bool(cache_cfg.get("compress", False))
+    cache_dir = None
+    if cache_enabled:
+        if cache_format != "npz":
+            logging.warning("Unsupported backtest cache format %s; caching disabled", cache_format)
+            cache_enabled = False
+        else:
+            cache_dir_value = cache_cfg.get("dir") or (data_dir / "backtest_cache")
+            cache_dir = Path(cache_dir_value)
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as exc:
+                logging.warning("Failed to create backtest cache dir %s: %s", cache_dir, exc)
+                cache_enabled = False
+
     frames = {}
     for symbol in symbols:
         path = data_dir / f"{symbol.replace('.', '_')}_{interval}.csv"
         if not path.exists():
             continue
-        frames[symbol] = _load_csv(path)
+        frames[symbol] = _load_csv(
+            path,
+            cache_dir=cache_dir,
+            cache_enabled=cache_enabled,
+            cache_format=cache_format,
+            cache_compress=cache_compress,
+        )
     if not frames:
         raise FileNotFoundError(f"No CSV data found for symbols in {data_dir}")
 
@@ -333,13 +361,64 @@ def _apply_slippage(price: float, side: str, slippage_bps: float, spread_bps: fl
     return price * (1.0 + bump)
 
 
-def _load_csv(path: Path) -> pd.DataFrame:
+def _load_csv_raw(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, parse_dates=[0])
     df.rename(columns={df.columns[0]: "Datetime"}, inplace=True)
     df["Datetime"] = pd.to_datetime(df["Datetime"], utc=True, errors="coerce")
     df = df.dropna(subset=["Datetime"])
     df["Datetime"] = df["Datetime"].dt.tz_convert(None)
     df = df.set_index("Datetime").sort_index()
+    return df
+
+
+def _cache_path_for_csv(path: Path, cache_dir: Path) -> Path:
+    return cache_dir / f"{path.stem}.npz"
+
+
+def _load_cached_npz(path: Path) -> pd.DataFrame:
+    payload = np.load(path, allow_pickle=False)
+    index_ns = payload["index_ns"]
+    values = payload["values"]
+    columns = payload["columns"].tolist()
+    df = pd.DataFrame(values, columns=columns)
+    df.index = pd.to_datetime(index_ns)
+    df.index.name = "Datetime"
+    return df
+
+
+def _write_cached_npz(path: Path, df: pd.DataFrame, compress: bool) -> None:
+    index_ns = df.index.view("int64")
+    values = df.to_numpy()
+    columns = np.asarray(df.columns, dtype=str)
+    if compress:
+        np.savez_compressed(path, index_ns=index_ns, values=values, columns=columns)
+    else:
+        np.savez(path, index_ns=index_ns, values=values, columns=columns)
+
+
+def _load_csv(
+    path: Path,
+    *,
+    cache_dir: Path | None = None,
+    cache_enabled: bool = False,
+    cache_format: str = "npz",
+    cache_compress: bool = False,
+) -> pd.DataFrame:
+    if not cache_enabled or cache_dir is None:
+        return _load_csv_raw(path)
+    if cache_format != "npz":
+        return _load_csv_raw(path)
+    cache_path = _cache_path_for_csv(path, cache_dir)
+    try:
+        if cache_path.exists() and cache_path.stat().st_mtime >= path.stat().st_mtime:
+            return _load_cached_npz(cache_path)
+    except Exception as exc:
+        logging.warning("Failed to load backtest cache %s: %s", cache_path, exc)
+    df = _load_csv_raw(path)
+    try:
+        _write_cached_npz(cache_path, df, cache_compress)
+    except Exception as exc:
+        logging.warning("Failed to write backtest cache %s: %s", cache_path, exc)
     return df
 
 
