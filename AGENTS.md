@@ -583,3 +583,9 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-23 23:25:29 CET
 - Routed orchestrator and downloader yfinance calls through `fetch_yfinance_bars`, added helper support for start/end/proxy and optional ticker.history fallback, and fixed yfinance helper call sites to unpack the returned tuple.
+
+## Session update 2026-01-24 04:19:40 CET
+- Re-profiled backtest with orchestrator disabled: pandas CSV parsing dominated; total ~0.50s for AAPL/5m (2025-12-01 to 2025-12-02).
+- In-memory preload profile (no CSV): total ~0.126s; top costs run_once (~0.072s), decision trace (~0.034s), market cache/Redis (~0.029s).
+- Polars CSV profile using polars[rtcompat]+pyarrow: total ~0.178s; _load_csv_polars ~0.064s, run_once ~0.063s, decision trace ~0.030s, Redis ~0.027s.
+- Saved profiles: data/profiles/profile_backtest_noorch.cprof, data/profiles/profile_backtest_preload2.cprof, data/profiles/profile_backtest_polars.cprof.
