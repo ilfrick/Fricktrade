@@ -21,11 +21,10 @@ class PairsParams:
 
 
 class StatArbPairsStrategy(Strategy):
-    _price_cache: dict[str, list[float]] = {}
-    _pairs: list[tuple[str, str]] = []
-    _last_refresh: datetime | None = None
-
     def __init__(self, params: dict):
+        self._price_cache: dict[str, list[float]] = {}
+        self._pairs: list[tuple[str, str]] = []
+        self._last_refresh: datetime | None = None
         cfg = params.get("stat_arb_pairs", {}) if isinstance(params, dict) else {}
         self.params = PairsParams(
             lookback=int(cfg.get("lookback", 50)),
@@ -52,10 +51,13 @@ class StatArbPairsStrategy(Strategy):
             return {"action": "hold"}
         a = np.array(series_a[-self.params.lookback :], dtype=float)
         b = np.array(series_b[-self.params.lookback :], dtype=float)
-        if a.std() == 0 or b.std() == 0:
+        if a.std() < 1e-10 or b.std() < 1e-10:
             return {"action": "hold"}
         spread = a - b
-        z = (spread[-1] - spread.mean()) / (spread.std() or 1.0)
+        spread_std = spread.std()
+        if spread_std < 1e-10:
+            return {"action": "hold"}
+        z = (spread[-1] - spread.mean()) / spread_std
         if z >= self.params.z_entry:
             return {"action": "sell", "pair": other, "z_score": float(z)}
         if z <= -self.params.z_entry:
@@ -85,7 +87,7 @@ class StatArbPairsStrategy(Strategy):
                     continue
                 a_series = np.array(a[-self.params.lookback :], dtype=float)
                 b_series = np.array(b[-self.params.lookback :], dtype=float)
-                if a_series.std() == 0 or b_series.std() == 0:
+                if a_series.std() < 1e-10 or b_series.std() < 1e-10:
                     continue
                 corr = float(np.corrcoef(a_series, b_series)[0, 1])
                 pairs.append((symbols[i], symbols[j], corr))

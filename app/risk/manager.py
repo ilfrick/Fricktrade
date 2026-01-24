@@ -27,7 +27,7 @@ class RiskManager:
         self.daily_loss = min(0.0, self.daily_loss + pnl_pct)
 
     def update_daily_loss(self, pnl_pct: float) -> None:
-        self.daily_loss = min(0.0, float(pnl_pct))
+        self.daily_loss = min(0.0, self.daily_loss + float(pnl_pct))
 
     def should_circuit_break(self, drawdown_pct: float) -> bool:
         if not self._enabled():

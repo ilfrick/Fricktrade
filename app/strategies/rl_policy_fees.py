@@ -88,6 +88,6 @@ class FeeAwareRLPolicyStrategy(RLPolicyStrategy):
             return 0.0
         prev = float(prices[-2])
         curr = float(prices[-1])
-        if prev == 0.0:
+        if abs(prev) < 1e-10:
             return 0.0
         return (curr - prev) / prev * 100.0

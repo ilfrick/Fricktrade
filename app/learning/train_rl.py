@@ -52,8 +52,12 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     train_sets = []
     for df in datasets:
         split_idx = int(len(df) * (1.0 - eval_split))
-        train_df = df.iloc[:split_idx] if split_idx > 0 else df
-        eval_df = df.iloc[split_idx:] if split_idx > 0 else df
+        if split_idx <= 0 or split_idx >= len(df):
+            train_df = df
+            eval_df = df.iloc[:0]  # Empty DataFrame preserving columns
+        else:
+            train_df = df.iloc[:split_idx]
+            eval_df = df.iloc[split_idx:]
         envs.append(
             lambda data=train_df: TradingEnv(
                 data=data,

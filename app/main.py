@@ -573,7 +573,7 @@ def _session_gain_pct(data, prices: list[float], mode: str) -> float:
         if mode == "session":
             first_price = prices[0]
             return (prices[-1] - first_price) / first_price * 100.0 if first_price else 0.0
-        if len(data.index) < 2:
+        if len(data.index) <= 1:
             return 0.0
         prev_close = data["Close"].iloc[-2]
         if prev_close:

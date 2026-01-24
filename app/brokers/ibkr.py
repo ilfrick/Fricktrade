@@ -19,7 +19,10 @@ class IBKRBroker(Broker):
         symbol_currencies: dict[str, str] | None = None,
     ):
         self.ib = IB()
-        self.ib.connect(host, port, clientId=client_id)
+        try:
+            self.ib.connect(host, port, clientId=client_id)
+        except Exception as exc:
+            raise ConnectionError(f"Failed to connect to IBKR at {host}:{port}: {exc}") from exc
         self._name = name
         self._account_id = str(account_id) if account_id else ""
         self._currency = str(currency or "USD").upper()

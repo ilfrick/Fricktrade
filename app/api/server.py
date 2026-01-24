@@ -561,7 +561,21 @@ def _mask_secrets(cfg: dict) -> None:
     try:
         cfg["brokers"]["alpaca"]["api_key"] = "***"
         cfg["brokers"]["alpaca"]["api_secret"] = "***"
-    except Exception:
+    except (KeyError, TypeError):
+        pass
+    try:
+        ibkr_cfg = cfg.get("brokers", {}).get("ibkr", {})
+        if ibkr_cfg:
+            for key in ("password", "api_key", "api_secret"):
+                if key in ibkr_cfg:
+                    ibkr_cfg[key] = "***"
+            ibkr_accounts = ibkr_cfg.get("accounts", []) or []
+            for acct in ibkr_accounts:
+                if isinstance(acct, dict):
+                    for key in ("password", "api_key", "api_secret"):
+                        if key in acct:
+                            acct[key] = "***"
+    except (KeyError, TypeError):
         pass
     try:
         accounts = cfg.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []

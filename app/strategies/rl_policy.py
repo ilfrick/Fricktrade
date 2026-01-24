@@ -85,7 +85,7 @@ class RLPolicyStrategy(Strategy):
             self.volumes = deque((float(v) for v in volumes), maxlen=self.volumes.maxlen)
         if self.prices and not self.volumes:
             self.volumes = deque([1.0] * len(self.prices), maxlen=self.volumes.maxlen)
-        if len(self.volumes) < len(self.prices):
+        if self.volumes and len(self.volumes) < len(self.prices):
             self.volumes.extend([self.volumes[-1]] * (len(self.prices) - len(self.volumes)))
 
     def generate_signal(self, market_state: dict) -> dict:

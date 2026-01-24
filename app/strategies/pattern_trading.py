@@ -86,10 +86,13 @@ class PatternTradingStrategy(Strategy):
         volumes: list[float],
         last_price: float,
     ) -> bool:
-        if not highs or not lows:
+        if not highs or not lows or len(highs) < 2:
             return False
         lookback = self._lookback_bars()
-        recent_high = max(highs[-lookback:-1] or highs[:-1] or highs)
+        slice_data = highs[-lookback:-1] if len(highs) > lookback else highs[:-1]
+        if not slice_data:
+            return False
+        recent_high = max(slice_data)
         if last_price <= recent_high:
             return False
         if not self._trend_ok(prices, highs, lows):

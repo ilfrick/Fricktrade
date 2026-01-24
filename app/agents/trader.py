@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import time
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
 from pathlib import Path
@@ -166,6 +167,7 @@ class TradingAgent:
         self._news_cache_at: datetime | None = None
         self._news_executor = ThreadPoolExecutor(max_workers=1)
         self._news_future = None
+        self._news_future_lock = threading.Lock()
         self._news_inflight_at: datetime | None = None
         self._strategy_names = self._resolve_strategy_names()
         self._combine_mode = cfg["strategy"].get("combine", "priority")
@@ -192,6 +194,7 @@ class TradingAgent:
         self._ai_filter_last_signals: dict[str, dict[str, float]] = {}
         self._ai_filter_executor = ThreadPoolExecutor(max_workers=1)
         self._ai_filter_future = None
+        self._ai_filter_future_lock = threading.Lock()
         self._ai_filter_inflight_at: datetime | None = None
         self._ai_filter_inflight_log_at: datetime | None = None
         self._market_cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
@@ -1264,7 +1267,7 @@ class TradingAgent:
             return False
         account = self._account_for_broker(broker)
         for key in ("account_blocked", "trading_blocked", "trade_suspended_by_user"):
-            if str(account.get(key, "")).lower() in {"true", "1", "yes"} or account.get(key) is True:
+            if str(account.get(key, "")).lower() in {"true", "1", "yes"} or account.get(key) == True:
                 return True
         return False
 
@@ -1286,7 +1289,7 @@ class TradingAgent:
             return True
         account = self._account_for_broker(portfolio.get("broker"))
         shorting_enabled = account.get("shorting_enabled")
-        if shorting_enabled is not True:
+        if shorting_enabled != True:
             return False
         if not self._limits_enabled():
             return True
@@ -2339,29 +2342,30 @@ class TradingAgent:
         ttl_minutes = int(news_cfg.get("cache_minutes", 15))
         if self._news_cache_at and (now - self._news_cache_at).total_seconds() < ttl_minutes * 60:
             return
-        if self._news_future is not None:
-            if self._news_future.done():
-                try:
-                    result = self._news_future.result()
-                except Exception as exc:
-                    logging.warning("News catalyst refresh failed: %s", exc)
-                else:
-                    if isinstance(result, dict):
-                        self._news_cache = result
-                        self._news_cache_at = now
-                        logging.info("News catalyst refresh completed; symbols=%d", len(result))
-                self._news_future = None
-                self._news_inflight_at = None
-            return
-        symbols_snapshot = list(symbols)
-        self._news_inflight_at = now
-        logging.info("News catalyst refresh started; symbols=%d", len(symbols_snapshot))
-        self._news_future = self._news_executor.submit(
-            fetch_catalyst_symbols_for_config,
-            symbols_snapshot,
-            dict(news_cfg),
-            dict(self.cfg.get("brokers", {})),
-        )
+        with self._news_future_lock:
+            if self._news_future is not None:
+                if self._news_future.done():
+                    try:
+                        result = self._news_future.result()
+                    except Exception as exc:
+                        logging.warning("News catalyst refresh failed: %s", exc)
+                    else:
+                        if isinstance(result, dict):
+                            self._news_cache = result
+                            self._news_cache_at = now
+                            logging.info("News catalyst refresh completed; symbols=%d", len(result))
+                    self._news_future = None
+                    self._news_inflight_at = None
+                return
+            symbols_snapshot = list(symbols)
+            self._news_inflight_at = now
+            logging.info("News catalyst refresh started; symbols=%d", len(symbols_snapshot))
+            self._news_future = self._news_executor.submit(
+                fetch_catalyst_symbols_for_config,
+                symbols_snapshot,
+                dict(news_cfg),
+                dict(self.cfg.get("brokers", {})),
+            )
 
     def _log_news_cache(self) -> None:
         news_cfg = self.cfg.get("news", {})
@@ -2422,45 +2426,46 @@ class TradingAgent:
         if ai_cfg.get("enabled", False) and score_symbols is not None:
             ai_cfg_payload = dict(ai_cfg)
             ai_cfg_payload["market_cache"] = self.cfg.get("market_cache", {})
-            if self._ai_filter_future is None:
-                logging.info("AI filter run starting; universe=%d", len(universe))
-                self._ai_filter_future = self._ai_filter_executor.submit(
-                    score_symbols,
-                    universe,
-                    api_key,
-                    api_secret,
-                    ai_cfg_payload,
-                    self.cfg.get("brokers", {}),
-                )
-                self._ai_filter_inflight_at = now
-                return
-            if not self._ai_filter_future.done():
-                if self._ai_filter_inflight_at is not None:
-                    elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
-                    last_log = self._ai_filter_inflight_log_at
-                    if last_log is None or (now - last_log).total_seconds() >= 60:
-                        logging.info("AI filter still running; elapsed_sec=%d", elapsed)
-                        self._ai_filter_inflight_log_at = now
-                return
-            try:
-                result = self._ai_filter_future.result()
-                if isinstance(result, tuple) and len(result) == 3:
-                    ordered, scores, signal_map = result
-                else:
-                    ordered, scores = result
+            with self._ai_filter_future_lock:
+                if self._ai_filter_future is None:
+                    logging.info("AI filter run starting; universe=%d", len(universe))
+                    self._ai_filter_future = self._ai_filter_executor.submit(
+                        score_symbols,
+                        universe,
+                        api_key,
+                        api_secret,
+                        ai_cfg_payload,
+                        self.cfg.get("brokers", {}),
+                    )
+                    self._ai_filter_inflight_at = now
+                    return
+                if not self._ai_filter_future.done():
+                    if self._ai_filter_inflight_at is not None:
+                        elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
+                        last_log = self._ai_filter_inflight_log_at
+                        if last_log is None or (now - last_log).total_seconds() >= 60:
+                            logging.info("AI filter still running; elapsed_sec=%d", elapsed)
+                            self._ai_filter_inflight_log_at = now
+                    return
+                try:
+                    result = self._ai_filter_future.result()
+                    if isinstance(result, tuple) and len(result) == 3:
+                        ordered, scores, signal_map = result
+                    else:
+                        ordered, scores = result
+                        signal_map = {}
+                except Exception as exc:
+                    elapsed = None
+                    if self._ai_filter_inflight_at is not None:
+                        elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
+                    logging.warning("AI filter run failed; elapsed_sec=%s err=%s", elapsed, exc)
+                    ordered = []
+                    scores = {}
                     signal_map = {}
-            except Exception as exc:
-                elapsed = None
-                if self._ai_filter_inflight_at is not None:
-                    elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
-                logging.warning("AI filter run failed; elapsed_sec=%s err=%s", elapsed, exc)
-                ordered = []
-                scores = {}
-                signal_map = {}
-            inflight_at = self._ai_filter_inflight_at
-            self._ai_filter_future = None
-            self._ai_filter_inflight_at = None
-            self._ai_filter_inflight_log_at = None
+                inflight_at = self._ai_filter_inflight_at
+                self._ai_filter_future = None
+                self._ai_filter_inflight_at = None
+                self._ai_filter_inflight_log_at = None
             elapsed = None
             if inflight_at is not None:
                 elapsed = int((now - inflight_at).total_seconds())
@@ -2890,7 +2895,7 @@ class TradingAgent:
         account = self._account_for_broker(portfolio.get("broker"))
         def _flag_value(key: str) -> bool:
             val = account.get(key)
-            return str(val).lower() in {"true", "1", "yes"} or val is True
+            return str(val).lower() in {"true", "1", "yes"} or val == True
         market_state["account_flags"] = {
             "account_blocked": _flag_value("account_blocked"),
             "trading_blocked": _flag_value("trading_blocked"),
