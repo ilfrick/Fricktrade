@@ -596,3 +596,8 @@ Highest positive impact (testing/live trading):
 ## Session update 2026-01-24 04:28:27 CET
 - Added backtest CSV binary cache support (npz) with mtime invalidation in app/backtest/agent_engine.py; cache settings now configurable via backtest.cache.*.
 - Enabled backtest cache defaults in config/config.yaml and backtest case configs; documented cache settings in docs/backtesting.md.
+## Session update 2026-01-24 04:32:01 CET
+- Rebuilt and restarted stack via scripts/compose_up.sh --build (GPU detected).
+- docker compose ps shows all services up; api/trader/healthwatch still in health: starting right after restart.
+- GPU check: torch in trader reports CUDA available (GTX 1060 6GB); ollama logs show CUDA GPU detected.
+- Logs in last 10m show no errors beyond compose version warning.
