@@ -37,6 +37,60 @@ from app.learning.features import risk_feature_vector, risk_feature_size
 from app.brokers.config_utils import get_alpaca_account_cfg
 from app.data.yfinance_utils import fetch_yfinance_bars
 
+try:
+    import numpy as np
+except Exception:
+    np = None
+
+
+class AccountActivityTracker:
+    """Tracks trading activity across all symbols on an account for global idle penalty calculation."""
+
+    def __init__(
+        self,
+        max_idle_minutes: float = 30.0,
+        penalty_scale: float = 0.01,
+        penalty_type: str = "exponential",
+    ):
+        self.last_trade_time: dict[str, datetime] = {}  # per account/broker
+        self.max_idle_time = timedelta(minutes=max_idle_minutes)
+        self.penalty_scale = penalty_scale
+        self.penalty_type = penalty_type
+
+    def calculate_idle_penalty(self, account_id: str, current_time: datetime | None = None) -> float:
+        """Calculate penalty based on time since last trade across all symbols."""
+        if current_time is None:
+            current_time = datetime.now(timezone.utc)
+
+        if account_id not in self.last_trade_time:
+            return 0.0  # No penalty if first trade
+
+        idle_duration = current_time - self.last_trade_time[account_id]
+
+        if idle_duration <= self.max_idle_time:
+            return 0.0  # No penalty within acceptable range
+
+        # Calculate penalty based on excess idle time
+        excess_minutes = (idle_duration - self.max_idle_time).total_seconds() / 60.0
+
+        if self.penalty_type == "linear":
+            penalty = self.penalty_scale * excess_minutes / 60.0
+        elif self.penalty_type == "exponential":
+            # Exponential penalty for excessive idleness
+            penalty = self.penalty_scale * (1.0 - (0.5 ** (excess_minutes / 60.0)))
+        elif self.penalty_type == "step":
+            penalty = self.penalty_scale if excess_minutes > 0 else 0.0
+        else:
+            penalty = 0.0
+
+        return penalty
+
+    def register_trade(self, account_id: str, timestamp: datetime | None = None):
+        """Update last trade time for account."""
+        if timestamp is None:
+            timestamp = datetime.now(timezone.utc)
+        self.last_trade_time[account_id] = timestamp
+
 
 @dataclass
 class OrchestratorConfig:
@@ -87,6 +141,10 @@ class RLOrchestratorConfig:
     save_interval_seconds: int = 300
     score_ema_alpha: float = 0.1
     time_penalty_per_bar: float = 0.0
+    global_time_penalty_enabled: bool = False
+    global_time_penalty_max_idle_minutes: float = 30.0
+    global_time_penalty_scale: float = 0.01
+    global_time_penalty_type: str = "exponential"
     pretrain_enabled: bool = True
     pretrain_in_trader: bool = False
     pretrain_provider: str = "yfinance"
@@ -327,6 +385,10 @@ class RLStrategyOrchestrator:
             save_interval_seconds=int(rl_cfg.get("save_interval_seconds", 300)),
             score_ema_alpha=float(rl_cfg.get("score_ema_alpha", 0.1)),
             time_penalty_per_bar=float(rl_cfg.get("time_penalty_per_bar", 0.0)),
+            global_time_penalty_enabled=bool(rl_cfg.get("global_time_penalty", {}).get("enabled", False)),
+            global_time_penalty_max_idle_minutes=float(rl_cfg.get("global_time_penalty", {}).get("max_idle_minutes", 30.0)),
+            global_time_penalty_scale=float(rl_cfg.get("global_time_penalty", {}).get("penalty_scale", 0.01)),
+            global_time_penalty_type=str(rl_cfg.get("global_time_penalty", {}).get("penalty_type", "exponential")),
             pretrain_enabled=bool(rl_cfg.get("pretrain", {}).get("enabled", True)),
             pretrain_in_trader=bool(rl_cfg.get("pretrain", {}).get("in_trader", False)),
             pretrain_provider=str(rl_cfg.get("pretrain", {}).get("provider", "yfinance")),
@@ -365,6 +427,14 @@ class RLStrategyOrchestrator:
         self._reward_ema: float | None = None
         self._last_selection: dict[tuple[str, str], str] = {}
         self._order_feedback: dict[tuple[str, str], dict[str, float]] = {}
+        # Initialize global account activity tracker
+        self._activity_tracker: AccountActivityTracker | None = None
+        if self.cfg.global_time_penalty_enabled:
+            self._activity_tracker = AccountActivityTracker(
+                max_idle_minutes=self.cfg.global_time_penalty_max_idle_minutes,
+                penalty_scale=self.cfg.global_time_penalty_scale,
+                penalty_type=self.cfg.global_time_penalty_type,
+            )
 
     def is_enabled(self) -> bool:
         return self.cfg.enabled
@@ -495,6 +565,15 @@ class RLStrategyOrchestrator:
             reward = -move_pct - self.cfg.time_penalty_per_bar
         else:
             reward = -self.cfg.time_penalty_per_bar
+
+        # Apply global account-level idle penalty if enabled
+        if self._activity_tracker is not None:
+            broker = str(broker_name) if broker_name else "default"
+            idle_penalty = self._activity_tracker.calculate_idle_penalty(broker)
+            reward -= idle_penalty
+            # Register this as a trade to reset the idle timer
+            self._activity_tracker.register_trade(broker)
+
         reward *= self.cfg.reward_scale
         action_idx = state.get("action_idx")
         if action_idx is None:

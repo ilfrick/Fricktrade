@@ -26,6 +26,17 @@ market state and influence actions via the signal bias guard.
 - Modes: `direct` (single strategy), `select` (top-k), or `weight` (weighted blend).
 - Combine mode: `priority` or `vote` (see `strategy.combine`).
 
+### Global Account Activity Tracking
+- **Purpose**: Penalizes prolonged inactivity across all symbols on an account
+- **Implementation**: `AccountActivityTracker` in `app/agents/orchestrator.py`
+- **Behavior**:
+  - Tracks time since last trade across all symbols per account/broker
+  - No penalty within `max_idle_minutes` threshold (default: 30 minutes)
+  - Applies configurable penalty for excess idle time
+  - Three penalty types: `linear`, `exponential` (default), or `step`
+  - Resets timer on any trade across any symbol on the account
+- **Use Case**: Encourages capital efficiency in multi-symbol portfolios
+
 ## Configuration
 `config/config.yaml`:
 - `strategy.name` or `strategy.names`
@@ -35,7 +46,12 @@ market state and influence actions via the signal bias guard.
 - `strategy.fee_aware.*` (fee guard)
 - `pattern_trading.*`
 - `orchestrator.*`
-- `orchestrator.rl.time_penalty_per_bar`
+- `orchestrator.rl.time_penalty_per_bar` - Static penalty per bar (default: 0.05)
+- **Global Time Penalty:**
+  - `orchestrator.rl.global_time_penalty.enabled` - Enable account-level idle tracking (default: false)
+  - `orchestrator.rl.global_time_penalty.max_idle_minutes` - Idle threshold before penalties (default: 30.0)
+  - `orchestrator.rl.global_time_penalty.penalty_scale` - Scale of penalty applied (default: 0.01)
+  - `orchestrator.rl.global_time_penalty.penalty_type` - Type: linear, exponential, or step (default: exponential)
 - `strategy.signal_bias_guard.*`
 
 ## Usage

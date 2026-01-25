@@ -25,6 +25,21 @@ Additional ML: the AI symbol filter uses PPO (stable-baselines3) with online upd
 - `learning.device`
 - `learning.window_size`
 - `learning.reward_time_penalty_per_step`
+- **Reward Shaping Parameters:**
+  - `learning.reward_win_trade_bonus` - Bonus added per winning trade (default: 0.5)
+  - `learning.reward_loss_trade_penalty` - Penalty for losing trades (default: 0.2)
+  - `learning.reward_win_streak_bonus_scale` - Multiplier for consecutive wins (default: 0.1)
+  - `learning.reward_loss_streak_penalty_scale` - Multiplier for consecutive losses (default: 0.15)
+  - `learning.reward_max_streak_bonus` - Maximum bonus from win streaks (default: 1.0)
+  - `learning.reward_max_streak_penalty` - Maximum penalty from loss streaks (default: 2.0)
+  - `learning.reward_sharpe_bonus_scale` - Scale for Sharpe-like risk adjustment (default: 0.1)
+  - `learning.reward_sharpe_window_size` - Rolling window for Sharpe calculation (default: 100)
+  - `learning.reward_target_trade_frequency` - Target trade frequency as % of bars (default: 0.1)
+  - `learning.reward_frequency_penalty_scale` - Penalty for deviating from target frequency (default: 0.5)
+- **Time-Aware Penalty:**
+  - `learning.enable_time_aware_penalty` - Use dynamic time-based penalties (default: true)
+  - `learning.base_time_penalty_per_minute` - Base penalty per minute of inactivity (default: 0.01)
+  - `learning.bar_interval_minutes` - Bar interval in minutes for time calculations (default: 5.0)
 - `learning.model_path`
 - `learning.best_model_path`
 - `learning.use_best_model`
@@ -65,6 +80,54 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## Online Updates
 The learner service runs online updates when enabled:
 - `learning.online.enabled: true`
+
+## Reward System
+
+The RL agent learns through a multi-component reward system designed to maximize profitable trades while managing risk:
+
+### Reward Components
+
+1. **Realized PnL** - Base reward from closed positions:
+   - Long: `(exit_price - entry_price) × quantity - costs`
+   - Short: `(entry_price - exit_price) × quantity - costs`
+   - Transaction costs include commission and slippage
+
+2. **Win-Rate Shaping** - Direct incentives for profitable trades:
+   - Win bonus: Additional reward for any profitable trade
+   - Loss penalty: Additional penalty beyond PnL loss for losing trades
+   - Encourages higher win rates even with smaller profits
+
+3. **Streak Tracking** - Rewards consistency:
+   - Win streaks: Growing bonus for consecutive winning trades (capped)
+   - Loss streaks: Escalating penalty for consecutive losses (capped)
+   - Helps break losing patterns and reinforce successful behaviors
+
+4. **Risk-Adjusted Performance** - Sharpe-like metric:
+   - Calculates mean/std of recent trade returns
+   - Adds bonus for consistent profitability
+   - Penalizes erratic performance
+
+5. **Trade Frequency Control**:
+   - Target frequency prevents overtrading and undertrading
+   - Penalty for deviating from optimal activity level
+   - Balances action with patience
+
+6. **Time Penalties**:
+   - **Legacy mode**: Static penalty per step
+   - **Time-aware mode**: Dynamic penalty based on actual time since last trade
+   - Encourages efficient capital deployment
+
+### Metrics Tracked
+
+The environment info dict includes:
+- `portfolio_value` - Current portfolio value
+- `total_realized_pnl` - Cumulative realized profits/losses
+- `consecutive_wins` - Current win streak length
+- `consecutive_losses` - Current loss streak length
+- `gross_profits` - Sum of all winning trades
+- `gross_losses` - Sum of all losing trades
+- `profit_factor` - Ratio of gross profits to gross losses
+- `trades_count` - Total trades executed this episode
 
 ## Governance
 - Training writes metadata + feature baselines into `learning.registry.path`.
