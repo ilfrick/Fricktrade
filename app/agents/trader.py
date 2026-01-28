@@ -1388,10 +1388,12 @@ class TradingAgent:
 
     def _update_active_symbol_metrics(self, symbols: list[str]) -> None:
         current_symbols = set(symbols)
-        for sym in self._active_symbol_labels - current_symbols:
-            SYMBOL_ACTIVE.labels(symbol=sym).set(0)
+        # Set active symbols to 1 first to avoid flipping between 0 and 1
         for sym in symbols:
             SYMBOL_ACTIVE.labels(symbol=sym).set(1)
+        # Then clear symbols that are no longer active
+        for sym in self._active_symbol_labels - current_symbols:
+            SYMBOL_ACTIVE.labels(symbol=sym).set(0)
         self._active_symbol_labels = current_symbols
         symbols_by_broker: dict[str, set[str]] = {}
         if self._symbols_by_broker:
@@ -1406,10 +1408,12 @@ class TradingAgent:
         if symbols_by_broker:
             for broker_name, active_syms in symbols_by_broker.items():
                 previous = self._active_symbol_labels_by_broker.get(broker_name, set())
-                for sym in previous - active_syms:
-                    SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(0)
+                # Set active symbols to 1 first to avoid flipping between 0 and 1
                 for sym in active_syms:
                     SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(1)
+                # Then clear symbols that are no longer active
+                for sym in previous - active_syms:
+                    SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(0)
                 self._active_symbol_labels_by_broker[broker_name] = set(active_syms)
 
     def _build_symbol_batches(self, symbols: list[str]) -> list[tuple[str, str | None, list[str]]]:
