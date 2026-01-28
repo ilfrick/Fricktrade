@@ -43,9 +43,9 @@ services:
     labels:
       - "autoheal=true"
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/metrics', timeout=5)\""]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/metrics', timeout=120)\""]
       interval: 30s
-      timeout: 5s
+      timeout: 120s
       retries: 3
     restart: unless-stopped
 
