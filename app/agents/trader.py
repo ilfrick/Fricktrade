@@ -277,6 +277,7 @@ class TradingAgent:
         )
         self._kill_switch_enabled = bool(self._performance_cfg.get("kill_switch", {}).get("enabled", True))
         self._performance_last_report_at: datetime | None = None
+        self._lock = threading.RLock()
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -1499,40 +1500,55 @@ class TradingAgent:
         self._maybe_force_liquidation(portfolio)
         return symbols
 
-    def _run_symbol_batch(
+    from concurrent.futures import ThreadPoolExecutor, wait
+
+    def _process_single_symbol(
         self,
-        symbols: list[str],
+        sym: str,
         portfolio: dict,
         market_data_provider,
         broker_override: str | None,
+        skip_unchanged: bool,
     ) -> None:
-        skip_unchanged = bool(self.cfg.get("data", {}).get("process_on_new_bar_only", False))
-        batch_portfolio = portfolio
-        if broker_override:
-            batch_portfolio = self._portfolio_for_broker(portfolio, broker_override)
-        broker_name = broker_override or self._broker_name
-        broker_state = self._broker_state(broker_name)
-        for sym in symbols:
-            if not self._is_symbol_market_open(sym):
-                continue
-            market_state: dict = {"symbol": sym}
+        if not self._is_symbol_market_open(sym):
+            return
+        
+        # Fetch market data UNLOCKED (IO bound)
+        try:
+            market_state = market_data_provider(sym)
+        except Exception as exc:
+            broker_name = broker_override or self._broker_name
+            with self._lock:
+                self._record_skip(sym, "hold", "symbol_error", broker_name)
+            logging.warning("Skipping %s: data fetch error: %s", sym, exc)
+            return
+
+        # Process Logic LOCKED (Safety)
+        with self._lock:
             try:
-                market_state = market_data_provider(sym)
+                broker_name = broker_override or self._broker_name
+                broker_state = self._broker_state(broker_name)
+                
                 last_bar_ts = market_state.get("last_bar_ts")
                 if last_bar_ts is not None:
                     last_seen = broker_state.last_bar_ts.get(sym)
                     if last_seen == last_bar_ts and skip_unchanged:
-                        continue
+                        return
                     broker_state.last_bar_ts[sym] = last_bar_ts
-                self._enrich_market_state(market_state, batch_portfolio, sym)
+                
+                self._enrich_market_state(market_state, portfolio, sym)
                 market_state["risk_outcome"] = broker_state.risk_outcomes.get(sym, {})
                 if broker_override:
                     market_state["broker_override"] = broker_override
                 market_state["strategy_symbols"] = self._symbols_by_strategy
+                
                 self._update_signal_metrics(sym, market_state)
+                
                 decision_start = time.perf_counter()
                 market_state["_decision_start"] = decision_start
+                
                 self._pipeline.run(sym, market_state)
+                
                 DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
             except Exception as exc:
                 broker_name = broker_override or self._broker_name
@@ -1547,6 +1563,36 @@ class TradingAgent:
                         "symbol_loop",
                         {"error": str(exc)},
                     )
+
+    def _run_symbol_batch(
+        self,
+        symbols: list[str],
+        portfolio: dict,
+        market_data_provider,
+        broker_override: str | None,
+    ) -> None:
+        skip_unchanged = bool(self.cfg.get("data", {}).get("process_on_new_bar_only", False))
+        
+        # Determine effective portfolio for batch
+        batch_portfolio = portfolio
+        if broker_override:
+            batch_portfolio = self._portfolio_for_broker(portfolio, broker_override)
+            
+        # Use ThreadPoolExecutor for parallel processing
+        # Limit max_workers to avoid API rate limits (e.g. 8-16)
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = [
+                executor.submit(
+                    self._process_single_symbol,
+                    sym,
+                    batch_portfolio,
+                    market_data_provider,
+                    broker_override,
+                    skip_unchanged,
+                )
+                for sym in symbols
+            ]
+            wait(futures)
 
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
