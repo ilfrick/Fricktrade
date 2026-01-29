@@ -24,6 +24,14 @@
 - Model output is a ranked symbol list; online updates run on refresh.
 - Filtered symbol cache is written per symbol (Redis + file) when enabled.
 
+## Concurrency & Thread Safety
+- **Parallel Execution:** `TradingAgent` processes symbols in parallel using a `ThreadPoolExecutor` (default 12 workers) to maximize throughput during data fetching and AI inference.
+- **Thread Safety:** 
+  - `OrderQueue` (`app/execution/order_queue.py`) is thread-safe via internal locks.
+  - `RiskManager` (`app/risk/manager.py`) protects critical state (daily loss, drawdowns) with locks.
+  - `TradingAgent` protects shared state (broker state, open orders cache) with a reentrant lock (`self._lock`).
+- **Decoupled Reporting:** Account metrics and market status are updated in a separate daemon thread (`_run_reporting_loop`) to ensure observability even if the trading loop is under heavy load.
+
 ## Tests
 - Unit tests: `docker compose run --rm tests-when-closed python -m pytest`.
 - Backtest: `docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml`.

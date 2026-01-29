@@ -315,6 +315,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Switched trading loop to parallel execution (ThreadPoolExecutor) with fine-grained locking and decoupled metric reporting for better responsiveness.
 - Switched live market data and AI filter bars to batched yfinance with coverage filtering.
 - Added live profiling scripts for the trading loop.
 - Documented configuration precedence and `.env` usage.

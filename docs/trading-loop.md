@@ -9,6 +9,11 @@ execution, and metrics updates.
 
 ## Implementation
 - Entry: `app/agents/trader.py`.
+- **Parallel Execution:** Symbols are processed concurrently using a `ThreadPoolExecutor` (default 12 workers).
+  - Market data fetching is unlocked (parallel IO).
+  - AI inference (`strategy.generate_signal`, `orchestrator.select`) is unlocked (parallel CPU).
+  - Critical state updates (risk checks, order placement) are serialized via locks for safety.
+- **Decoupled Reporting:** A separate daemon thread updates account metrics and market status every 15 seconds, ensuring dashboards remain responsive regardless of trading loop latency.
 - Loads strategies, orchestrator, broker adapters, and venue gating.
 - Per-symbol venue gating uses `market.symbol_venues` and falls back to `market.default_symbol_venue`.
 - Symbol venue mappings can be refreshed from the broker via `market.symbol_venues_auto`.
