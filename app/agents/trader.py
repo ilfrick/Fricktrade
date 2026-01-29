@@ -739,47 +739,55 @@ class TradingAgent:
             self._compliance_logger.write(payload)
 
     def run_once(self, symbol: str, market_state: dict):
-        trace = self._init_decision_trace(symbol, market_state)
-        if trace and "_decision_start" in market_state:
-            trace["_decision_start"] = market_state.get("_decision_start")
-        if trace:
-            model_snapshot = self._current_model_snapshot()
-            if model_snapshot:
-                trace["model_active"] = model_snapshot
-        if self._kill_switch_liquidated:
-            return None
-        self._apply_kill_switch_profile(market_state)
-        exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
-        broker_hint = self._resolve_broker_for_symbol(symbol, self._strategy_names, None)
-        broker_override = market_state.get("broker_override")
-        if broker_override:
-            broker_override = self._normalize_broker_name(str(broker_override))
-        strategy_broker = broker_override or broker_hint
-        market_state["risk_outcome"] = self._broker_state(strategy_broker).risk_outcomes.get(symbol, {})
-        if trace:
-            trace["broker_hint"] = broker_hint
-        if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol, broker=broker_hint):
-            self._record_skip(symbol, "hold", "open_order", broker_hint)
-            logging.info("Skipping %s: open orders pending (strategy guard)", symbol)
-            self._emit_decision_trace(trace, "skip", "open_order", "strategy_guard")
-            return None
-        active_strategies = [
-            name for name in self._strategy_names if not self._strategy_disabled_globally(name)
-        ]
-        if not active_strategies:
-            logging.warning("No active strategies available; skipping %s", symbol)
-            self._emit_decision_trace(trace, "skip", "no_active_strategies", "strategy")
-            return None
-        signals = []
-        for name in active_strategies:
-            strategy_symbols = market_state.get("strategy_symbols", {})
-            if isinstance(strategy_symbols, dict):
-                allowed = strategy_symbols.get(name)
-                if isinstance(allowed, list) and allowed and symbol not in allowed:
+        with self._lock:
+            trace = self._init_decision_trace(symbol, market_state)
+            if trace and "_decision_start" in market_state:
+                trace["_decision_start"] = market_state.get("_decision_start")
+            if trace:
+                model_snapshot = self._current_model_snapshot()
+                if model_snapshot:
+                    trace["model_active"] = model_snapshot
+            if self._kill_switch_liquidated:
+                return None
+            self._apply_kill_switch_profile(market_state)
+            exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
+            broker_hint = self._resolve_broker_for_symbol(symbol, self._strategy_names, None)
+            broker_override = market_state.get("broker_override")
+            if broker_override:
+                broker_override = self._normalize_broker_name(str(broker_override))
+            strategy_broker = broker_override or broker_hint
+            market_state["risk_outcome"] = self._broker_state(strategy_broker).risk_outcomes.get(symbol, {})
+            if trace:
+                trace["broker_hint"] = broker_hint
+            if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol, broker=broker_hint):
+                self._record_skip(symbol, "hold", "open_order", broker_hint)
+                logging.info("Skipping %s: open orders pending (strategy guard)", symbol)
+                self._emit_decision_trace(trace, "skip", "open_order", "strategy_guard")
+                return None
+            active_strategies = [
+                name for name in self._strategy_names if not self._strategy_disabled_globally(name)
+            ]
+            if not active_strategies:
+                logging.warning("No active strategies available; skipping %s", symbol)
+                self._emit_decision_trace(trace, "skip", "no_active_strategies", "strategy")
+                return None
+            
+            # Prepare strategies safely within lock
+            strategies_to_run = []
+            for name in active_strategies:
+                strategy_symbols = market_state.get("strategy_symbols", {})
+                if isinstance(strategy_symbols, dict):
+                    allowed = strategy_symbols.get(name)
+                    if isinstance(allowed, list) and allowed and symbol not in allowed:
+                        continue
+                strategy = self._get_strategy(strategy_broker, symbol, name)
+                if not strategy:
                     continue
-            strategy = self._get_strategy(strategy_broker, symbol, name)
-            if not strategy:
-                continue
+                strategies_to_run.append((name, strategy))
+
+        # UNLOCKED: Run strategy inference (CPU heavy)
+        signals = []
+        for name, strategy in strategies_to_run:
             try:
                 signal = strategy.generate_signal(market_state)
             except Exception as exc:
@@ -787,6 +795,8 @@ class TradingAgent:
                 continue
             signal["name"] = name
             signals.append(signal)
+
+        # UNLOCKED: Signal bias calculation (pure logic)
         bias = self._signal_bias(market_state)
         guard_cfg = self.cfg.get("strategy", {}).get("signal_bias_guard", {}) or {}
         if bias is not None:
@@ -802,289 +812,300 @@ class TradingAgent:
                     elif action == "sell" and bias > threshold:
                         signal["action"] = "hold"
                         signal["signal_bias_block"] = "positive_bias"
+        
         if trace:
             trace["signals"] = [
                 self._signal_summary(sig, include_features=self._include_feature_snapshots) for sig in signals
             ]
             trace["orchestrator_mode"] = self.cfg.get("orchestrator", {}).get("mode", "direct")
-        self._update_orchestrator(symbol, market_state, strategy_broker)
+
+        with self._lock:
+            self._update_orchestrator(symbol, market_state, strategy_broker)
+
+        # UNLOCKED: Orchestrator inference (CPU heavy)
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             names, weights = self._orchestrator.select(
                 symbol, active_strategies, market_state, signals, strategy_broker
             )
         else:
             names, weights = self._orchestrator.select(active_strategies, market_state)
-        filtered_signals = [signal for signal in signals if signal.get("name") in names]
-        action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names)
-        order_meta = self._select_order_meta(filtered_signals, names)
-        if broker_override:
-            broker_name = broker_override
-        else:
-            broker_name = self._resolve_broker_for_symbol(symbol, names, filtered_signals, action_strategy)
-        broker_state = self._broker_state(broker_name)
-        risk_disabled = self._risk_disabled()
-        if risk_disabled:
-            market_state["risk_disabled"] = True
-        if broker_name != strategy_broker:
-            market_state["risk_outcome"] = broker_state.risk_outcomes.get(symbol, {})
-        if not risk_disabled and broker_state.risk.should_circuit_break(broker_state.current_drawdown_pct):
-            self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
-            logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
-            self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
-            return None
-        allowed_names = [name for name in names if name not in broker_state.disabled_strategies]
-        if not allowed_names:
-            logging.warning("No active strategies available for %s; skipping %s", broker_name, symbol)
-            self._emit_decision_trace(trace, "skip", "no_active_strategies", "strategy")
-            return None
-        if allowed_names != list(names) or (action_strategy and action_strategy not in allowed_names):
-            filtered_signals = [signal for signal in signals if signal.get("name") in allowed_names]
-            filtered_weights = weights
-            if isinstance(weights, dict):
-                filtered_weights = {name: weights.get(name, 1.0) for name in allowed_names}
-            action, reduce_pct, action_strategy = self._combine_signals(
-                filtered_signals, filtered_weights, order=allowed_names
-            )
-            order_meta = self._select_order_meta(filtered_signals, allowed_names)
-            if not broker_override:
-                broker_name = self._resolve_broker_for_symbol(
-                    symbol, allowed_names, filtered_signals, action_strategy
-                )
-                broker_state = self._broker_state(broker_name)
-                if action_strategy and action_strategy in broker_state.disabled_strategies:
-                    self._record_skip(symbol, "hold", "strategy_disabled", broker_name)
-                    logging.info("Skipping %s: strategy disabled for broker %s", symbol, broker_name)
-                    self._emit_decision_trace(trace, "skip", "strategy_disabled", "strategy")
-                    return None
-            names = allowed_names
-            weights = filtered_weights
-        if not risk_disabled and broker_state.risk.should_circuit_break(broker_state.current_drawdown_pct):
-            self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
-            logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
-            self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
-            return None
-        if trace:
-            trace["orchestrator_selected"] = list(names)
-            trace["orchestrator_weights"] = list(weights) if isinstance(weights, (list, tuple)) else weights
-        for name in self._strategy_names:
-            ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
-        for name in set(names):
-            ORCHESTRATOR_STRATEGY_SELECTED.labels(strategy=name).inc()
-        market_state["broker"] = broker_name
-        self._record_orchestrator(symbol, signals, market_state, broker_name)
-        if trace:
-            trace["action"] = action
-            trace["action_strategy"] = action_strategy
-            trace["broker"] = broker_name
-        guardrail = self._get_guardrail(broker_name, symbol)
-        if guardrail:
-            guard_action = guardrail.generate_signal(market_state).get("action", "hold")
-            mode = self.learning_cfg.get("guardrail", {}).get("mode", "confirm")
-            action = self._apply_guardrail(action, guard_action, mode)
-            if trace:
-                trace["guardrail_action"] = guard_action
-                trace["guardrail_mode"] = mode
-                trace["action"] = action
-        if action == "hold":
-            if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
-                self._remove_pending_orders(symbol, broker=broker_name)
-            self._emit_decision_trace(trace, "hold", "strategies_hold", "signal")
-            return None
-        if action == "exit":
-            if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
-                self._remove_pending_orders(symbol, broker=broker_name)
-            self.broker.close_position(symbol, broker=broker_name)
-            self._emit_decision_trace(trace, "exit", "strategy_exit", "signal")
-            return None
 
-        if self._has_pending_order(symbol, broker=broker_name):
-            if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
-                self._remove_pending_orders(symbol, broker=broker_name)
+        # LOCKED: Execution logic (Critical State Updates)
+        with self._lock:
+            filtered_signals = [signal for signal in signals if signal.get("name") in names]
+            action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names)
+            order_meta = self._select_order_meta(filtered_signals, names)
+            if broker_override:
+                broker_name = broker_override
             else:
-                self._record_skip(symbol, "hold", "open_order", broker_name)
-                logging.info("Skipping %s: open orders pending", symbol)
-                self._emit_decision_trace(trace, "skip", "open_order", "open_orders")
+                broker_name = self._resolve_broker_for_symbol(symbol, names, filtered_signals, action_strategy)
+            broker_state = self._broker_state(broker_name)
+            risk_disabled = self._risk_disabled()
+            if risk_disabled:
+                market_state["risk_disabled"] = True
+            if broker_name != strategy_broker:
+                market_state["risk_outcome"] = broker_state.risk_outcomes.get(symbol, {})
+            if not risk_disabled and broker_state.risk.should_circuit_break(broker_state.current_drawdown_pct):
+                self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
+                logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
+                self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
+                return None
+            allowed_names = [name for name in names if name not in broker_state.disabled_strategies]
+            if not allowed_names:
+                logging.warning("No active strategies available for %s; skipping %s", broker_name, symbol)
+                self._emit_decision_trace(trace, "skip", "no_active_strategies", "strategy")
+                return None
+            if allowed_names != list(names) or (action_strategy and action_strategy not in allowed_names):
+                filtered_signals = [signal for signal in signals if signal.get("name") in allowed_names]
+                filtered_weights = weights
+                if isinstance(weights, dict):
+                    filtered_weights = {name: weights.get(name, 1.0) for name in allowed_names}
+                action, reduce_pct, action_strategy = self._combine_signals(
+                    filtered_signals, filtered_weights, order=allowed_names
+                )
+                order_meta = self._select_order_meta(filtered_signals, allowed_names)
+                if not broker_override:
+                    broker_name = self._resolve_broker_for_symbol(
+                        symbol, allowed_names, filtered_signals, action_strategy
+                    )
+                    broker_state = self._broker_state(broker_name)
+                    if action_strategy and action_strategy in broker_state.disabled_strategies:
+                        self._record_skip(symbol, "hold", "strategy_disabled", broker_name)
+                        logging.info("Skipping %s: strategy disabled for broker %s", symbol, broker_name)
+                        self._emit_decision_trace(trace, "skip", "strategy_disabled", "strategy")
+                        return None
+                names = allowed_names
+                weights = filtered_weights
+            if not risk_disabled and broker_state.risk.should_circuit_break(broker_state.current_drawdown_pct):
+                self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
+                logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
+                self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
+                return None
+            if trace:
+                trace["orchestrator_selected"] = list(names)
+                trace["orchestrator_weights"] = list(weights) if isinstance(weights, (list, tuple)) else weights
+            for name in self._strategy_names:
+                ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
+            for name in set(names):
+                ORCHESTRATOR_STRATEGY_SELECTED.labels(strategy=name).inc()
+            market_state["broker"] = broker_name
+            self._record_orchestrator(symbol, signals, market_state, broker_name)
+            if trace:
+                trace["action"] = action
+                trace["action_strategy"] = action_strategy
+                trace["broker"] = broker_name
+            
+            # Guardrail check (might need lock if it has state, but typically stateless config)
+            # We'll keep it locked for safety as it might access broker_state via _get_guardrail
+            guardrail = self._get_guardrail(broker_name, symbol)
+            if guardrail:
+                guard_action = guardrail.generate_signal(market_state).get("action", "hold")
+                mode = self.learning_cfg.get("guardrail", {}).get("mode", "confirm")
+                action = self._apply_guardrail(action, guard_action, mode)
+                if trace:
+                    trace["guardrail_action"] = guard_action
+                    trace["guardrail_mode"] = mode
+                    trace["action"] = action
+            if action == "hold":
+                if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
+                    self._remove_pending_orders(symbol, broker=broker_name)
+                self._emit_decision_trace(trace, "hold", "strategies_hold", "signal")
+                return None
+            if action == "exit":
+                if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
+                    self._remove_pending_orders(symbol, broker=broker_name)
+                self.broker.close_position(symbol, broker=broker_name)
+                self._emit_decision_trace(trace, "exit", "strategy_exit", "signal")
                 return None
 
-        last_price = market_state.get("last_price")
-        if last_price is None:
-            prices = market_state.get("prices", [])
-            last_price = prices[-1] if prices else None
-        if last_price is None:
-            self._record_skip(symbol, action, "no_price", broker_name)
-            logging.info("Skipping %s for %s: no price available", action, symbol)
-            self._emit_decision_trace(trace, "skip", "no_price", "pricing")
-            return None
-        min_price = self.cfg.get("trading_limits", {}).get("min_price")
-        if min_price is not None and last_price < float(min_price):
-            self._record_skip(symbol, action, "min_price", broker_name)
-            logging.info("Skipping %s for %s: price below min_price", action, symbol)
-            self._emit_decision_trace(trace, "skip", "min_price", "limits")
-            return None
-        try:
-            broker_state.last_prices[symbol] = float(last_price)
-        except (TypeError, ValueError):
-            pass
+            if self._has_pending_order(symbol, broker=broker_name):
+                if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
+                    self._remove_pending_orders(symbol, broker=broker_name)
+                else:
+                    self._record_skip(symbol, "hold", "open_order", broker_name)
+                    logging.info("Skipping %s: open orders pending", symbol)
+                    self._emit_decision_trace(trace, "skip", "open_order", "open_orders")
+                    return None
 
-        portfolio = self._portfolio_for_broker(market_state.get("portfolio", {}), broker_name)
-        market_state["portfolio"] = portfolio
-        self._recalculate_exposure(market_state, portfolio, symbol)
-        if trace:
-            trace["portfolio"] = self._portfolio_snapshot_for_trace(portfolio, symbol)
-            trace["exposure_pct"] = market_state.get("exposure_pct")
-            trace["short_exposure_pct"] = market_state.get("short_exposure_pct")
-            trace["leverage"] = market_state.get("leverage")
-        if self._is_account_blocked(broker_name):
-            self._record_risk_outcome(symbol, action, False, "account_blocked", broker_name)
-            self._record_skip(symbol, action, "account_blocked", broker_name)
-            logging.info("Skipping %s for %s: account blocked", action, symbol)
-            self._emit_decision_trace(trace, "skip", "account_blocked", "account")
-            return None
-        var_reason = self._var_limit_reason(broker_name)
-        if not risk_disabled and var_reason:
-            self._record_risk_outcome(symbol, action, False, var_reason, broker_name)
-            self._record_skip(symbol, action, var_reason, broker_name)
-            logging.info("Skipping %s for %s: %s", action, symbol, var_reason)
-            self._emit_decision_trace(trace, "skip", var_reason, "risk")
-            return None
-        can_short = True
-        if action == "sell":
-            positions = portfolio.get("positions", {})
-            current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
-            can_short = self._can_short(symbol, portfolio)
-            if not risk_disabled and current_qty <= 0 and not can_short:
-                self._record_risk_outcome(symbol, action, False, "shorting_disabled", broker_name)
-                self._record_skip(symbol, action, "shorting_disabled", broker_name)
-                logging.info("Skipping %s for %s: shorting disabled", action, symbol)
-                self._emit_decision_trace(trace, "skip", "shorting_disabled", "shorting")
+            last_price = market_state.get("last_price")
+            if last_price is None:
+                prices = market_state.get("prices", [])
+                last_price = prices[-1] if prices else None
+            if last_price is None:
+                self._record_skip(symbol, action, "no_price", broker_name)
+                logging.info("Skipping %s for %s: no price available", action, symbol)
+                self._emit_decision_trace(trace, "skip", "no_price", "pricing")
                 return None
-        if not risk_disabled and self._is_action_blocked(symbol, action):
-            self._record_risk_outcome(symbol, action, False, "limit_block", broker_name)
-            self._record_skip(symbol, action, "limit_block", broker_name)
-            logging.info("Skipping %s for %s: limits block action", action, symbol)
-            self._emit_decision_trace(trace, "skip", "limit_block", "limits")
-            return None
-        if action == "sell":
-            qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, market_state, reduce_pct=reduce_pct)
-        else:
-            qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, market_state)
-        if trace:
-            trace["haircuts"] = self._haircut_snapshot(market_state)
-        if qty <= 0:
-            if skip_reason:
-                self._record_risk_outcome(symbol, action, False, str(skip_reason), broker_name)
-                self._record_skip(symbol, action, str(skip_reason), broker_name)
-                logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
-                self._emit_decision_trace(trace, "skip", str(skip_reason), "sizing")
-            return None
-        if not risk_disabled and self._violates_exposure_caps(symbol, action, qty, last_price, portfolio):
-            self._record_risk_outcome(symbol, action, False, "exposure_cap", broker_name)
-            self._record_skip(symbol, action, "exposure_cap", broker_name)
-            logging.info("Skipping %s for %s: exposure caps exceeded", action, symbol)
-            self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
-            return None
-        if not risk_disabled and self._violates_order_limits(symbol, action, qty, last_price):
-            self._record_risk_outcome(symbol, action, False, "order_limit", broker_name)
-            self._record_skip(symbol, action, "order_limit", broker_name)
-            logging.info("Skipping %s for %s: order limits", action, symbol)
-            self._emit_decision_trace(trace, "skip", "order_limit", "limits")
-            return None
-        market_state["qty"] = qty
-        if trace:
-            trace["qty"] = qty
-
-        now = datetime.utcnow()
-        if not risk_disabled and self._is_cooldown_active(market_state, now, broker_name):
-            self._record_risk_outcome(symbol, action, False, "cooldown", broker_name)
-            self._record_skip(symbol, action, "cooldown", broker_name)
-            logging.info("Skipping %s for %s: cooldown", action, symbol)
-            self._emit_decision_trace(trace, "skip", "cooldown", "cooldown")
-            return None
-        if not risk_disabled:
-            if not broker_state.risk.can_open_trade(
-                exposure_pct=market_state.get("exposure_pct", 0.0),
-                short_exposure_pct=market_state.get("short_exposure_pct", 0.0),
-                leverage=market_state.get("leverage", 1.0),
-            ):
-                self._record_risk_outcome(symbol, action, False, "risk_block", broker_name)
-                self._record_skip(symbol, action, "risk_block", broker_name)
-                logging.info("Skipping %s for %s: risk limits exceeded", action, symbol)
-                self._emit_decision_trace(trace, "skip", "risk_block", "risk")
+            min_price = self.cfg.get("trading_limits", {}).get("min_price")
+            if min_price is not None and last_price < float(min_price):
+                self._record_skip(symbol, action, "min_price", broker_name)
+                logging.info("Skipping %s for %s: price below min_price", action, symbol)
+                self._emit_decision_trace(trace, "skip", "min_price", "limits")
                 return None
-            self._record_risk_outcome(symbol, action, True, "ok", broker_name)
-        else:
-            self._record_risk_outcome(symbol, action, True, "risk_disabled", broker_name)
+            try:
+                broker_state.last_prices[symbol] = float(last_price)
+            except (TypeError, ValueError):
+                pass
 
-        order_type = str(order_meta.get("order_type") or "market").lower()
-        limit_price = order_meta.get("limit_price")
-        algo_name = order_meta.get("algo")
-        if order_type == "limit" and limit_price is None:
-            self._record_skip(symbol, action, "limit_price_missing", broker_name)
-            logging.info("Skipping %s for %s: limit price missing", action, symbol)
-            self._emit_decision_trace(trace, "skip", "limit_price_missing", "pricing")
-            return None
-        slices = []
-        algo_label = str(algo_name or "").lower()
-        if order_type == "market" and algo_label not in {"none", "off"}:
-            slices = self._plan_execution(action, qty, last_price, market_state, algo_name)
+            portfolio = self._portfolio_for_broker(market_state.get("portfolio", {}), broker_name)
+            market_state["portfolio"] = portfolio
+            self._recalculate_exposure(market_state, portfolio, symbol)
+            if trace:
+                trace["portfolio"] = self._portfolio_snapshot_for_trace(portfolio, symbol)
+                trace["exposure_pct"] = market_state.get("exposure_pct")
+                trace["short_exposure_pct"] = market_state.get("short_exposure_pct")
+                trace["leverage"] = market_state.get("leverage")
+            if self._is_account_blocked(broker_name):
+                self._record_risk_outcome(symbol, action, False, "account_blocked", broker_name)
+                self._record_skip(symbol, action, "account_blocked", broker_name)
+                logging.info("Skipping %s for %s: account blocked", action, symbol)
+                self._emit_decision_trace(trace, "skip", "account_blocked", "account")
+                return None
+            var_reason = self._var_limit_reason(broker_name)
+            if not risk_disabled and var_reason:
+                self._record_risk_outcome(symbol, action, False, var_reason, broker_name)
+                self._record_skip(symbol, action, var_reason, broker_name)
+                logging.info("Skipping %s for %s: %s", action, symbol, var_reason)
+                self._emit_decision_trace(trace, "skip", var_reason, "risk")
+                return None
+            can_short = True
+            if action == "sell":
+                positions = portfolio.get("positions", {})
+                current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
+                can_short = self._can_short(symbol, portfolio)
+                if not risk_disabled and current_qty <= 0 and not can_short:
+                    self._record_risk_outcome(symbol, action, False, "shorting_disabled", broker_name)
+                    self._record_skip(symbol, action, "shorting_disabled", broker_name)
+                    logging.info("Skipping %s for %s: shorting disabled", action, symbol)
+                    self._emit_decision_trace(trace, "skip", "shorting_disabled", "shorting")
+                    return None
+            if not risk_disabled and self._is_action_blocked(symbol, action):
+                self._record_risk_outcome(symbol, action, False, "limit_block", broker_name)
+                self._record_skip(symbol, action, "limit_block", broker_name)
+                logging.info("Skipping %s for %s: limits block action", action, symbol)
+                self._emit_decision_trace(trace, "skip", "limit_block", "limits")
+                return None
+            if action == "sell":
+                qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, market_state, reduce_pct=reduce_pct)
+            else:
+                qty, skip_reason = self._size_order(action, last_price, portfolio, symbol, market_state)
+            if trace:
+                trace["haircuts"] = self._haircut_snapshot(market_state)
+            if qty <= 0:
+                if skip_reason:
+                    self._record_risk_outcome(symbol, action, False, str(skip_reason), broker_name)
+                    self._record_skip(symbol, action, str(skip_reason), broker_name)
+                    logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
+                    self._emit_decision_trace(trace, "skip", str(skip_reason), "sizing")
+                return None
+            if not risk_disabled and self._violates_exposure_caps(symbol, action, qty, last_price, portfolio):
+                self._record_risk_outcome(symbol, action, False, "exposure_cap", broker_name)
+                self._record_skip(symbol, action, "exposure_cap", broker_name)
+                logging.info("Skipping %s for %s: exposure caps exceeded", action, symbol)
+                self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
+                return None
+            if not risk_disabled and self._violates_order_limits(symbol, action, qty, last_price):
+                self._record_risk_outcome(symbol, action, False, "order_limit", broker_name)
+                self._record_skip(symbol, action, "order_limit", broker_name)
+                logging.info("Skipping %s for %s: order limits", action, symbol)
+                self._emit_decision_trace(trace, "skip", "order_limit", "limits")
+                return None
+            market_state["qty"] = qty
+            if trace:
+                trace["qty"] = qty
 
-        order_notional = qty * last_price
-        order_queue = self._order_queues.get(broker_name, self._order_queue)
-        if order_queue is None:
-            self._record_skip(symbol, action, "order_queue_missing", broker_name)
-            logging.warning("Skipping %s for %s: no order queue for broker %s", action, symbol, broker_name)
-            self._emit_decision_trace(trace, "skip", "order_queue_missing", "execution")
-            return None
-        order_start = time.perf_counter()
-        if slices:
-            order_id = None
-            for order_slice in slices:
-                order_queue.enqueue(
+            now = datetime.utcnow()
+            if not risk_disabled and self._is_cooldown_active(market_state, now, broker_name):
+                self._record_risk_outcome(symbol, action, False, "cooldown", broker_name)
+                self._record_skip(symbol, action, "cooldown", broker_name)
+                logging.info("Skipping %s for %s: cooldown", action, symbol)
+                self._emit_decision_trace(trace, "skip", "cooldown", "cooldown")
+                return None
+            if not risk_disabled:
+                if not broker_state.risk.can_open_trade(
+                    exposure_pct=market_state.get("exposure_pct", 0.0),
+                    short_exposure_pct=market_state.get("short_exposure_pct", 0.0),
+                    leverage=market_state.get("leverage", 1.0),
+                ):
+                    self._record_risk_outcome(symbol, action, False, "risk_block", broker_name)
+                    self._record_skip(symbol, action, "risk_block", broker_name)
+                    logging.info("Skipping %s for %s: risk limits exceeded", action, symbol)
+                    self._emit_decision_trace(trace, "skip", "risk_block", "risk")
+                    return None
+                self._record_risk_outcome(symbol, action, True, "ok", broker_name)
+            else:
+                self._record_risk_outcome(symbol, action, True, "risk_disabled", broker_name)
+
+            order_type = str(order_meta.get("order_type") or "market").lower()
+            limit_price = order_meta.get("limit_price")
+            algo_name = order_meta.get("algo")
+            if order_type == "limit" and limit_price is None:
+                self._record_skip(symbol, action, "limit_price_missing", broker_name)
+                logging.info("Skipping %s for %s: limit price missing", action, symbol)
+                self._emit_decision_trace(trace, "skip", "limit_price_missing", "pricing")
+                return None
+            slices = []
+            algo_label = str(algo_name or "").lower()
+            if order_type == "market" and algo_label not in {"none", "off"}:
+                slices = self._plan_execution(action, qty, last_price, market_state, algo_name)
+
+            order_notional = qty * last_price
+            order_queue = self._order_queues.get(broker_name, self._order_queue)
+            if order_queue is None:
+                self._record_skip(symbol, action, "order_queue_missing", broker_name)
+                logging.warning("Skipping %s for %s: no order queue for broker %s", action, symbol, broker_name)
+                self._emit_decision_trace(trace, "skip", "order_queue_missing", "execution")
+                return None
+            order_start = time.perf_counter()
+            if slices:
+                order_id = None
+                for order_slice in slices:
+                    order_queue.enqueue(
+                        symbol,
+                        action,
+                        qty=order_slice.qty,
+                        order_type=order_type,
+                        limit_price=limit_price,
+                        extended_hours=bool(market_state.get("market_extended", False)),
+                        earliest_at=order_slice.earliest_at,
+                        notional=order_slice.qty * last_price,
+                    )
+            else:
+                order_id = order_queue.enqueue(
                     symbol,
                     action,
-                    qty=order_slice.qty,
+                    qty=qty,
                     order_type=order_type,
                     limit_price=limit_price,
                     extended_hours=bool(market_state.get("market_extended", False)),
-                    earliest_at=order_slice.earliest_at,
-                    notional=order_slice.qty * last_price,
+                    notional=order_notional,
                 )
-        else:
-            order_id = order_queue.enqueue(
-                symbol,
-                action,
-                qty=qty,
-                order_type=order_type,
-                limit_price=limit_price,
-                extended_hours=bool(market_state.get("market_extended", False)),
-                notional=order_notional,
-            )
-        order_latency = time.perf_counter() - order_start
-        ORDER_LATENCY.labels(symbol=symbol, side=action).observe(order_latency)
-        if trace:
-            trace["order_latency_seconds"] = order_latency
-        if action == "buy":
-            strategy_label = action_strategy or (names[0] if names else None)
-            if strategy_label:
-                broker_state.pending_entry_strategy[symbol] = {"strategy": strategy_label, "ts": now}
-        if order_id and action in ("buy", "sell"):
-            TRADES.labels(symbol=symbol, side=action).inc()
-            broker_state.last_trade_at = now
-            self._emit_decision_trace(
-                trace,
-                "order_enqueued",
-                "ok",
-                "execution",
-                {
-                    "order_type": order_type,
-                    "limit_price": limit_price,
-                    "algo": algo_name,
-                },
-            )
-        elif action in ("buy", "sell"):
-            self._record_skip(symbol, action, "order_failed", broker_name)
-            self._emit_decision_trace(trace, "skip", "order_failed", "execution")
-        return order_id
+            order_latency = time.perf_counter() - order_start
+            ORDER_LATENCY.labels(symbol=symbol, side=action).observe(order_latency)
+            if trace:
+                trace["order_latency_seconds"] = order_latency
+            if action == "buy":
+                strategy_label = action_strategy or (names[0] if names else None)
+                if strategy_label:
+                    broker_state.pending_entry_strategy[symbol] = {"strategy": strategy_label, "ts": now}
+            if order_id and action in ("buy", "sell"):
+                TRADES.labels(symbol=symbol, side=action).inc()
+                broker_state.last_trade_at = now
+                self._emit_decision_trace(
+                    trace,
+                    "order_enqueued",
+                    "ok",
+                    "execution",
+                    {
+                        "order_type": order_type,
+                        "limit_price": limit_price,
+                        "algo": algo_name,
+                    },
+                )
+            elif action in ("buy", "sell"):
+                self._record_skip(symbol, action, "order_failed", broker_name)
+                self._emit_decision_trace(trace, "skip", "order_failed", "execution")
+            return order_id
 
     def _cancel_pending_if_needed(self, symbol: str, action: str, broker: str | None = None) -> bool:
         pending = self._pending_orders(symbol, broker=broker)
@@ -1523,12 +1544,13 @@ class TradingAgent:
             logging.warning("Skipping %s: data fetch error: %s", sym, exc)
             return
 
-        # Process Logic LOCKED (Safety)
-        with self._lock:
-            try:
-                broker_name = broker_override or self._broker_name
+        # Process Logic (Locking handled inside run_once and critical sections)
+        try:
+            broker_name = broker_override or self._broker_name
+            
+            # Access broker state with lock
+            with self._lock:
                 broker_state = self._broker_state(broker_name)
-                
                 last_bar_ts = market_state.get("last_bar_ts")
                 if last_bar_ts is not None:
                     last_seen = broker_state.last_bar_ts.get(sym)
@@ -1536,21 +1558,27 @@ class TradingAgent:
                         return
                     broker_state.last_bar_ts[sym] = last_bar_ts
                 
-                self._enrich_market_state(market_state, portfolio, sym)
+                # Check risk outcome (read safe-ish, but keeping lock for consistency)
                 market_state["risk_outcome"] = broker_state.risk_outcomes.get(sym, {})
-                if broker_override:
-                    market_state["broker_override"] = broker_override
+
+            self._enrich_market_state(market_state, portfolio, sym)
+            
+            if broker_override:
+                market_state["broker_override"] = broker_override
+            
+            # Access strategy symbols with lock
+            with self._lock:
                 market_state["strategy_symbols"] = self._symbols_by_strategy
-                
-                self._update_signal_metrics(sym, market_state)
-                
-                decision_start = time.perf_counter()
-                market_state["_decision_start"] = decision_start
-                
-                self._pipeline.run(sym, market_state)
-                
-                DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
-            except Exception as exc:
+            
+            self._update_signal_metrics(sym, market_state)
+            
+            decision_start = time.perf_counter()
+            market_state["_decision_start"] = decision_start
+            
+            self._pipeline.run(sym, market_state)
+            
+            DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
+        except Exception as exc:
                 broker_name = broker_override or self._broker_name
                 self._record_skip(sym, "hold", "symbol_error", broker_name)
                 logging.warning("Skipping %s: symbol processing error: %s", sym, exc)
@@ -2143,8 +2171,29 @@ class TradingAgent:
             logging.warning("Performance report write failed: %s", exc)
         self._performance_last_report_at = now
 
+    def _run_reporting_loop(self):
+        logging.info("Starting reporting loop thread.")
+        while True:
+            try:
+                # Update account metrics (includes PnL, Equity, Drift)
+                # We lock to protect shared state updates.
+                # Note: self.broker.get_account() is called inside, which might block.
+                # Ideally, we would fetch unlocked and update locked, but for now this ensures safety.
+                with self._lock:
+                    self._update_account_metrics()
+                    market_open = is_market_open(self.cfg)
+                    self._update_market_open_metrics(market_open)
+            except Exception as exc:
+                logging.warning("Reporting loop error: %s", exc)
+            time.sleep(15)
+
     def loop(self, symbol: str | list[str], market_data_provider, interval_seconds: int = 60):
         self._symbols = symbol if isinstance(symbol, list) else [symbol]
+        
+        # Start decoupled reporting thread
+        reporting_thread = threading.Thread(target=self._run_reporting_loop, daemon=True)
+        reporting_thread.start()
+        
         while True:
             if should_restart(self._started_at):
                 logging.info("Restart requested; exiting trading loop.")
@@ -2164,8 +2213,8 @@ class TradingAgent:
             if self._ops_state_blocks_run():
                 time.sleep(interval_seconds)
                 continue
+            # Market open check is also done in reporting loop, but we need it here for logic control
             market_open = is_market_open(self.cfg)
-            self._update_market_open_metrics(market_open)
             if not market_open:
                 time.sleep(interval_seconds)
                 continue
