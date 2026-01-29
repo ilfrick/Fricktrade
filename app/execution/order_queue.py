@@ -3,6 +3,7 @@
 
 import json
 import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -57,6 +58,7 @@ class OrderQueue:
         self._retry_notional_used = 0.0
         self._completion_grace_seconds = max(int(completion_grace_seconds), 0)
         self._missing_since: datetime | None = None
+        self._lock = threading.Lock()
 
     def enqueue(
         self,
@@ -79,63 +81,67 @@ class OrderQueue:
             earliest_at=earliest_at or datetime.utcnow(),
             notional=notional,
         )
-        self._queue.append(request)
-        self._queue.sort(key=lambda r: r.earliest_at)
-        if self._active is None:
-            self._start_next()
-            return self._active.order_id if self._active else None
+        with self._lock:
+            self._queue.append(request)
+            self._queue.sort(key=lambda r: r.earliest_at)
+            if self._active is None:
+                self._start_next()
+                return self._active.order_id if self._active else None
         logging.info("Order queued: %s %s qty=%s type=%s", side, symbol, qty, order_type)
         return None
 
     def mark_cancel_requested(self, order_id: str) -> None:
         if order_id:
-            self._cancel_requested.add(order_id)
+            with self._lock:
+                self._cancel_requested.add(order_id)
 
     def update(self, open_orders: list[dict]) -> None:
         now = datetime.utcnow()
         open_by_id = {str(o.get("order_id")): o for o in open_orders if o.get("order_id")}
         open_ids = set(open_by_id.keys())
-        if self._active and self._active.order_id:
-            active_id = self._active.order_id
-            if active_id in open_by_id:
-                self._missing_since = None
-                snapshot = open_by_id[active_id]
-                response = self._response_from_snapshot(snapshot, "open")
-                if response and response != self._active_snapshot:
-                    self._active_snapshot = response
-                    self._responses.append(OrderResponse(**response))
-            elif active_id not in open_ids:
-                if self._completion_grace_seconds > 0:
-                    if self._missing_since is None:
-                        self._missing_since = now
-                        return
-                    if (now - self._missing_since).total_seconds() < self._completion_grace_seconds:
-                        return
-                self._missing_since = None
-                status = "canceled" if self._active.order_id in self._cancel_requested else "completed"
-                snapshot = self._active_snapshot or {}
-                self._responses.append(
-                    OrderResponse(
-                        symbol=self._active.symbol,
-                        broker=self._broker_name,
-                        status=status,
-                        order_id=self._active.order_id,
-                        side=self._active.side,
-                        qty=self._active.qty,
-                        filled_qty=snapshot.get("filled_qty"),
-                        filled_avg_price=snapshot.get("filled_avg_price"),
+        with self._lock:
+            if self._active and self._active.order_id:
+                active_id = self._active.order_id
+                if active_id in open_by_id:
+                    self._missing_since = None
+                    snapshot = open_by_id[active_id]
+                    response = self._response_from_snapshot(snapshot, "open")
+                    if response and response != self._active_snapshot:
+                        self._active_snapshot = response
+                        self._responses.append(OrderResponse(**response))
+                elif active_id not in open_ids:
+                    if self._completion_grace_seconds > 0:
+                        if self._missing_since is None:
+                            self._missing_since = now
+                            return
+                        if (now - self._missing_since).total_seconds() < self._completion_grace_seconds:
+                            return
+                    self._missing_since = None
+                    status = "canceled" if self._active.order_id in self._cancel_requested else "completed"
+                    snapshot = self._active_snapshot or {}
+                    self._responses.append(
+                        OrderResponse(
+                            symbol=self._active.symbol,
+                            broker=self._broker_name,
+                            status=status,
+                            order_id=self._active.order_id,
+                            side=self._active.side,
+                            qty=self._active.qty,
+                            filled_qty=snapshot.get("filled_qty"),
+                            filled_avg_price=snapshot.get("filled_avg_price"),
+                        )
                     )
-                )
-                self._cancel_requested.discard(self._active.order_id)
-                self._active = None
-                self._active_snapshot = None
-        if self._active is None and self._queue:
-            self._start_next()
+                    self._cancel_requested.discard(self._active.order_id)
+                    self._active = None
+                    self._active_snapshot = None
+            if self._active is None and self._queue:
+                self._start_next()
 
     def pop_responses(self) -> list[OrderResponse]:
-        responses = self._responses
-        self._responses = []
-        return responses
+        with self._lock:
+            responses = self._responses
+            self._responses = []
+            return responses
 
     def _start_next(self) -> None:
         if not self._queue:
