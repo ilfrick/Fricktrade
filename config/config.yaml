@@ -201,6 +201,7 @@ strategy:
   names:
   - rl_policy
   - rl_policy_fees
+  - trend_following
   combine: vote
   fee_aware:
     min_edge_pct: 0.005
