@@ -10,7 +10,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 
 from app.execution.executor import ExecutionEngine
 from app.execution.order_queue import OrderQueue
@@ -1520,8 +1520,6 @@ class TradingAgent:
         self._refresh_open_orders_cache(symbols)
         self._maybe_force_liquidation(portfolio)
         return symbols
-
-    from concurrent.futures import ThreadPoolExecutor, wait
 
     def _process_single_symbol(
         self,
