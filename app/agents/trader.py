@@ -1606,7 +1606,7 @@ class TradingAgent:
             
         # Use ThreadPoolExecutor for parallel processing
         # Limit max_workers to avoid API rate limits (e.g. 8-16)
-        with ThreadPoolExecutor(max_workers=12) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             futures = [
                 executor.submit(
                     self._process_single_symbol,
