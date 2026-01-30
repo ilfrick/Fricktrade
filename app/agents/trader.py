@@ -1464,20 +1464,21 @@ class TradingAgent:
                 self._order_queue.update(self._open_orders_cache)
 
     def _update_market_open_metrics(self, market_open: bool) -> None:
-        brokers_cfg = self.cfg.get("brokers", {})
-        broker_names = [
-            name
-            for name, cfg in brokers_cfg.items()
-            if not isinstance(cfg, dict) or cfg.get("enabled", True)
-        ]
-        if not broker_names:
-            broker_names = self._broker_names or [self._broker_name]
-        for name in broker_names:
-            BROKER_MARKET_OPEN.labels(broker=name).set(1 if market_open else 0)
-        if market_open != self._last_market_open:
-            state = "open" if market_open else "closed"
-            logging.info("Market is %s; %s trading loop.", state, "starting" if market_open else "waiting")
-            self._last_market_open = market_open
+        with self._lock:
+            brokers_cfg = self.cfg.get("brokers", {})
+            broker_names = [
+                name
+                for name, cfg in brokers_cfg.items()
+                if not isinstance(cfg, dict) or cfg.get("enabled", True)
+            ]
+            if not broker_names:
+                broker_names = self._broker_names or [self._broker_name]
+            for name in broker_names:
+                BROKER_MARKET_OPEN.labels(broker=name).set(1 if market_open else 0)
+            if market_open != self._last_market_open:
+                state = "open" if market_open else "closed"
+                logging.info("Market is %s; %s trading loop.", state, "starting" if market_open else "waiting")
+                self._last_market_open = market_open
 
     def _prepare_market_data(self, market_data_provider, symbols: list[str]) -> None:
         data_cfg = self.cfg.get("data", {}) or {}
@@ -1721,71 +1722,72 @@ class TradingAgent:
         except Exception as exc:
             logging.warning("Account metrics update failed: %s", exc)
             return
-        total_val = cash_val = buying_power_val = None
-        broker_equities: dict[str, float] = {}
-        if isinstance(account, dict):
-            if "brokers" in account and isinstance(account["brokers"], dict):
-                total_val = float(account.get("equity") or 0.0)
-                cash_val = float(account.get("cash") or 0.0)
-                buying_power_val = float(account.get("buying_power") or 0.0)
-                for name, details in account["brokers"].items():
-                    equity = float(details.get("equity") or 0.0)
-                    cash = float(details.get("cash") or 0.0)
-                    buying_power = float(details.get("buying_power") or 0.0)
-                    ACCOUNT_TOTAL_BY_BROKER.labels(broker=name).set(equity)
-                    ACCOUNT_CASH_BY_BROKER.labels(broker=name).set(cash)
-                    ACCOUNT_BUYING_POWER_BY_BROKER.labels(broker=name).set(buying_power)
-                    ACCOUNT_INVESTED_BY_BROKER.labels(broker=name).set(equity - cash)
-                    broker_equities[str(name)] = equity
-                    self._update_broker_equity_state(str(name), equity)
-            elif "equity" in account:
-                total_val = float(account.get("equity") or 0.0)
-                cash_val = float(account.get("cash") or 0.0)
-                buying_power_val = float(account.get("buying_power") or 0.0)
-            elif "NetLiquidation" in account:
-                total_val = float(account.get("NetLiquidation") or 0.0)
-                cash_val = float(account.get("TotalCashValue") or 0.0)
-                buying_power_val = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
-        if total_val is None or cash_val is None:
-            return
-        if not broker_equities:
-            broker_equities[self._broker_name] = total_val
-            self._update_broker_equity_state(self._broker_name, total_val)
-        if self._equity_start is None:
-            self._equity_start = total_val
-        if self._equity_peak is None or total_val > self._equity_peak:
-            self._equity_peak = total_val
-        last_equity = None
-        if isinstance(account, dict):
-            last_equity = account.get("last_equity")
-        base_equity = self._equity_start
-        if last_equity is not None:
-            try:
-                last_equity_val = float(last_equity)
-            except (TypeError, ValueError):
-                last_equity_val = None
-            if last_equity_val:
-                base_equity = last_equity_val
-        if base_equity:
-            pnl_pct = (total_val - base_equity) / base_equity * 100.0
-            PNL.set(pnl_pct)
-        if self._equity_peak:
-            drawdown_pct = (self._equity_peak - total_val) / self._equity_peak * 100.0
-            DRAWDOWN.set(max(drawdown_pct, 0.0))
-            self._current_drawdown_pct = max(drawdown_pct, 0.0)
-        ACCOUNT_TOTAL.set(total_val)
-        ACCOUNT_CASH.set(cash_val)
-        if buying_power_val is not None:
-            ACCOUNT_BUYING_POWER.set(buying_power_val)
-        ACCOUNT_INVESTED.set(total_val - cash_val)
-        today = datetime.utcnow().date()
-        if self._day_start_date != today or self._day_start_equity is None:
-            self._day_start_date = today
-            self._day_start_equity = total_val
-        if self._day_start_equity:
-            day_pnl_pct = (total_val - self._day_start_equity) / self._day_start_equity * 100.0
-            self._update_drift_monitor(day_pnl_pct)
-        self._update_var_cvar(total_val, broker_equities)
+        with self._lock:
+            total_val = cash_val = buying_power_val = None
+            broker_equities: dict[str, float] = {}
+            if isinstance(account, dict):
+                if "brokers" in account and isinstance(account["brokers"], dict):
+                    total_val = float(account.get("equity") or 0.0)
+                    cash_val = float(account.get("cash") or 0.0)
+                    buying_power_val = float(account.get("buying_power") or 0.0)
+                    for name, details in account["brokers"].items():
+                        equity = float(details.get("equity") or 0.0)
+                        cash = float(details.get("cash") or 0.0)
+                        buying_power = float(details.get("buying_power") or 0.0)
+                        ACCOUNT_TOTAL_BY_BROKER.labels(broker=name).set(equity)
+                        ACCOUNT_CASH_BY_BROKER.labels(broker=name).set(cash)
+                        ACCOUNT_BUYING_POWER_BY_BROKER.labels(broker=name).set(buying_power)
+                        ACCOUNT_INVESTED_BY_BROKER.labels(broker=name).set(equity - cash)
+                        broker_equities[str(name)] = equity
+                        self._update_broker_equity_state(str(name), equity)
+                elif "equity" in account:
+                    total_val = float(account.get("equity") or 0.0)
+                    cash_val = float(account.get("cash") or 0.0)
+                    buying_power_val = float(account.get("buying_power") or 0.0)
+                elif "NetLiquidation" in account:
+                    total_val = float(account.get("NetLiquidation") or 0.0)
+                    cash_val = float(account.get("TotalCashValue") or 0.0)
+                    buying_power_val = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
+            if total_val is None or cash_val is None:
+                return
+            if not broker_equities:
+                broker_equities[self._broker_name] = total_val
+                self._update_broker_equity_state(self._broker_name, total_val)
+            if self._equity_start is None:
+                self._equity_start = total_val
+            if self._equity_peak is None or total_val > self._equity_peak:
+                self._equity_peak = total_val
+            last_equity = None
+            if isinstance(account, dict):
+                last_equity = account.get("last_equity")
+            base_equity = self._equity_start
+            if last_equity is not None:
+                try:
+                    last_equity_val = float(last_equity)
+                except (TypeError, ValueError):
+                    last_equity_val = None
+                if last_equity_val:
+                    base_equity = last_equity_val
+            if base_equity:
+                pnl_pct = (total_val - base_equity) / base_equity * 100.0
+                PNL.set(pnl_pct)
+            if self._equity_peak:
+                drawdown_pct = (self._equity_peak - total_val) / self._equity_peak * 100.0
+                DRAWDOWN.set(max(drawdown_pct, 0.0))
+                self._current_drawdown_pct = max(drawdown_pct, 0.0)
+            ACCOUNT_TOTAL.set(total_val)
+            ACCOUNT_CASH.set(cash_val)
+            if buying_power_val is not None:
+                ACCOUNT_BUYING_POWER.set(buying_power_val)
+            ACCOUNT_INVESTED.set(total_val - cash_val)
+            today = datetime.utcnow().date()
+            if self._day_start_date != today or self._day_start_equity is None:
+                self._day_start_date = today
+                self._day_start_equity = total_val
+            if self._day_start_equity:
+                day_pnl_pct = (total_val - self._day_start_equity) / self._day_start_equity * 100.0
+                self._update_drift_monitor(day_pnl_pct)
+            self._update_var_cvar(total_val, broker_equities)
 
     def _update_drift_monitor(self, day_pnl_pct: float) -> None:
         if not self._drift_monitor:
@@ -2174,13 +2176,9 @@ class TradingAgent:
         while True:
             try:
                 # Update account metrics (includes PnL, Equity, Drift)
-                # We lock to protect shared state updates.
-                # Note: self.broker.get_account() is called inside, which might block.
-                # Ideally, we would fetch unlocked and update locked, but for now this ensures safety.
-                with self._lock:
-                    self._update_account_metrics()
-                    market_open = is_market_open(self.cfg)
-                    self._update_market_open_metrics(market_open)
+                self._update_account_metrics()
+                market_open = is_market_open(self.cfg)
+                self._update_market_open_metrics(market_open)
             except Exception as exc:
                 logging.warning("Reporting loop error: %s", exc)
             time.sleep(15)

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from statistics import pstdev
 import logging
+import threading
 
 try:
     import torch
@@ -427,6 +428,7 @@ class RLStrategyOrchestrator:
         self._reward_ema: float | None = None
         self._last_selection: dict[tuple[str, str], str] = {}
         self._order_feedback: dict[tuple[str, str], dict[str, float]] = {}
+        self._lock = threading.RLock()
         # Initialize global account activity tracker
         self._activity_tracker: AccountActivityTracker | None = None
         if self.cfg.global_time_penalty_enabled:
@@ -473,125 +475,129 @@ class RLStrategyOrchestrator:
         signals: list[dict] | None = None,
         broker_name: str | None = None,
     ) -> tuple[list[str], dict[str, float]]:
-        if not self.cfg.enabled or not strategy_names:
-            return strategy_names, {name: 1.0 for name in strategy_names}
-        self._ensure_model(strategy_names)
-        key = self._key(symbol, broker_name)
-        features = self._state_features(symbol, market_state, signals, broker_name)
-        sequence = self._update_sequence(key, features)
-        probs = self._predict(sequence)
-        if random.random() < self.cfg.epsilon:
-            shuffled = strategy_names[:]
-            random.shuffle(shuffled)
-            selected = shuffled[: max(1, min(len(shuffled), self._top_k))]
-            self._last_selection[key] = selected[0]
-            return selected, {name: 1.0 for name in selected}
+        with self._lock:
+            if not self.cfg.enabled or not strategy_names:
+                return strategy_names, {name: 1.0 for name in strategy_names}
+            self._ensure_model(strategy_names)
+            key = self._key(symbol, broker_name)
+            features = self._state_features(symbol, market_state, signals, broker_name)
+            sequence = self._update_sequence(key, features)
+            probs = self._predict(sequence)
+            if random.random() < self.cfg.epsilon:
+                shuffled = strategy_names[:]
+                random.shuffle(shuffled)
+                selected = shuffled[: max(1, min(len(shuffled), self._top_k))]
+                self._last_selection[key] = selected[0]
+                return selected, {name: 1.0 for name in selected}
 
-        ranked = sorted(strategy_names, key=lambda n: probs.get(n, 0.0), reverse=True)
-        if not ranked:
-            return strategy_names, {name: 1.0 for name in strategy_names}
-        if len(ranked) == 1:
-            self._last_selection[key] = ranked[0]
-            return ranked, {ranked[0]: 1.0}
+            ranked = sorted(strategy_names, key=lambda n: probs.get(n, 0.0), reverse=True)
+            if not ranked:
+                return strategy_names, {name: 1.0 for name in strategy_names}
+            if len(ranked) == 1:
+                self._last_selection[key] = ranked[0]
+                return ranked, {ranked[0]: 1.0}
 
-        selected = [name for name in ranked if probs.get(name, 0.0) >= self._min_score]
-        if not selected:
-            selected = ranked
-        top_k = max(1, min(len(selected), self._top_k))
-        selected = selected[:top_k]
-        if self._mode == "direct":
             selected = [name for name in ranked if probs.get(name, 0.0) >= self._min_score]
             if not selected:
-                selected = [ranked[0]]
+                selected = ranked
+            top_k = max(1, min(len(selected), self._top_k))
+            selected = selected[:top_k]
+            if self._mode == "direct":
+                selected = [name for name in ranked if probs.get(name, 0.0) >= self._min_score]
+                if not selected:
+                    selected = [ranked[0]]
+                self._last_selection[key] = selected[0]
+                return [selected[0]], {selected[0]: 1.0}
+            if self._mode == "weight":
+                weights = {name: max(probs.get(name, 0.0), 0.0) for name in selected}
+                if not any(weight > 0 for weight in weights.values()):
+                    weights = {name: 1.0 for name in selected}
+                self._last_selection[key] = selected[0]
+                return selected, weights
             self._last_selection[key] = selected[0]
-            return [selected[0]], {selected[0]: 1.0}
-        if self._mode == "weight":
-            weights = {name: max(probs.get(name, 0.0), 0.0) for name in selected}
-            if not any(weight > 0 for weight in weights.values()):
-                weights = {name: 1.0 for name in selected}
-            self._last_selection[key] = selected[0]
-            return selected, weights
-        self._last_selection[key] = selected[0]
-        return selected, {name: 1.0 for name in selected}
+            return selected, {name: 1.0 for name in selected}
 
     def record(
         self, symbol: str, signals: list[dict], market_state: dict, broker_name: str | None = None
     ) -> None:
-        if not self.cfg.enabled:
-            return
-        actions = {s.get("name"): s.get("action") for s in signals if s.get("name")}
-        if not actions:
-            return
-        last_price = _last_price(market_state)
-        if last_price is None:
-            return
-        key = self._key(symbol, broker_name)
-        selected = self._last_selection.get(key)
-        if not selected or selected not in actions:
-            return
-        features = self._state_features(symbol, market_state, signals, broker_name)
-        sequence = self._update_sequence(key, features)
-        self._last_state[key] = {
-            "features": sequence,
-            "action": str(actions.get(selected, "hold")),
-            "action_idx": self._strategy_names.index(selected),
-            "price": last_price,
-        }
+        with self._lock:
+            if not self.cfg.enabled:
+                return
+            actions = {s.get("name"): s.get("action") for s in signals if s.get("name")}
+            if not actions:
+                return
+            last_price = _last_price(market_state)
+            if last_price is None:
+                return
+            key = self._key(symbol, broker_name)
+            selected = self._last_selection.get(key)
+            if not selected or selected not in actions:
+                return
+            features = self._state_features(symbol, market_state, signals, broker_name)
+            sequence = self._update_sequence(key, features)
+            self._last_state[key] = {
+                "features": sequence,
+                "action": str(actions.get(selected, "hold")),
+                "action_idx": self._strategy_names.index(selected),
+                "price": last_price,
+            }
 
     def update(self, symbol: str, market_state: dict, broker_name: str | None = None) -> None:
-        if not self.cfg.enabled:
-            return
-        key = self._key(symbol, broker_name)
-        state = self._last_state.get(key)
-        if not state:
-            return
-        prev_price = state.get("price")
-        if prev_price is None or prev_price <= 0:
-            return
-        current_price = _last_price(market_state)
-        if current_price is None or current_price <= 0:
-            return
-        move_pct = (current_price - prev_price) / prev_price * 100.0
-        if abs(move_pct) < self.cfg.min_price_move_pct:
-            self._last_state.pop(key, None)
-            return
-        action = state.get("action")
-        if not action:
-            self._last_state.pop(key, None)
-            return
-        if action == "buy":
-            reward = move_pct - self.cfg.time_penalty_per_bar
-        elif action == "sell":
-            reward = -move_pct - self.cfg.time_penalty_per_bar
-        else:
-            reward = -self.cfg.time_penalty_per_bar
+        with self._lock:
+            if not self.cfg.enabled:
+                return
+            key = self._key(symbol, broker_name)
+            state = self._last_state.get(key)
+            if not state:
+                return
+            prev_price = state.get("price")
+            if prev_price is None or prev_price <= 0:
+                return
+            current_price = _last_price(market_state)
+            if current_price is None or current_price <= 0:
+                return
+            move_pct = (current_price - prev_price) / prev_price * 100.0
+            if abs(move_pct) < self.cfg.min_price_move_pct:
+                self._last_state.pop(key, None)
+                return
+            action = state.get("action")
+            if not action:
+                self._last_state.pop(key, None)
+                return
+            if action == "buy":
+                reward = move_pct - self.cfg.time_penalty_per_bar
+            elif action == "sell":
+                reward = -move_pct - self.cfg.time_penalty_per_bar
+            else:
+                reward = -self.cfg.time_penalty_per_bar
 
-        # Apply global account-level idle penalty if enabled
-        if self._activity_tracker is not None:
-            broker = str(broker_name) if broker_name else "default"
-            idle_penalty = self._activity_tracker.calculate_idle_penalty(broker)
-            reward -= idle_penalty
-            # Register this as a trade to reset the idle timer
-            self._activity_tracker.register_trade(broker)
+            # Apply global account-level idle penalty if enabled
+            if self._activity_tracker is not None:
+                broker = str(broker_name) if broker_name else "default"
+                idle_penalty = self._activity_tracker.calculate_idle_penalty(broker)
+                reward -= idle_penalty
+                # Register this as a trade to reset the idle timer
+                self._activity_tracker.register_trade(broker)
 
-        reward *= self.cfg.reward_scale
-        action_idx = state.get("action_idx")
-        if action_idx is None:
+            reward *= self.cfg.reward_scale
+            action_idx = state.get("action_idx")
+            if action_idx is None:
+                self._last_state.pop(key, None)
+                return
+            self._enqueue(state.get("features"), int(action_idx), float(reward))
+            self._train()
+            self._update_score(float(reward))
+            self._maybe_save()
+            self._maybe_save_best()
             self._last_state.pop(key, None)
-            return
-        self._enqueue(state.get("features"), int(action_idx), float(reward))
-        self._train()
-        self._update_score(float(reward))
-        self._maybe_save()
-        self._maybe_save_best()
-        self._last_state.pop(key, None)
 
     def on_order_update(self, response: dict) -> None:
-        symbol = response.get("symbol")
-        if not symbol:
-            return
-        broker_name = response.get("broker")
-        self._order_feedback[self._key(str(symbol), broker_name)] = _order_feedback_features(response)
+        with self._lock:
+            symbol = response.get("symbol")
+            if not symbol:
+                return
+            broker_name = response.get("broker")
+            self._order_feedback[self._key(str(symbol), broker_name)] = _order_feedback_features(response)
 
     def _ensure_model(self, strategy_names: list[str]) -> None:
         if self._model is not None:
