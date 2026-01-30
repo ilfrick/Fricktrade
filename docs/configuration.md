@@ -114,3 +114,567 @@ Centralize runtime settings for all subsystems.
   (active symbol, open orders, positions).
 - Metrics now include representative absolute moves (open->close, runup, drawdown) along with %.
 - Decision traces are read from `reports.daily_top_movers.decision_trace.*` to explain skip causes.
+
+
+## Full Configuration Reference
+
+This section enumerates every setting in `config/config.yaml` and explains what it does. Keys are grouped by top-level section; nested keys use dotted names for clarity.
+
+### app
+- `app.name`: Friendly service name used in logs and reports.
+- `app.env`: Environment label (e.g., dev, prod) used for logging/metrics context.
+- `app.timezone`: Default timezone for scheduling, reports, and market-hours logic.
+- `app.log_level`: Logging verbosity (INFO, DEBUG, WARNING, ERROR).
+
+### api
+- `api.auth.enabled`: Require an API token for config/restart endpoints.
+- `api.auth.token_env`: Environment variable name that stores the API token.
+
+### logging
+- `logging.file_path`: Log file location inside the container.
+- `logging.max_bytes`: Max log file size before rotation.
+- `logging.backup_count`: Number of rotated log files to keep.
+
+### market
+- `market.venue`: Default venue label when using a single venue.
+- `market.default_currency`: Base currency for symbols without explicit mapping.
+- `market.default_symbol_venue`: Fallback venue for unmapped symbols.
+- `market.symbol_venues`: Manual per-symbol venue mapping.
+- `market.symbol_currencies`: Manual per-symbol currency mapping.
+- `market.symbol_sectors`: Manual per-symbol sector mapping (used by exposure caps).
+- `market.symbol_venues_auto.enabled`: Auto-refresh symbol venue mapping from broker.
+- `market.symbol_venues_auto.refresh_minutes`: Refresh cadence for auto venue mapping.
+- `market.symbol_venues_auto.max_symbols`: Max symbols to refresh in a cycle.
+- `market.symbol_venues_auto.exchange_venue_map`: Map broker exchange codes to venues.
+- `market.open_mode`: `any` trades if any venue is open, `all` requires all venues.
+- `market.extended_hours.enabled`: Trade during configured extended sessions.
+- `market.holiday_update.enabled`: Enable periodic holiday refresh.
+- `market.holiday_update.interval_days`: Days between holiday updates.
+- `market.holiday_update.years_ahead`: Years of holidays to fetch ahead.
+- `market.venues[]`: Venue definitions (name, timezone, trading_hours, holidays).
+- `market.venues[].trading_hours.open/close`: Regular session hours.
+- `market.venues[].trading_hours.extended_open/extended_close`: Extended session hours.
+- `market.venues[].holidays[]`: ISO dates when the venue is closed.
+
+### brokers
+- `brokers.<name>.enabled`: Enable the broker adapter.
+- `brokers.<name>.base_url`: Broker API base URL (Alpaca).
+- `brokers.<name>.api_key/api_secret`: Broker credentials (use env vars).
+- `brokers.<name>.host/port/client_id/account_id`: IBKR connection settings.
+- `brokers.<name>.currency`: Default account currency (IBKR).
+- `brokers.<name>.accounts[]`: Optional multi-account entries (each creates a broker instance).
+- `brokers.<name>.fees.*`: Fee model used by fee-aware strategy.
+- `brokers.<name>.fees.commission_pct`: Percentage commission (e.g., 0.01 = 1%).
+- `brokers.<name>.fees.per_trade_fee`: Flat fee per trade.
+- `brokers.<name>.fees.per_share_fee`: Per-share fee.
+- `brokers.<name>.fees.min_fee`: Minimum fee per order.
+- `brokers.<name>.fees.spread_pct`: Additional spread cost in percent.
+
+### risk
+- `risk.enabled`: Master switch for risk controls.
+- `risk.max_daily_loss_pct`: Daily loss limit (% equity) before blocking trades.
+- `risk.max_position_size_pct`: Max position size (% equity) per symbol.
+- `risk.max_portfolio_leverage`: Max gross leverage.
+- `risk.max_short_exposure_pct`: Max short exposure (% equity).
+- `risk.max_positions`: Max open positions.
+- `risk.cooldown_seconds`: Cooldown after a trade before re-entering.
+- `risk.hard_stop_pct`: Hard stop loss threshold (%).
+- `risk.trailing_stop_pct`: Trailing stop threshold (%).
+- `risk.circuit_breaker_drawdown_pct`: Drawdown that halts trading (%).
+- `risk.vol_targeting.enabled`: Enable volatility targeting.
+- `risk.vol_targeting.target_vol_pct`: Target volatility (%).
+- `risk.vol_targeting.min_scale/max_scale`: Clamp scaling factor.
+- `risk.stress.enabled`: Apply stress haircut to sizing.
+- `risk.stress.shock_pct`: Shock percentage for stress test sizing.
+- `risk.liquidity_haircut.enabled`: Apply liquidity haircuts to sizing.
+- `risk.liquidity_haircut.max_participation`: Max % of session volume per order.
+- `risk.liquidity_haircut.min_session_volume`: Minimum volume to trade.
+- `risk.liquidity_haircut.max_spread_pct`: Max allowed spread (%).
+- `risk.liquidity_haircut.volume_haircut_pct`: Sizing haircut (%).
+- `risk.var.enabled`: Enable VaR/CVaR gating.
+- `risk.var.window`: Lookback window (bars).
+- `risk.var.confidence`: Confidence level (0-1).
+- `risk.var.max_var_pct`: Max VaR (% equity).
+- `risk.var.max_cvar_pct`: Max CVaR (% equity).
+- `risk.exposure_caps.enabled`: Enable venue/sector caps.
+- `risk.exposure_caps.venues`: Venue caps (% equity) by venue name.
+- `risk.exposure_caps.sectors`: Sector caps (% equity) by sector name.
+- `risk.kill_switch_profiles.enabled`: Enable adaptive risk profiles.
+- `risk.kill_switch_profiles.mode`: `static` or `adaptive`.
+- `risk.kill_switch_profiles.current`: Active profile name when in static mode.
+- `risk.kill_switch_profiles.adaptive.low_vol_max_pct`: Low-vol threshold.
+- `risk.kill_switch_profiles.adaptive.high_vol_min_pct`: High-vol threshold.
+- `risk.kill_switch_profiles.profiles.*`: Per-profile overrides (e.g., max_daily_loss_pct).
+
+### trading_limits
+- `trading_limits.enabled`: Enable limits enforcement.
+- `trading_limits.allow_shorts`: Allow short selling.
+- `trading_limits.enforce_account_flags`: Enforce broker account flags (blocked/suspended).
+- `trading_limits.blocked_symbols`: Symbols to always block.
+- `trading_limits.blocked_actions`: Actions to block (buy/sell/exit).
+- `trading_limits.min_price`: Minimum allowed last price.
+
+### strategy
+- `strategy.name`: Single strategy name (legacy).
+- `strategy.names`: Multi-strategy list.
+- `strategy.combine`: `priority` or `vote` when combining signals.
+- `strategy.fee_aware.*`: Fee-aware bias adjustments.
+- `strategy.fee_aware.min_edge_pct`: Minimum expected edge to trade.
+- `strategy.fee_aware.edge_multiplier`: Scale factor for edge.
+- `strategy.fee_aware.min_notional`: Minimum notional to apply fee-aware logic.
+- `strategy.signal_bias_guard.enabled`: Enable bias guard.
+- `strategy.signal_bias_guard.threshold`: Bias threshold to block counter-trend signals.
+- `strategy.performance.enabled`: Enable strategy performance monitoring.
+- `strategy.performance.window_days`: Rolling window for metrics.
+- `strategy.performance.min_trades`: Minimum trades before enforcement.
+- `strategy.performance.min_win_rate`: Minimum win rate before enforcement.
+- `strategy.performance.max_drawdown_pct`: Max drawdown before enforcement.
+- `strategy.performance.report_interval_minutes`: Report cadence.
+- `strategy.performance.report_path`: Output path for performance JSON.
+- `strategy.performance.kill_switch.enabled`: Enable kill switch on poor performance.
+- `strategy.params.*`: Strategy-specific parameters.
+- `strategy.params.lookback_minutes`: Base lookback window.
+- `strategy.params.entry_threshold_pct/exit_threshold_pct`: Signal thresholds (%).
+- `strategy.params.position_horizon_minutes`: Max holding window.
+- `strategy.params.allow_shorts`: Strategy-level shorting override.
+- `strategy.params.trend_following.*`: Trend strategy parameters.
+- `strategy.params.factor_model.*`: Factor model weights and thresholds.
+- `strategy.params.stat_arb_pairs.*`: Pair trading parameters.
+- `strategy.params.market_maker.*`: Market maker parameters.
+
+### orchestrator
+- `orchestrator.mode`: Strategy selection mode (`direct`, `weight`, `select`).
+- `orchestrator.top_k`: Max strategies to keep.
+- `orchestrator.min_score`: Minimum score to be selected.
+- `orchestrator.rl.enabled`: Enable RL orchestrator.
+- `orchestrator.rl.model_type`: `lstm` or `mlp`.
+- `orchestrator.rl.device`: `auto`, `cpu`, or `cuda`.
+- `orchestrator.rl.hidden_dim/num_layers/dropout/seq_len`: Model architecture.
+- `orchestrator.rl.model_path/best_model_path/best_score_path`: Model artifacts.
+- `orchestrator.rl.use_best_model`: Use the best model if available.
+- `orchestrator.rl.learning_rate/weight_decay/batch_size/buffer_size`: Training params.
+- `orchestrator.rl.update_steps_per_bar`: Gradient steps per bar.
+- `orchestrator.rl.epsilon`: Exploration probability.
+- `orchestrator.rl.min_price_move_pct`: Ignore tiny moves below this threshold.
+- `orchestrator.rl.reward_scale`: Scale factor for rewards.
+- `orchestrator.rl.entropy_coef/baseline_alpha/max_grad_norm`: RL stabilizers.
+- `orchestrator.rl.save_interval_seconds`: Model save cadence.
+- `orchestrator.rl.score_ema_alpha`: Score smoothing.
+- `orchestrator.rl.time_penalty_per_bar`: Per-bar idle penalty.
+- `orchestrator.rl.global_time_penalty.*`: Account-level idle penalty controls.
+- `orchestrator.rl.global_time_penalty.enabled`: Enable account-level idle penalty.
+- `orchestrator.rl.global_time_penalty.max_idle_minutes`: Idle threshold before penalty.
+- `orchestrator.rl.global_time_penalty.penalty_scale`: Penalty scale factor.
+- `orchestrator.rl.global_time_penalty.penalty_type`: `linear`, `exponential`, or `step`.
+- `orchestrator.rl.pretrain.*`: Pretrain data source and window settings.
+- `orchestrator.rl.pretrain.enabled`: Enable orchestrator pretraining.
+- `orchestrator.rl.pretrain.in_trader`: Run pretraining inside trader loop.
+- `orchestrator.rl.pretrain.provider`: Data provider for pretraining.
+- `orchestrator.rl.pretrain.alpaca_api_key/alpaca_api_secret`: Alpaca credentials for pretrain.
+- `orchestrator.rl.pretrain.lookback_days`: Lookback for pretrain data.
+- `orchestrator.rl.pretrain.interval`: Bar interval for pretrain data.
+- `orchestrator.rl.pretrain.window_days`: Window size for each training slice.
+- `orchestrator.rl.pretrain.coverage_days`: Total coverage window.
+- `orchestrator.rl.pretrain.step_days`: Step size between windows.
+- `orchestrator.rl.pretrain.max_symbols`: Max symbols for pretraining.
+- `orchestrator.rl.pretrain.max_samples`: Max samples for pretraining.
+- `orchestrator.rl.pretrain.epochs`: Pretraining epochs.
+- `orchestrator.rl.pretrain.warmup_bars`: Warmup bars before training.
+- `orchestrator.rl.pretrain.symbols_source`: Symbol source for pretrain.
+- `orchestrator.rl.pretrain.timeout_seconds/retries`: Pretrain fetch timeouts.
+
+### learning
+- `learning.enabled`: Enable RL policy strategy.
+- `learning.model_path/best_model_path`: RL policy artifacts.
+- `learning.use_best_model`: Prefer best model if available.
+- `learning.device`: `auto`, `cpu`, or `cuda`.
+- `learning.window_size`: Observation window size (bars).
+- `learning.reward_time_penalty_per_step`: Base penalty per step.
+- `learning.reward_*`: Reward shaping parameters (win/loss, streaks, Sharpe, frequency).
+- `learning.reward_win_trade_bonus`: Reward bonus per winning trade.
+- `learning.reward_loss_trade_penalty`: Penalty per losing trade.
+- `learning.reward_win_streak_bonus_scale`: Win streak bonus scale.
+- `learning.reward_loss_streak_penalty_scale`: Loss streak penalty scale.
+- `learning.reward_max_streak_bonus`: Cap for win streak bonus.
+- `learning.reward_max_streak_penalty`: Cap for loss streak penalty.
+- `learning.reward_sharpe_bonus_scale`: Sharpe-like bonus scale.
+- `learning.reward_sharpe_window_size`: Rolling window for Sharpe bonus.
+- `learning.reward_target_trade_frequency`: Target trade frequency ratio.
+- `learning.reward_frequency_penalty_scale`: Penalty scale for low/high frequency.
+- `learning.enable_time_aware_penalty`: Use minutes since last trade for penalty.
+- `learning.base_time_penalty_per_minute`: Penalty per minute idle.
+- `learning.bar_interval_minutes`: Bar duration in minutes.
+- `learning.features.*`: Feature toggles and technical indicator periods.
+- `learning.features.include_returns`: Include returns in feature vector.
+- `learning.features.include_signal_features`: Include signal features in vector.
+- `learning.features.signal_interval`: Interval for signal features.
+- `learning.features.sma_periods/ema_periods/rsi_periods`: Indicator periods.
+- `learning.registry.*`: Model registry settings and active pointer path.
+- `learning.registry.enabled`: Enable registry writes.
+- `learning.registry.path`: Registry JSON path.
+- `learning.registry.artifact_dir`: Registry artifact directory.
+- `learning.registry.artifact_prefix`: Artifact filename prefix.
+- `learning.registry.active_path`: Active model pointer path.
+- `learning.registry.use_active`: Use active pointer for loading.
+- `learning.registry.publish_mode`: `best` or `latest` publishing mode.
+- `learning.registry.refresh_minutes`: Registry refresh cadence.
+- `learning.drift.*`: Drift detection and auto-rollback controls.
+- `learning.drift.enabled`: Enable drift detection.
+- `learning.drift.window`: Drift window size (bars).
+- `learning.drift.feature_zscore_threshold`: Z-score threshold for features.
+- `learning.drift.max_drift_feature_pct`: Max % of features allowed to drift.
+- `learning.drift.pnl_window`: PnL window for drift checks.
+- `learning.drift.max_pnl_drop_pct`: Max allowed PnL drop (%).
+- `learning.drift.auto_rollback`: Auto-rollback to best model on drift.
+- `learning.drift.baseline_enabled`: Build/store baseline feature stats.
+- `learning.drift.baseline_max_samples`: Max samples for baseline.
+- `learning.drift.baseline_stride`: Sampling stride for baseline.
+- `learning.guardrail.*`: Guardrail strategy parameters.
+- `learning.guardrail.enabled`: Enable guardrail strategy.
+- `learning.guardrail.mode`: `confirm` or `veto`.
+- `learning.guardrail.params.*`: Guardrail strategy params.
+- `learning.online.*`: Online training config.
+- `learning.online.enabled`: Enable online updates.
+- `learning.online.update_interval_minutes`: Online update cadence.
+- `learning.online.timesteps`: Steps per online update.
+- `learning.online.eval_split`: Evaluation split ratio.
+- `learning.online.respect_ops_state`: Pause updates during ops-state stop.
+- `learning.training.*`: Offline training config and report paths.
+- `learning.training.data_dir`: Training data directory.
+- `learning.training.interval`: Bar interval for training.
+- `learning.training.timesteps`: Training timesteps.
+- `learning.training.initial_cash`: Starting cash for training sim.
+- `learning.training.commission_pct/slippage_bps`: Cost model.
+- `learning.training.eval_split`: Evaluation split ratio.
+- `learning.training.resume`: Resume training from existing model.
+- `learning.training.report_path/best_report_path`: Training reports paths.
+- `learning.training.report_plot_dir`: Training plots output dir.
+
+### backtest
+- `backtest.data_dir`: Input data directory.
+- `backtest.start/end`: Date range (YYYY-MM-DD).
+- `backtest.initial_cash`: Starting cash.
+- `backtest.commission_pct/slippage_bps/spread_bps`: Cost model.
+- `backtest.use_gpu`: Enable GPU acceleration when available.
+- `backtest.mode`: `agent` or legacy engine.
+- `backtest.symbols_source`: Symbol source (`data_dir` or explicit list).
+- `backtest.cache.*`: CSV-to-binary cache settings.
+- `backtest.cache.enabled`: Enable cache for parsed data.
+- `backtest.cache.format`: Cache format (`npz`).
+- `backtest.cache.dir`: Cache directory.
+- `backtest.cache.compress`: Compress cache files.
+- `backtest.dynamic_symbols_enabled`: Use dynamic symbol scanner in backtest.
+- `backtest.news_*`: News sources for backtests.
+- `backtest.news_enabled`: Enable news in backtests.
+- `backtest.news_source`: News source (`none`, file, or provider).
+- `backtest.news_path`: News cache path for backtests.
+- `backtest.run_when_closed`: Allow runs when markets are closed.
+- `backtest.plan.*`: Walk-forward planning configuration.
+- `backtest.plan.enabled`: Enable plan-based sampling.
+- `backtest.plan.window_days/step_days`: Plan window and step size.
+- `backtest.plan.liquidity_tiers`: Number of liquidity buckets.
+- `backtest.plan.sample_per_tier`: Samples per tier.
+- `backtest.plan.seed`: RNG seed.
+
+### benchmarking
+- `benchmarking.run_when_closed`: Allow benchmarks when markets are closed.
+- `benchmarking.use_plan`: Use plan-based symbol sampling.
+- `benchmarking.plan_*`: Walk-forward plan parameters.
+- `benchmarking.plan_window_days`: Plan window size.
+- `benchmarking.plan_step_days`: Plan step size.
+- `benchmarking.plan_liquidity_tiers`: Number of liquidity tiers.
+- `benchmarking.plan_sample_per_tier`: Samples per tier.
+- `benchmarking.bootstrap_*`: Bootstrap confidence interval settings.
+- `benchmarking.bootstrap_samples`: Number of bootstrap samples.
+- `benchmarking.bootstrap_confidence`: Confidence level (0-1).
+- `benchmarking.seed`: RNG seed.
+- `benchmarking.mc.*`: Monte Carlo stress parameters.
+- `benchmarking.mc.enabled`: Enable Monte Carlo stress tests.
+- `benchmarking.mc.runs`: Number of MC runs.
+- `benchmarking.mc.slippage_bps_range`: Slippage range for MC.
+- `benchmarking.mc.spread_bps_range`: Spread range for MC.
+- `benchmarking.mc.commission_pct_range`: Commission range for MC.
+- `benchmarking.output_path/plot_dir/pdf_path`: Report output locations.
+
+### data
+- `data.provider`: Live data provider (`yfinance`, `alpaca`, or `brokers`).
+- `data.prefetch_enabled`: Prefetch market data before loop.
+- `data.prefetch_after_filter`: Prefetch after symbol filtering.
+- `data.process_on_new_bar_only`: Skip processing if bar timestamp unchanged.
+- `data.symbols`: Static symbol list (empty = dynamic).
+- `data.interval`: Bar interval.
+- `data.lookback_days`: Lookback window.
+- `data.session_gain_mode`: `gap` or `session` gain calculation.
+- `data.quality.*`: Data validation settings.
+- `data.quality.enabled`: Enable OHLCV validation.
+- `data.quality.report_path`: Output path for data quality report.
+- `data.quality.gap_multiplier`: Gap threshold multiplier.
+- `data.quality.outlier_zscore`: Z-score threshold for outliers.
+- `data.adjustments.*`: Split/dividend adjustments directory.
+- `data.adjustments.enabled`: Enable adjustments.
+- `data.adjustments.dir`: Adjustments data directory.
+- `data.dynamic_symbols.*`: Dynamic scanner settings.
+- `data.dynamic_symbols.provider`: Scanner data provider (alpaca).
+- `data.dynamic_symbols.feed`: Market data feed for Alpaca (iex/sip).
+- `data.dynamic_symbols.refresh_minutes`: Scanner refresh cadence.
+- `data.dynamic_symbols.max_symbols/max_universe`: Caps for selection.
+- `data.dynamic_symbols.universe`: Universe source (e.g., alpaca_active).
+- `data.dynamic_symbols.universe_price_filter`: Price/cash filter for universe.
+- `data.dynamic_symbols.cash_aware`: Apply cash-aware caps.
+- `data.dynamic_symbols.cash_buffer_pct`: Reserve buffer when cash-aware.
+- `data.dynamic_symbols.cash_cap_mode`: `cash` or `risk` cap mode.
+- `data.dynamic_symbols.cash_max_pct`: Max percent of cash to deploy.
+- `data.dynamic_symbols.timeout_seconds/retries`: API timeouts and retries.
+- `data.dynamic_symbols.ai_filter.*`: AI filter settings (provider, window, retrain, model).
+- `data.dynamic_symbols.ai_filter.provider`: AI filter data provider (alpaca/yfinance).
+- `data.dynamic_symbols.ai_filter.coverage_filter`: Drop symbols without sufficient bars.
+- `data.dynamic_symbols.ai_filter.use_cached_symbols`: Use cached filtered symbols when available.
+- `data.dynamic_symbols.ai_filter.interval`: Bar interval for AI scoring.
+- `data.dynamic_symbols.ai_filter.lookback_days`: Lookback window for AI filter data.
+- `data.dynamic_symbols.ai_filter.window`: Feature window length (bars).
+- `data.dynamic_symbols.ai_filter.retrain_hours`: Retrain cadence in hours.
+- `data.dynamic_symbols.ai_filter.model_type`: Model type (e.g., PPO).
+- `data.dynamic_symbols.ai_filter.model_path`: Model path for AI filter policy.
+- `data.dynamic_symbols.ai_filter.train_max_symbols`: Cap symbols used for training.
+- `data.dynamic_symbols.ai_filter.max_samples_per_symbol`: Max samples per symbol during training.
+- `data.dynamic_symbols.ai_filter.rl.*`: PPO hyperparameters for AI filter.
+- `data.dynamic_symbols.ai_filter.rl.timesteps`: Training timesteps per run.
+- `data.dynamic_symbols.ai_filter.rl.learning_rate`: Learning rate.
+- `data.dynamic_symbols.ai_filter.rl.batch_size`: Batch size.
+- `data.dynamic_symbols.ai_filter.rl.n_steps`: PPO n_steps.
+- `data.dynamic_symbols.ai_filter.rl.gamma`: Discount factor.
+- `data.dynamic_symbols.ai_filter.rl.ent_coef`: Entropy coefficient.
+- `data.dynamic_symbols.ai_filter.rl.clip_range`: PPO clip range.
+- `data.dynamic_symbols.ai_filter.rl.gae_lambda`: GAE lambda.
+- `data.dynamic_symbols.ai_filter.online.*`: Online update settings.
+- `data.dynamic_symbols.ai_filter.online.enabled`: Enable online updates.
+- `data.dynamic_symbols.ai_filter.online.learning_rate`: Online learning rate.
+- `data.dynamic_symbols.ai_filter.online.steps`: Steps per update.
+- `data.dynamic_symbols.ai_filter.online.timesteps`: Timesteps per update.
+- `data.dynamic_symbols.ai_filter.online.max_symbols`: Max symbols per update.
+- `data.dynamic_symbols.ai_filter.news.*`: Optional news feature settings.
+- `data.dynamic_symbols.ai_filter.news.enabled`: Enable AI filter news features.
+- `data.dynamic_symbols.ai_filter.news.provider`: News provider for AI filter.
+- `data.dynamic_symbols.ai_filter.news.base_url`: News API base URL.
+- `data.dynamic_symbols.ai_filter.news.lookback_hours`: News lookback window.
+- `data.dynamic_symbols.ai_filter.news.keywords`: Keyword filters.
+- `data.dynamic_symbols.ai_filter.news.timeout_seconds/retries`: News request timeouts.
+- `data.dynamic_symbols.ai_filter.feed`: Alpaca feed for AI filter data.
+- `data.dynamic_symbols.ai_filter.objective`: Reward objective.
+- `data.dynamic_symbols.ai_filter.time_penalty_per_bar`: Time penalty in AI filter reward.
+- `data.dynamic_symbols.ai_filter.allow_orchestrator_fetch`: Let orchestrator fetch data in AI filter.
+- `data.dynamic_symbols.ai_filter.keras_returns.*`: Optional Keras return overlay.
+- `data.dynamic_symbols.ai_filter.keras_returns.enabled`: Enable Keras overlay.
+- `data.dynamic_symbols.ai_filter.keras_returns.model_path`: Keras model path.
+- `data.dynamic_symbols.ai_filter.keras_returns.interval`: Interval for overlay features.
+- `data.dynamic_symbols.ai_filter.keras_returns.score_mode`: Scoring mode (e.g., expected_return).
+- `data.dynamic_symbols.ai_filter.keras_returns.weight`: Overlay weight in scoring.
+- `data.dynamic_symbols.filters.*`: Primary scanner filters.
+- `data.dynamic_symbols.filters.price_min`: Minimum price filter.
+- `data.dynamic_symbols.filters.relative_volume_min`: Relative volume threshold.
+- `data.dynamic_symbols.filters.premarket_gain_min_pct`: Premarket gain threshold.
+- `data.dynamic_symbols.filters.min_shares_traded`: Min shares traded.
+- `data.dynamic_symbols.filters.max_spread_pct`: Max spread percent.
+- `data.dynamic_symbols.filters.strict_spread`: Enforce strict spread filter.
+- `data.dynamic_symbols.filters.require_catalyst`: Require news catalyst.
+- `data.dynamic_symbols.fallback.*`: Fallback scanner filters.
+- `data.dynamic_symbols.fallback.enabled`: Enable fallback filters.
+- `data.dynamic_symbols.fallback.relative_volume_min`: Fallback relative volume.
+- `data.dynamic_symbols.fallback.premarket_gain_min_pct`: Fallback premarket gain.
+- `data.dynamic_symbols.fallback.min_shares_traded`: Fallback minimum shares.
+- `data.dynamic_symbols.fallback.max_spread_pct`: Fallback max spread.
+- `data.dynamic_symbols.fallback.require_catalyst`: Require catalyst in fallback.
+- `data.start/end`: Optional global date range for data ingestion.
+- `data.proxy`: HTTP proxy for data providers.
+- `data.rate_limit_seconds`: Default rate limit sleep.
+- `data.output_dir`: Output directory for downloads.
+- `data.sources[]`: Per-provider ingestion settings.
+- `data.sources[].provider`: Provider name (yfinance, alpaca, stooq, alphavantage).
+- `data.sources[].enabled`: Enable this source.
+- `data.sources[].symbols`: Explicit symbol list (empty uses provider default or universe).
+- `data.sources[].interval`: Bar interval.
+- `data.sources[].lookback_days`: Lookback for providers that use days.
+- `data.sources[].rate_limit_seconds`: Delay between requests.
+- `data.sources[].symbol_blacklist`: Symbols to skip (yfinance).
+- `data.sources[].universe`: Universe selector (alpaca).
+- `data.sources[].max_universe`: Max universe size (alpaca).
+- `data.sources[].start/end`: Date range overrides (alpaca).
+- `data.sources[].api_key`: API key (alphavantage).
+
+### market_cache
+- `market_cache.enabled`: Enable cache service integration.
+- `market_cache.redis_url`: Redis endpoint.
+- `market_cache.file_dir`: File cache directory.
+- `market_cache.batch_size`: Batch size per refresh cycle.
+- `market_cache.delay_seconds`: Delay between batches.
+- `market_cache.max_age_multiplier`: Multiplier for staleness checks.
+- `market_cache.cache_only`: If true, only serve cached data.
+- `market_cache.ignore_staleness`: Serve stale data when true.
+- `market_cache.allow_pickle`: Allow legacy pickle reads (safety risk).
+- `market_cache.filtered_symbols.enabled`: Enable filtered-symbol cache.
+
+### checkpointing
+- `checkpointing.enabled`: Enable periodic state checkpoints.
+- `checkpointing.interval_seconds`: Save cadence.
+- `checkpointing.dir`: Checkpoint directory.
+- `checkpointing.keep_history`: Retain historical checkpoints.
+- `checkpointing.retention.max_age_hours/max_files`: Retention policy.
+
+### healthwatch
+- `healthwatch.enabled`: Enable healthwatch service.
+- `healthwatch.interval_seconds`: Probe cadence.
+- `healthwatch.timeout_seconds`: Probe timeout.
+- `healthwatch.port`: Healthwatch HTTP port.
+- `healthwatch.targets.*`: Service health endpoints to monitor.
+- `healthwatch.market_shutdown.*`: Market-based stack sleep/wake settings.
+- `healthwatch.market_shutdown.project_name`: Compose project to stop/start.
+- `healthwatch.market_shutdown.check_interval_seconds`: Scheduler cadence.
+- `healthwatch.market_shutdown.start_before_minutes`: Start lead time.
+- `healthwatch.market_shutdown.heartbeat_minutes`: Heartbeat log interval.
+- `healthwatch.market_shutdown.write_state`: Write ops state file.
+- `healthwatch.market_shutdown.state_path`: Ops state file path.
+- `healthwatch.market_shutdown.keep_services`: Services to keep running when closed.
+- `healthwatch.market_shutdown.stop_services`: Explicit services to stop.
+
+### kill_switch
+- `kill_switch.armed`: Master arm switch (must be true to act).
+- `kill_switch.confirm_code`: User-entered confirmation code.
+- `kill_switch.required_code`: Required confirmation code (env var).
+- `kill_switch.confirm_phrase`: Required confirmation phrase.
+- `kill_switch.force_sleep`: Force the system into sleep mode.
+- `kill_switch.force_liquidate`: Force liquidation of open positions.
+
+### reports
+- `reports.daily_top_movers.*`: Daily report settings.
+- `reports.daily_top_movers.enabled`: Enable report generator.
+- `reports.daily_top_movers.top_n`: Top movers count.
+- `reports.daily_top_movers.universe/max_universe`: Universe selection.
+- `reports.daily_top_movers.feed`: Alpaca feed.
+- `reports.daily_top_movers.output_dir`: Output directory for reports.
+- `reports.daily_top_movers.training_enabled/training_data_dir`: Training export.
+- `reports.daily_top_movers.check_interval_seconds`: Poll cadence.
+- `reports.daily_top_movers.close_delay_minutes`: Delay after market close.
+- `reports.daily_top_movers.broker_venues`: Per-broker venue overrides.
+- `reports.daily_top_movers.use_symbol_venues_auto`: Use auto venue mapping.
+- `reports.daily_top_movers.prometheus_url`: Prometheus endpoint for metrics.
+- `reports.daily_top_movers.signal_thresholds.*`: Signal thresholds for ranking.
+- `reports.daily_top_movers.signal_thresholds.early_return_30m_pct`: Early return threshold.
+- `reports.daily_top_movers.signal_thresholds.sustained_return_60m_pct`: Sustained return threshold.
+- `reports.daily_top_movers.signal_thresholds.early_volume_pct`: Early volume threshold.
+- `reports.daily_top_movers.signal_thresholds.runup_pct`: Runup threshold.
+- `reports.daily_top_movers.signal_thresholds.drawdown_pct`: Drawdown threshold.
+- `reports.daily_top_movers.news.*`: News aggregation settings.
+- `reports.daily_top_movers.news.max_headlines`: Max headlines to include.
+- `reports.daily_top_movers.news.include_summaries`: Include provider summaries.
+- `reports.daily_top_movers.news.correlation_window_minutes`: Window for news/price correlation.
+- `reports.daily_top_movers.decision_trace.*`: Decision trace export.
+- `reports.daily_top_movers.decision_trace.enabled`: Enable decision trace export.
+- `reports.daily_top_movers.decision_trace.output_dir`: Decision trace output directory.
+- `reports.daily_top_movers.explain_ai.*`: LLM-based explanation.
+- `reports.daily_top_movers.explain_ai.enabled`: Enable LLM explanations.
+- `reports.daily_top_movers.explain_ai.provider`: LLM provider (ollama).
+- `reports.daily_top_movers.explain_ai.base_url`: LLM base URL.
+- `reports.daily_top_movers.explain_ai.model`: LLM model name.
+- `reports.daily_top_movers.explain_ai.timeout_seconds`: LLM timeout.
+- `reports.daily_top_movers.explain_ai.max_text_chars`: Max text length per prompt.
+- `reports.daily_top_movers.email.*`: Email settings for the report.
+- `reports.daily_top_movers.email.use_alertmanager_config`: Use Alertmanager email config.
+- `reports.daily_top_movers.email.alertmanager_config_path`: Path to Alertmanager config.
+- `reports.daily_top_movers.email.smtp_require_tls`: Require TLS for email.
+
+### news
+- `news.enabled`: Enable news fetching.
+- `news.provider`: News provider (`alpaca` or `brokers`).
+- `news.base_url`: News API base URL.
+- `news.api_key/api_secret`: News credentials.
+- `news.lookback_hours`: How far back to fetch news.
+- `news.cache_minutes`: Cache TTL for news.
+- `news.keywords`: Keyword filters.
+- `news.timeout_seconds`: Request timeout.
+- `news.retries`: Retry count.
+- `news.llm.*`: LLM gate settings for news relevance.
+- `news.llm.enabled`: Enable LLM news filtering.
+- `news.llm.provider`: LLM provider (ollama).
+- `news.llm.base_url`: LLM base URL.
+- `news.llm.model`: LLM model name.
+- `news.llm.timeout_seconds`: LLM request timeout.
+- `news.llm.max_items`: Max items to evaluate per cycle.
+- `news.llm.max_text_chars`: Max text length per prompt.
+
+### pattern_trading
+- `pattern_trading.selection.*`: Scanner filters for pattern strategy.
+- `pattern_trading.selection.price_min`: Minimum price filter.
+- `pattern_trading.selection.relative_volume_min`: Relative volume threshold.
+- `pattern_trading.selection.premarket_gain_min_pct`: Premarket gain threshold.
+- `pattern_trading.selection.min_shares_traded`: Min shares traded.
+- `pattern_trading.selection.max_spread_pct`: Max spread percent.
+- `pattern_trading.selection.strict_spread`: Enforce strict spread filter.
+- `pattern_trading.selection.require_catalyst`: Require news catalyst.
+- `pattern_trading.pattern.*`: Pattern detection parameters.
+- `pattern_trading.pattern.ma_periods`: Moving-average periods.
+- `pattern_trading.pattern.pullback_max_retrace_pct`: Max pullback retrace.
+- `pattern_trading.entry.*`: Entry confirmation settings.
+- `pattern_trading.entry.breakout_lookback_bars`: Bars to consider for breakout.
+- `pattern_trading.entry.volume_confirm_mult`: Volume confirmation multiplier.
+- `pattern_trading.risk.*`: Strategy-specific risk controls.
+- `pattern_trading.risk.stop_loss_pct`: Stop-loss percent.
+- `pattern_trading.risk.partial_take_profit_pct`: Partial take-profit percent.
+- `pattern_trading.risk.trailing_stop_pct`: Trailing stop percent.
+
+### execution
+- `execution.open_orders.*`: Open-order polling and guards.
+- `execution.open_orders.enabled`: Enable open-order tracking.
+- `execution.open_orders.interval_seconds`: Poll cadence.
+- `execution.open_orders.skip_if_pending`: Skip work if pending orders exist.
+- `execution.open_orders.strategy_guard`: Skip signals when pending orders exist.
+- `execution.open_orders.missing_grace_seconds`: Grace period before marking missing orders completed/canceled.
+- `execution.algos.*`: Execution algorithm settings (TWAP/VWAP/POV).
+- `execution.algos.default`: Default algo name (twap/vwap/pov/off).
+- `execution.algos.min_notional`: Minimum notional to use algos.
+- `execution.algos.adaptive.enabled`: Enable adaptive algo selection.
+- `execution.algos.adaptive.impact_bps_thresholds`: Impact thresholds for switching algo.
+- `execution.algos.twap.duration_seconds/slices`: TWAP schedule.
+- `execution.algos.vwap.duration_seconds/profile`: VWAP schedule weights.
+- `execution.algos.pov.max_participation`: Max percent of volume for POV.
+- `execution.algos.pov.estimated_volume`: Estimated session volume for POV.
+- `execution.impact.*`: Impact model coefficients.
+- `execution.impact.base_bps`: Base impact in bps.
+- `execution.impact.volume_scale_bps`: Volume scaling factor.
+- `execution.impact.min_vol_pct`: Minimum volume percent for scaling.
+- `execution.retry.*`: Retry policy for failed orders.
+- `execution.retry.enabled`: Enable retries.
+- `execution.retry.max_attempts`: Max retry attempts.
+- `execution.retry.backoff_seconds`: Backoff between retries.
+- `execution.retry.max_notional`: Max notional eligible for retry.
+- `execution.retry.reasons[]`: Retry-eligible reason codes.
+- `execution.retry.reasons[]`: Retry-eligible reason codes.
+- `execution.brokers.*`: Multi-broker routing configuration.
+- `execution.brokers.routing.mode`: Routing mode (`auto_split`, `direct`).
+- `execution.brokers.routing.default`: Default broker when no rule matches.
+- `execution.brokers.routing.symbols/strategies`: Per-symbol or per-strategy routing.
+- `execution.brokers.routing.fallback_enabled`: Enable fallback to any connected broker.
+
+### monitoring
+- `monitoring.prometheus_port`: Metrics server port.
+- `monitoring.metrics_path`: Metrics endpoint path.
+- `monitoring.audit.*`: Audit logging settings.
+- `monitoring.audit.enabled`: Enable audit logging.
+- `monitoring.audit.output_dir`: Audit output directory.
+- `monitoring.audit.include_features/include_market_state`: Payload controls.
+- `monitoring.audit.retention_days`: Log retention policy.
+- `monitoring.audit.enforce_reason_codes`: Enforce reason-code whitelist.
+- `monitoring.audit.reason_codes_path`: Reason code config path.
+- `monitoring.audit.signing.*`: HMAC signing settings.
+- `monitoring.audit.signing.enabled`: Enable audit log signing.
+- `monitoring.audit.signing.secret_env`: Env var with signing secret.
+- `monitoring.compliance.*`: Compliance export settings.
+- `monitoring.compliance.enabled`: Enable compliance exports.
+- `monitoring.compliance.output_dir`: Compliance output directory.
+- `monitoring.compliance.formats[]`: Output formats.
+- `monitoring.compliance.include_features/include_market_state`: Payload controls.
+- `monitoring.compliance.retention_days`: Log retention policy.
+- `monitoring.compliance.enforce_reason_codes`: Enforce reason-code whitelist.
+- `monitoring.compliance.reason_codes_path`: Reason code config path.
+- `monitoring.compliance.signing.*`: HMAC signing settings.
+- `monitoring.compliance.signing.enabled`: Enable compliance log signing.
+- `monitoring.compliance.signing.secret_env`: Env var with signing secret.
