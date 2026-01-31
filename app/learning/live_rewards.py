@@ -119,26 +119,26 @@ class LiveRewardTracker:
         if updated:
             self._save_positions()
 
-    def on_order_response(self, response: dict) -> None:
+    def on_order_response(self, response: dict) -> dict | None:
         status = str(response.get("status", "")).lower()
         if status not in {"completed", "filled"}:
-            return
+            return None
         symbol = response.get("symbol")
         if not symbol:
-            return
+            return None
         broker = response.get("broker")
         side = str(response.get("side", "")).lower()
         if side not in {"buy", "sell"}:
-            return
+            return None
         qty = response.get("filled_qty") or response.get("qty")
         price = response.get("filled_avg_price") or response.get("price")
         try:
             qty = float(qty or 0.0)
             price = float(price or 0.0)
         except (TypeError, ValueError):
-            return
+            return None
         if qty <= 0 or price <= 0:
-            return
+            return None
 
         key = self._key(broker, str(symbol))
         pos = self._positions.get(key, LivePosition(qty=0.0, avg_entry=0.0))
@@ -190,7 +190,7 @@ class LiveRewardTracker:
         self._save_positions()
 
         if realized_pnl == 0.0 or entry_qty == 0.0:
-            return
+            return None
 
         reward = _reward_value(realized_pnl, entry_price, entry_qty, self._cfg)
         record = {
@@ -205,6 +205,7 @@ class LiveRewardTracker:
             "reward": reward,
         }
         self._append_reward(record)
+        return record
 
     def _append_reward(self, record: dict) -> None:
         try:

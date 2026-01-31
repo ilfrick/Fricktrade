@@ -271,6 +271,7 @@ orchestrator:
     update_steps_per_bar: 1
     epsilon: 0.2
     min_price_move_pct: 0.02
+    reward_mode: policy
     reward_scale: 1.0
     entropy_coef: 0.01
     baseline_alpha: 0.1

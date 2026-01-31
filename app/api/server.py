@@ -182,6 +182,7 @@ _DESCRIPTIONS = {
     "orchestrator.rl.update_steps_per_bar": "RL orchestrator update steps per bar.",
     "orchestrator.rl.epsilon": "RL orchestrator exploration rate.",
     "orchestrator.rl.min_price_move_pct": "Minimum price move to train the RL orchestrator.",
+    "orchestrator.rl.reward_mode": "Reward mode: price_move (default) or policy (match RL policy rewards).",
     "orchestrator.rl.reward_scale": "Reward scale for RL orchestrator.",
     "orchestrator.rl.entropy_coef": "Entropy coefficient for RL policy exploration.",
     "orchestrator.rl.baseline_alpha": "EMA alpha for RL reward baseline.",

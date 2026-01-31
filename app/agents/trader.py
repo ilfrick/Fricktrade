@@ -1151,7 +1151,12 @@ class TradingAgent:
                     logging.warning("Orchestrator order feedback failed: %s", exc)
                 if self._live_reward_tracker is not None:
                     try:
-                        self._live_reward_tracker.on_order_response(response.__dict__)
+                        reward_event = self._live_reward_tracker.on_order_response(response.__dict__)
+                        if reward_event and isinstance(self._orchestrator, RLStrategyOrchestrator):
+                            try:
+                                self._orchestrator.on_trade_reward(reward_event)
+                            except Exception as exc:
+                                logging.warning("Orchestrator reward update failed: %s", exc)
                     except Exception as exc:
                         logging.warning("Live reward update failed: %s", exc)
 
