@@ -301,6 +301,8 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `learning.reward_sharpe_window_size`: Rolling window for Sharpe bonus.
 - `learning.reward_target_trade_frequency`: Target trade frequency ratio.
 - `learning.reward_frequency_penalty_scale`: Penalty scale for low/high frequency.
+- `learning.reward_pnl_mode`: PnL reward mode (`abs` or `pct`).
+- `learning.reward_pnl_scale`: Scale factor for PnL reward.
 - `learning.enable_time_aware_penalty`: Use minutes since last trade for penalty.
 - `learning.base_time_penalty_per_minute`: Penalty per minute idle.
 - `learning.bar_interval_minutes`: Bar duration in minutes.

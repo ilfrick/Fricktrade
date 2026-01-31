@@ -36,6 +36,8 @@ Additional ML: the AI symbol filter uses PPO (stable-baselines3) with online upd
   - `learning.reward_sharpe_window_size` - Rolling window for Sharpe calculation (default: 100)
   - `learning.reward_target_trade_frequency` - Target trade frequency as % of bars (default: 0.1)
   - `learning.reward_frequency_penalty_scale` - Penalty for deviating from target frequency (default: 0.5)
+  - `learning.reward_pnl_mode` - PnL reward mode: `abs` or `pct` (default: `abs`)
+  - `learning.reward_pnl_scale` - Scale factor for PnL reward (default: 1.0)
 - **Time-Aware Penalty:**
   - `learning.enable_time_aware_penalty` - Use dynamic time-based penalties (default: true)
   - `learning.base_time_penalty_per_minute` - Base penalty per minute of inactivity (default: 0.01)
@@ -90,6 +92,7 @@ The RL agent learns through a multi-component reward system designed to maximize
 1. **Realized PnL** - Base reward from closed positions:
    - Long: `(exit_price - entry_price) × quantity - costs`
    - Short: `(entry_price - exit_price) × quantity - costs`
+   - If `learning.reward_pnl_mode: pct`, PnL is normalized by `entry_price × |qty|`
    - Transaction costs include commission and slippage
 
 2. **Win-Rate Shaping** - Direct incentives for profitable trades:

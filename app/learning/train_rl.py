@@ -81,6 +81,8 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
                 enable_time_aware_penalty=bool(learning_cfg.get("enable_time_aware_penalty", False)),
                 base_time_penalty_per_minute=float(learning_cfg.get("base_time_penalty_per_minute", 0.01)),
                 bar_interval_minutes=float(learning_cfg.get("bar_interval_minutes", 5.0)),
+                reward_pnl_mode=str(learning_cfg.get("reward_pnl_mode", "abs")),
+                reward_pnl_scale=float(learning_cfg.get("reward_pnl_scale", 1.0)),
             )
         )
         eval_sets.append(eval_df)

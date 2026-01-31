@@ -37,6 +37,8 @@ class TradingEnv(gym.Env):
         enable_time_aware_penalty: bool = False,
         base_time_penalty_per_minute: float = 0.01,
         bar_interval_minutes: float = 5.0,
+        reward_pnl_mode: str = "abs",
+        reward_pnl_scale: float = 1.0,
     ):
         super().__init__()
         self.data = data.reset_index(drop=True)
@@ -63,6 +65,8 @@ class TradingEnv(gym.Env):
         self.enable_time_aware_penalty = bool(enable_time_aware_penalty)
         self.base_time_penalty_per_minute = float(base_time_penalty_per_minute)
         self.bar_interval_minutes = float(bar_interval_minutes)
+        self.reward_pnl_mode = str(reward_pnl_mode or "abs").lower()
+        self.reward_pnl_scale = float(reward_pnl_scale)
 
         self.position_entry_price = 0.0 # Track entry price for current position
         self.position_entry_qty = 0.0   # Track quantity for current position
@@ -88,6 +92,16 @@ class TradingEnv(gym.Env):
         )
 
         self._reset_state()
+
+    def _pnl_reward(self, realized_pnl: float, entry_price: float, entry_qty: float) -> float:
+        if realized_pnl == 0:
+            return 0.0
+        if self.reward_pnl_mode == "pct":
+            denom = entry_price * abs(entry_qty)
+            if denom <= 0:
+                return 0.0
+            return (realized_pnl / denom) * self.reward_pnl_scale
+        return realized_pnl * self.reward_pnl_scale
 
     def _reset_state(self) -> None:
         last_index = max(len(self.data) - 1, 0)
@@ -140,6 +154,8 @@ class TradingEnv(gym.Env):
     def step(self, action: int):
         done = False
         price = self._get_price(self.step_index)
+        close_entry_price = self.position_entry_price
+        close_entry_qty = self.position_entry_qty
 
         # Initialize reward with time penalty
         if self.enable_time_aware_penalty:
@@ -206,8 +222,8 @@ class TradingEnv(gym.Env):
         # If action is 0 (flat), and position was closed above, we are now flat.
         # If action is 0 and we were already flat, we remain flat.
 
-        # Add realized PnL from closed trades to the reward for this step
-        reward += realized_pnl_this_step
+        # Add realized PnL reward from closed trades to the reward for this step
+        reward += self._pnl_reward(realized_pnl_this_step, close_entry_price, close_entry_qty)
 
         # Apply reward shaping if a trade was closed
         if realized_pnl_this_step != 0:
@@ -235,8 +251,8 @@ class TradingEnv(gym.Env):
                 reward -= streak_penalty
 
             # 4. Sharpe-like risk-adjusted reward
-            if abs(self.position_entry_price) > 1e-6:
-                trade_return_pct = realized_pnl_this_step / (self.position_entry_price * abs(self.position_entry_qty))
+            if abs(close_entry_price) > 1e-6 and abs(close_entry_qty) > 0:
+                trade_return_pct = realized_pnl_this_step / (close_entry_price * abs(close_entry_qty))
                 self.recent_returns.append(trade_return_pct)
 
                 if len(self.recent_returns) >= 10:

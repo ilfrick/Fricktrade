@@ -320,6 +320,8 @@ learning:
   reward_sharpe_window_size: 100
   reward_target_trade_frequency: 0.07
   reward_frequency_penalty_scale: 1.0
+  reward_pnl_mode: pct
+  reward_pnl_scale: 1.0
   # Time-aware penalty settings
   enable_time_aware_penalty: true
   base_time_penalty_per_minute: 0.01

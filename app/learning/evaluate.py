@@ -86,6 +86,8 @@ def evaluate_model(
                     enable_time_aware_penalty=bool(training_cfg.get("enable_time_aware_penalty", False)),
                     base_time_penalty_per_minute=float(training_cfg.get("base_time_penalty_per_minute", 0.01)),
                     bar_interval_minutes=float(training_cfg.get("bar_interval_minutes", 5.0)),
+                    reward_pnl_mode=str(training_cfg.get("reward_pnl_mode", "abs")),
+                    reward_pnl_scale=float(training_cfg.get("reward_pnl_scale", 1.0)),
                 )
             ]
         )
