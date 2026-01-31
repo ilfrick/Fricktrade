@@ -74,6 +74,7 @@ from app.data.scanner import ScanFilters, filter_universe_by_price, load_symbol_
 from app.data.market_cache import build_market_cache, build_market_cache_config, interval_to_seconds
 from app.learning.drift import DriftMonitor
 from app.learning.registry import load_active_model, load_latest_feature_stats
+from app.learning.live_rewards import LiveRewardTracker
 from app.brokers.config_utils import get_alpaca_account_cfg
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
@@ -178,6 +179,9 @@ class TradingAgent:
         self._active_symbol_labels: set[str] = set()
         self._active_symbol_labels_by_broker: dict[str, set[str]] = {}
         self._open_orders_labels_by_broker: set[tuple[str, str, str]] = set()
+        self._live_reward_tracker: LiveRewardTracker | None = None
+        if self.cfg.get("learning", {}).get("live_rewards", {}).get("enabled", False):
+            self._live_reward_tracker = LiveRewardTracker(self.cfg)
         self._dynamic_symbols_at: datetime | None = None
         self._dynamic_symbols: list[str] = []
         self._symbols: list[str] = []
@@ -1145,6 +1149,11 @@ class TradingAgent:
                     self._orchestrator.on_order_update(response.__dict__)
                 except Exception as exc:
                     logging.warning("Orchestrator order feedback failed: %s", exc)
+                if self._live_reward_tracker is not None:
+                    try:
+                        self._live_reward_tracker.on_order_response(response.__dict__)
+                    except Exception as exc:
+                        logging.warning("Live reward update failed: %s", exc)
 
     def _pending_orders(self, symbol: str, broker: str | None = None) -> list[dict]:
         pending = [order for order in self._open_orders_cache if order.get("symbol") == symbol]
@@ -1497,6 +1506,11 @@ class TradingAgent:
             STRATEGY_ACTIVE.labels(strategy=name).set(0 if self._strategy_disabled_globally(name) else 1)
         for broker_name in self._broker_names:
             BROKER_ACTIVE.labels(broker=broker_name).set(1)
+        if self._live_reward_tracker is not None:
+            try:
+                self._live_reward_tracker.sync_positions(portfolio)
+            except Exception as exc:
+                logging.warning("Live reward sync failed: %s", exc)
         self._update_account_metrics()
         self._update_position_metrics(portfolio)
         if self._performance_enabled:

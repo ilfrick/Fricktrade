@@ -322,6 +322,12 @@ learning:
   reward_frequency_penalty_scale: 1.0
   reward_pnl_mode: pct
   reward_pnl_scale: 1.0
+  live_rewards:
+    enabled: true
+    path: /data/learning/live_rewards.jsonl
+    positions_path: /data/learning/live_positions.json
+    max_days: 7
+    mode: add
   # Time-aware penalty settings
   enable_time_aware_penalty: true
   base_time_penalty_per_minute: 0.01
@@ -371,11 +377,13 @@ learning:
     timesteps: 1000
     eval_split: 0.1
     respect_ops_state: true
+    use_live_rewards: true
   training:
     data_dir: /data/rl_train_small
     interval: 5m
     timesteps: 5000
     checkpoint_best_only: false
+    use_live_rewards: false
     initial_cash: 200
     commission_pct: 0.05
     slippage_bps: 2

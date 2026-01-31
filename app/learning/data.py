@@ -28,6 +28,12 @@ def load_csv_data(data_dir: str, interval: str | None = None) -> list[pd.DataFra
         if not required.issubset(df.columns):
             continue
         df = df.sort_values("datetime") if "datetime" in df.columns else df
+        try:
+            symbol = file_path.stem.split("_")[0]
+            if symbol:
+                df.attrs["symbol"] = symbol
+        except Exception:
+            pass
         datasets.append(df)
     if not datasets:
         raise ValueError("No valid OHLCV CSVs found in data directory")

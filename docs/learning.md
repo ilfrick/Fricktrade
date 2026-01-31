@@ -38,6 +38,11 @@ Additional ML: the AI symbol filter uses PPO (stable-baselines3) with online upd
   - `learning.reward_frequency_penalty_scale` - Penalty for deviating from target frequency (default: 0.5)
   - `learning.reward_pnl_mode` - PnL reward mode: `abs` or `pct` (default: `abs`)
   - `learning.reward_pnl_scale` - Scale factor for PnL reward (default: 1.0)
+  - `learning.live_rewards.enabled` - Capture live trade rewards (default: false)
+  - `learning.live_rewards.path` - JSONL path for live rewards
+  - `learning.live_rewards.positions_path` - Persisted positions state
+  - `learning.live_rewards.max_days` - Max days of rewards used in training
+  - `learning.live_rewards.mode` - `add` or `override` (merge mode)
 - **Time-Aware Penalty:**
   - `learning.enable_time_aware_penalty` - Use dynamic time-based penalties (default: true)
   - `learning.base_time_penalty_per_minute` - Base penalty per minute of inactivity (default: 0.01)
@@ -83,6 +88,7 @@ docker compose run --rm trader python3 -m app.main evaluate --config /app/config
 ## Online Updates
 The learner service runs online updates when enabled:
 - `learning.online.enabled: true`
+- `learning.online.use_live_rewards` (apply live reward overrides in online updates)
 
 ## Reward System
 

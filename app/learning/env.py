@@ -39,6 +39,9 @@ class TradingEnv(gym.Env):
         bar_interval_minutes: float = 5.0,
         reward_pnl_mode: str = "abs",
         reward_pnl_scale: float = 1.0,
+        symbol: str | None = None,
+        reward_overrides: dict[str, float] | None = None,
+        reward_override_mode: str = "add",
     ):
         super().__init__()
         self.data = data.reset_index(drop=True)
@@ -67,6 +70,9 @@ class TradingEnv(gym.Env):
         self.bar_interval_minutes = float(bar_interval_minutes)
         self.reward_pnl_mode = str(reward_pnl_mode or "abs").lower()
         self.reward_pnl_scale = float(reward_pnl_scale)
+        self.symbol = str(symbol) if symbol else None
+        self.reward_overrides = reward_overrides or {}
+        self.reward_override_mode = str(reward_override_mode or "add").lower()
 
         self.position_entry_price = 0.0 # Track entry price for current position
         self.position_entry_qty = 0.0   # Track quantity for current position
@@ -154,6 +160,21 @@ class TradingEnv(gym.Env):
     def step(self, action: int):
         done = False
         price = self._get_price(self.step_index)
+        reward_override = 0.0
+        if self.reward_overrides and "datetime" in self.data.columns:
+            try:
+                ts = self.data.loc[self.step_index, "datetime"]
+            except Exception:
+                ts = None
+            if ts is not None:
+                try:
+                    ts_val = pd.to_datetime(ts, errors="coerce")
+                except Exception:
+                    ts_val = None
+                if ts_val is not None and not pd.isna(ts_val):
+                    bucket = ts_val.floor(f"{int(self.bar_interval_minutes)}min")
+                    key = bucket.isoformat()
+                    reward_override = float(self.reward_overrides.get(key, 0.0) or 0.0)
         close_entry_price = self.position_entry_price
         close_entry_qty = self.position_entry_qty
 
@@ -276,6 +297,12 @@ class TradingEnv(gym.Env):
         self.step_index += 1
         if self.step_index >= len(self.data) - 1:
             done = True
+
+        if reward_override:
+            if self.reward_override_mode == "override":
+                reward = reward_override
+            else:
+                reward += reward_override
 
         obs = self._get_obs()
 

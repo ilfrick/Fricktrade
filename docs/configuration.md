@@ -303,6 +303,12 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `learning.reward_frequency_penalty_scale`: Penalty scale for low/high frequency.
 - `learning.reward_pnl_mode`: PnL reward mode (`abs` or `pct`).
 - `learning.reward_pnl_scale`: Scale factor for PnL reward.
+- `learning.live_rewards.*`: Live reward capture settings.
+- `learning.live_rewards.enabled`: Enable live reward capture from fills.
+- `learning.live_rewards.path`: JSONL path for live rewards.
+- `learning.live_rewards.positions_path`: Path to persist open positions for reward calc.
+- `learning.live_rewards.max_days`: Max days of live rewards to use in training.
+- `learning.live_rewards.mode`: Reward merge mode (`add` or `override`).
 - `learning.enable_time_aware_penalty`: Use minutes since last trade for penalty.
 - `learning.base_time_penalty_per_minute`: Penalty per minute idle.
 - `learning.bar_interval_minutes`: Bar duration in minutes.
@@ -341,6 +347,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `learning.online.timesteps`: Steps per online update.
 - `learning.online.eval_split`: Evaluation split ratio.
 - `learning.online.respect_ops_state`: Pause updates during ops-state stop.
+- `learning.online.use_live_rewards`: Use live reward overrides in online updates.
 - `learning.training.*`: Offline training config and report paths.
 - `learning.training.data_dir`: Training data directory.
 - `learning.training.interval`: Bar interval for training.
@@ -350,6 +357,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `learning.training.commission_pct/slippage_bps`: Cost model.
 - `learning.training.eval_split`: Evaluation split ratio.
 - `learning.training.resume`: Resume training from existing model.
+- `learning.training.use_live_rewards`: Use live reward overrides in training runs.
 - `learning.training.report_path/best_report_path`: Training reports paths.
 - `learning.training.report_plot_dir`: Training plots output dir.
 

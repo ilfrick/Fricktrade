@@ -18,6 +18,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from app.learning.data import load_csv_data
 from app.learning.drift import compute_feature_stats
 from app.learning.env import TradingEnv
+from app.learning.live_rewards import load_live_reward_overrides
 from app.learning.evaluate import evaluate_model
 from app.learning.registry import build_active_record, register_model, set_active_model
 from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart
@@ -47,6 +48,12 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
         resume = bool(training_cfg.get("resume", True))
 
     datasets = load_csv_data(data_dir, interval=interval)
+    live_overrides = {}
+    if training_cfg.get("use_live_rewards") and learning_cfg.get("live_rewards", {}).get("enabled", False):
+        try:
+            live_overrides = load_live_reward_overrides(cfg, float(learning_cfg.get("bar_interval_minutes", 5.0)))
+        except Exception as exc:
+            logging.warning("Failed to load live reward overrides: %s", exc)
     envs = []
     eval_sets = []
     train_sets = []
@@ -58,8 +65,10 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
         else:
             train_df = df.iloc[:split_idx]
             eval_df = df.iloc[split_idx:]
+        symbol = train_df.attrs.get("symbol")
+        overrides = live_overrides.get(str(symbol), {}) if symbol and live_overrides else {}
         envs.append(
-            lambda data=train_df: TradingEnv(
+            lambda data=train_df, sym=symbol, ov=overrides: TradingEnv(
                 data=data,
                 window_size=window_size,
                 initial_cash=training_cfg.get("initial_cash", cfg["backtest"]["initial_cash"]),
@@ -83,6 +92,9 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
                 bar_interval_minutes=float(learning_cfg.get("bar_interval_minutes", 5.0)),
                 reward_pnl_mode=str(learning_cfg.get("reward_pnl_mode", "abs")),
                 reward_pnl_scale=float(learning_cfg.get("reward_pnl_scale", 1.0)),
+                symbol=str(sym) if sym else None,
+                reward_overrides=ov,
+                reward_override_mode=str(learning_cfg.get("live_rewards", {}).get("mode", "add")),
             )
         )
         eval_sets.append(eval_df)

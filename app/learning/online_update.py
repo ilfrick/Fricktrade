@@ -130,6 +130,7 @@ def run_online_updates(cfg: dict) -> None:
     eval_split = float(online_cfg.get("eval_split", 0.1))
     publish_in_progress = bool(online_cfg.get("publish_in_progress", True))
     checkpoint_interval = int(online_cfg.get("checkpoint_interval_steps", max(1, timesteps // 5)))
+    use_live_rewards = bool(online_cfg.get("use_live_rewards", False))
     resume = bool(learning_cfg.get("training", {}).get("resume", True))
     checkpoint_state = {"at": None}
     initial_delay = _initial_delay_seconds(cfg, interval_minutes)
@@ -181,6 +182,7 @@ def run_online_updates(cfg: dict) -> None:
         loop_cfg["learning"]["training"]["eval_split"] = eval_split
         loop_cfg["learning"]["training"]["checkpoint_interval_steps"] = checkpoint_interval
         loop_cfg["learning"]["training"]["publish_in_progress"] = publish_in_progress
+        loop_cfg["learning"]["training"]["use_live_rewards"] = use_live_rewards
         logging.info("Starting online update (%d timesteps)", timesteps)
         _train_with_lock(loop_cfg, resume=resume, cfg=cfg, owner=owner)
         checkpoint_state["at"] = _checkpoint_learner(
