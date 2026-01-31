@@ -90,6 +90,18 @@ The learner service runs online updates when enabled:
 - `learning.online.enabled: true`
 - `learning.online.use_live_rewards` (apply live reward overrides in online updates)
 
+## Orchestrator Rewards
+The RL orchestrator has its own reward loop used to train strategy selection:
+- Default (`orchestrator.rl.reward_mode: price_move`): reward is based on the next price move after a strategy action.
+- Policy-aligned (`orchestrator.rl.reward_mode: policy`): reward uses the same RL policy reward shaping
+  (`learning.reward_*`), including PnL, streak bonuses, Sharpe-like adjustment, and frequency incentives.
+
+When using `policy` mode, enable live rewards so the orchestrator sees realized PnL from fills:
+- `learning.live_rewards.enabled: true`
+- Rewards are recorded to `learning.live_rewards.path` and positions tracked in `learning.live_rewards.positions_path`.
+
+Without live rewards, policy mode still applies time/frequency shaping but will not see actual realized PnL.
+
 ## Reward System
 
 The RL agent learns through a multi-component reward system designed to maximize profitable trades while managing risk:
