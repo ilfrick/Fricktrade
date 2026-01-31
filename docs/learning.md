@@ -68,6 +68,7 @@ Additional ML: the AI symbol filter uses PPO (stable-baselines3) with online upd
 - `learning.online.respect_ops_state`
 - `learning.features.include_signal_features` (adds intraday signal features to observations)
 - `learning.features.signal_interval`
+  - `learning.training.checkpoint_best_only` - Keep best-only checkpoints (false publishes latest)
 
 ## Train
 ```bash

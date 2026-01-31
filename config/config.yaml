@@ -344,7 +344,7 @@ learning:
     artifact_prefix: ppo_policy
     active_path: /app/models/model_active.json
     use_active: true
-    publish_mode: best
+    publish_mode: latest
     refresh_minutes: 5
   drift:
     enabled: false
@@ -375,6 +375,7 @@ learning:
     data_dir: /data/rl_train_small
     interval: 5m
     timesteps: 5000
+    checkpoint_best_only: false
     initial_cash: 200
     commission_pct: 0.05
     slippage_bps: 2

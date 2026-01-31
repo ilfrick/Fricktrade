@@ -345,6 +345,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `learning.training.data_dir`: Training data directory.
 - `learning.training.interval`: Bar interval for training.
 - `learning.training.timesteps`: Training timesteps.
+- `learning.training.checkpoint_best_only`: Keep best model only (false publishes latest).
 - `learning.training.initial_cash`: Starting cash for training sim.
 - `learning.training.commission_pct/slippage_bps`: Cost model.
 - `learning.training.eval_split`: Evaluation split ratio.
