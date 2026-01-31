@@ -29,7 +29,7 @@ market:
       AMEX: NYSE
   open_mode: any
   extended_hours:
-    enabled: true
+    enabled: false
   holiday_update:
     enabled: true
     interval_days: 7
@@ -138,8 +138,8 @@ brokers:
       min_fee: 0.0
       spread_pct: 0.0
 risk:
-  enabled: false
-  max_daily_loss_pct: 2.0
+  enabled: true
+  max_daily_loss_pct: 1.0
   max_position_size_pct: 10.0
   max_portfolio_leverage: 1.5
   max_short_exposure_pct: 30.0
@@ -147,7 +147,7 @@ risk:
   cooldown_seconds: 5
   hard_stop_pct: 1.5
   trailing_stop_pct: 0.7
-  circuit_breaker_drawdown_pct: 5.0
+  circuit_breaker_drawdown_pct: 1.0
   vol_targeting:
     enabled: true
     target_vol_pct: 2.0
@@ -311,15 +311,15 @@ learning:
   reward_time_penalty_per_step: 0.15
   # New reward shaping parameters
   reward_win_trade_bonus: 0.5
-  reward_loss_trade_penalty: 0.2
+  reward_loss_trade_penalty: 0.4
   reward_win_streak_bonus_scale: 0.1
   reward_loss_streak_penalty_scale: 0.15
   reward_max_streak_bonus: 1.0
   reward_max_streak_penalty: 2.0
   reward_sharpe_bonus_scale: 0.1
   reward_sharpe_window_size: 100
-  reward_target_trade_frequency: 0.1
-  reward_frequency_penalty_scale: 0.5
+  reward_target_trade_frequency: 0.07
+  reward_frequency_penalty_scale: 1.0
   # Time-aware penalty settings
   enable_time_aware_penalty: true
   base_time_penalty_per_minute: 0.01
@@ -362,7 +362,7 @@ learning:
       lookback_minutes: 30
       entry_threshold_pct: 0.8
       exit_threshold_pct: 0.4
-      allow_shorts: true
+    allow_shorts: false
   online:
     enabled: true
     update_interval_minutes: 60
