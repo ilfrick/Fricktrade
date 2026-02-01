@@ -795,6 +795,7 @@ def _fetch_bars_yfinance(
 
 
 def _fetch_with_retries(client: StockHistoricalDataClient, request: StockBarsRequest, timeout: int, retries: int):
+    import time as time_module
     for attempt in range(retries + 1):
         try:
             return client.get_stock_bars(request).df
@@ -802,6 +803,9 @@ def _fetch_with_retries(client: StockHistoricalDataClient, request: StockBarsReq
             if attempt >= retries:
                 logging.warning("AI filter bars fetch failed: %s", exc)
                 return None
+            # Exponential backoff: 1s, 2s, 4s, ...
+            backoff = min(2 ** attempt, 30)
+            time_module.sleep(backoff)
     return None
 
 

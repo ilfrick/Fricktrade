@@ -1,18 +1,27 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
+import heapq
 import json
 import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import total_ordering
 
 from app.brokers.base import Broker
 from app.monitoring.metrics import ORDER_REJECTS, PDT_BLOCKS
 
 
+@total_ordering
 @dataclass
 class OrderRequest:
+    """
+    Represents an order request in the queue.
+
+    Uses @total_ordering for heapq compatibility (ordered by earliest_at).
+    """
+
     symbol: str
     side: str
     qty: float
@@ -24,6 +33,14 @@ class OrderRequest:
     order_id: str | None = None
     attempts: int = 0
     notional: float | None = None
+
+    def __lt__(self, other: "OrderRequest") -> bool:
+        return self.earliest_at < other.earliest_at
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, OrderRequest):
+            return NotImplemented
+        return self.earliest_at == other.earliest_at
 
 
 @dataclass
@@ -40,6 +57,13 @@ class OrderResponse:
 
 
 class OrderQueue:
+    """
+    FIFO order queue with priority scheduling and retry logic.
+
+    Uses heapq for O(log n) insertion instead of O(n log n) sorting.
+    Thread-safe: All operations are protected by a lock.
+    """
+
     def __init__(
         self,
         broker: Broker,
@@ -50,7 +74,7 @@ class OrderQueue:
         self._broker = broker
         self._broker_name = broker_name
         self._retry_cfg = retry_cfg or {}
-        self._queue: list[OrderRequest] = []
+        self._queue: list[OrderRequest] = []  # heapq
         self._active: OrderRequest | None = None
         self._active_snapshot: dict | None = None
         self._cancel_requested: set[str] = set()
@@ -81,14 +105,21 @@ class OrderQueue:
             earliest_at=earliest_at or datetime.utcnow(),
             notional=notional,
         )
+        result_order_id = None
+        started_immediately = False
+
         with self._lock:
-            self._queue.append(request)
-            self._queue.sort(key=lambda r: r.earliest_at)
+            heapq.heappush(self._queue, request)
             if self._active is None:
                 self._start_next()
-                return self._active.order_id if self._active else None
-        logging.info("Order queued: %s %s qty=%s type=%s", side, symbol, qty, order_type)
-        return None
+                if self._active:
+                    result_order_id = self._active.order_id
+                    started_immediately = True
+
+        if not started_immediately:
+            logging.info("Order queued: %s %s qty=%s type=%s", side, symbol, qty, order_type)
+
+        return result_order_id
 
     def mark_cancel_requested(self, order_id: str) -> None:
         if order_id:
@@ -144,13 +175,16 @@ class OrderQueue:
             return responses
 
     def _start_next(self) -> None:
+        """Start processing the next order in queue. Must be called with lock held."""
         if not self._queue:
             return
         now = datetime.utcnow()
+        # Peek at the top of the heap
         request = self._queue[0]
         if request.earliest_at > now:
             return
-        request = self._queue.pop(0)
+        # Pop from heap
+        request = heapq.heappop(self._queue)
         try:
             order_id = self._broker.place_order(
                 request.symbol,
@@ -266,17 +300,18 @@ class OrderQueue:
         return True
 
     def _enqueue_retry(self, request: OrderRequest) -> None:
+        """Re-enqueue a request for retry with exponential backoff."""
         request.attempts += 1
         backoff = int(self._retry_cfg.get("backoff_seconds", 5))
         request.earliest_at = datetime.utcnow() + timedelta(seconds=backoff * request.attempts)
         notional = float(request.notional or 0.0)
         if notional > 0:
             self._retry_notional_used += notional
-        self._queue.append(request)
-        self._queue.sort(key=lambda r: r.earliest_at)
+        heapq.heappush(self._queue, request)
 
 
 def _reject_reason(code: str, exc: Exception) -> str:
+    """Extract reject reason from error code or exception text."""
     mapping = {
         "40310100": "pdt_protection",
     }

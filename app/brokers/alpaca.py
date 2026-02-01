@@ -155,9 +155,13 @@ class AlpacaBroker(Broker):
     def close_position(self, symbol: str) -> None:
         try:
             record_broker_call(self._name, "close_position", self.client.close_position, symbol)
-        except Exception:
-            # Ignore if position does not exist.
-            return
+        except Exception as exc:
+            # Only ignore if position does not exist
+            exc_str = str(exc).lower()
+            if "not found" in exc_str or "no position" in exc_str or "does not exist" in exc_str:
+                return
+            logging.warning("Failed to close position %s: %s", symbol, exc)
+            raise
 
     def cancel_order(self, order_id: str) -> None:
         if not order_id:

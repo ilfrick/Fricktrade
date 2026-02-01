@@ -82,7 +82,19 @@ class BrokerRouter(Broker):
         broker_name = kwargs.get("broker") or self.resolve_broker(symbol, kwargs.get("strategy"))
         broker = self._brokers.get(str(broker_name))
         if broker is None:
-            raise ValueError(f"Unknown broker {broker_name!r} for {symbol}")
+            # Log warning and fall back to first available broker
+            available = list(self._brokers.keys())
+            if not available:
+                raise ValueError(f"No brokers available for {symbol}")
+            fallback = available[0]
+            logging.warning(
+                "Unknown broker %r for %s, falling back to %s",
+                broker_name,
+                symbol,
+                fallback,
+            )
+            broker = self._brokers[fallback]
+            broker_name = fallback
         return broker.place_order(symbol, side, qty, order_type, **kwargs)
 
     def close_position(self, symbol: str, **kwargs) -> None:

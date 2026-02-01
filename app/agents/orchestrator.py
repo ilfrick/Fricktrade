@@ -846,9 +846,10 @@ class RLStrategyOrchestrator:
         if features is None:
             return
         features = self._normalize_features(features)
-        x = torch.tensor(features, dtype=torch.float32)
-        action = torch.tensor(int(action_idx), dtype=torch.long)
-        reward_tensor = torch.tensor(float(reward), dtype=torch.float32)
+        # Store tensors on CPU to avoid GPU memory leak in buffer
+        x = torch.tensor(features, dtype=torch.float32).cpu()
+        action = torch.tensor(int(action_idx), dtype=torch.long).cpu()
+        reward_tensor = torch.tensor(float(reward), dtype=torch.float32).cpu()
         self._buffer.append((x, action, reward_tensor))
 
     def _train(self) -> None:

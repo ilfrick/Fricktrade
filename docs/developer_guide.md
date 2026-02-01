@@ -26,10 +26,11 @@
 
 ## Concurrency & Thread Safety
 - **Parallel Execution:** `TradingAgent` processes symbols in parallel using a `ThreadPoolExecutor` (default 12 workers) to maximize throughput during data fetching and AI inference.
-- **Thread Safety:** 
-  - `OrderQueue` (`app/execution/order_queue.py`) is thread-safe via internal locks.
-  - `RiskManager` (`app/risk/manager.py`) protects critical state (daily loss, drawdowns) with locks.
+- **Thread Safety:**
+  - `OrderQueue` (`app/execution/order_queue.py`) is thread-safe via internal locks. Uses `heapq` for O(log n) priority insertion.
+  - `RiskManager` (`app/risk/manager.py`) protects all state mutations with locks. Includes auto-reset of daily loss at market open.
   - `TradingAgent` protects shared state (broker state, open orders cache) with a reentrant lock (`self._lock`).
+  - `RLStrategyOrchestrator` stores experience buffer tensors on CPU to prevent GPU memory leaks.
 - **Decoupled Reporting:** Account metrics and market status are updated in a separate daemon thread (`_run_reporting_loop`) to ensure observability even if the trading loop is under heavy load.
 
 ## Tests

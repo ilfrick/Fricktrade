@@ -210,8 +210,9 @@ class MarketCache:
                     symbols: list[str] = []
                     stale_count = 0
                     max_stale_age = 0.0
-                    for key in keys:
-                        raw = self._redis.get(key)
+                    # Use mget for batch retrieval instead of N individual get calls
+                    raw_values = self._redis.mget(keys)
+                    for key, raw in zip(keys, raw_values):
                         if not raw:
                             continue
                         record = self._deserialize(raw) or {}
@@ -325,8 +326,12 @@ class MarketCache:
         for symbol in symbols:
             self._write_filtered_symbol_file(interval, symbol, record)
 
+    def _sanitize_symbol(self, symbol: str) -> str:
+        """Sanitize symbol for use in Redis keys (replace special chars)."""
+        return symbol.replace(":", "_").replace("*", "_").replace("?", "_")
+
     def _bars_key(self, interval: str, symbol: str) -> str:
-        return f"market_cache:bars:{interval}:{symbol}"
+        return f"market_cache:bars:{interval}:{self._sanitize_symbol(symbol)}"
 
     def _filtered_key(self, interval: str) -> str:
         return f"market_cache:filtered:{interval}"
@@ -335,7 +340,7 @@ class MarketCache:
         return f"{self._filtered_key(interval)}:"
 
     def _filtered_symbol_key(self, interval: str, symbol: str) -> str:
-        return f"{self._filtered_key(interval)}:{symbol}"
+        return f"{self._filtered_key(interval)}:{self._sanitize_symbol(symbol)}"
 
     def _filtered_symbol_from_key(self, key: object) -> str | None:
         if key is None:

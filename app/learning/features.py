@@ -61,14 +61,20 @@ _RISK_REASON_CODES = {
 
 
 def _sma(values: np.ndarray, period: int) -> float:
+    """Calculate Simple Moving Average with period validation."""
+    if period <= 0:
+        return float(np.mean(values)) if values.size > 0 else 0.0
     if values.size < period:
-        return float(np.mean(values))
+        return float(np.mean(values)) if values.size > 0 else 0.0
     return float(np.mean(values[-period:]))
 
 
 def _ema(values: np.ndarray, period: int) -> float:
+    """Calculate Exponential Moving Average with period validation."""
+    if period <= 0:
+        return float(np.mean(values)) if values.size > 0 else 0.0
     if values.size < period:
-        return float(np.mean(values))
+        return float(np.mean(values)) if values.size > 0 else 0.0
     alpha = 2.0 / (period + 1.0)
     ema = values[-period]
     for val in values[-period + 1 :]:
@@ -77,6 +83,9 @@ def _ema(values: np.ndarray, period: int) -> float:
 
 
 def _rsi(values: np.ndarray, period: int) -> float:
+    """Calculate Relative Strength Index with period validation."""
+    if period <= 0:
+        return 50.0
     if values.size < period + 1:
         return 50.0
     deltas = np.diff(values[-(period + 1) :])
