@@ -29,6 +29,8 @@ def compute_feature_stats(
             break
         closes = df.get("Close").tolist()
         volumes = df.get("Volume").tolist()
+        highs = df.get("High").tolist() if "High" in df.columns else None
+        lows = df.get("Low").tolist() if "Low" in df.columns else None
         limit = len(closes)
         for idx in range(window_size, limit):
             if count >= max_samples:
@@ -43,6 +45,8 @@ def compute_feature_stats(
                 cash_pct=1.0,
                 buying_power_pct=1.0,
                 feature_config=feature_config,
+                highs=highs[: idx + 1] if highs else None,
+                lows=lows[: idx + 1] if lows else None,
             )
             vec = np.asarray(obs, dtype=float).reshape(-1)
             if sums is None:
