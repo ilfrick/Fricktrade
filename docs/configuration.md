@@ -662,7 +662,8 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `execution.retry.reasons[]`: Retry-eligible reason codes.
 - `execution.retry.reasons[]`: Retry-eligible reason codes.
 - `execution.brokers.*`: Multi-broker routing configuration.
-- `execution.brokers.routing.mode`: Routing mode (`auto_split`, `direct`).
+- `execution.brokers.routing.mode`: Routing mode (`parallel`, `auto_split`, `direct`).
+- `execution.brokers.routing.buying_power_scaling`: Scale symbol count per broker by buying power (parallel mode).
 - `execution.brokers.routing.default`: Default broker when no rule matches.
 - `execution.brokers.routing.symbols/strategies`: Per-symbol or per-strategy routing.
 - `execution.brokers.routing.fallback_enabled`: Enable fallback to any connected broker.

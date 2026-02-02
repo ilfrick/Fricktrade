@@ -118,6 +118,7 @@ class BrokerState:
     risk_outcomes: dict[str, dict] = field(default_factory=dict)
     last_prices: dict[str, float] = field(default_factory=dict)
     last_bar_ts: dict[str, datetime] = field(default_factory=dict)
+    buying_power: float = 0.0
 
 
 class TradingAgent:
@@ -1437,8 +1438,16 @@ class TradingAgent:
                 symbols_by_broker[broker_name] = set(batch)
         else:
             routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
-            if routing_mode == "auto_split" and len(self._broker_map) > 1:
-                buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
+            broker_names = list(self._broker_map.keys())
+            if routing_mode == "parallel" and len(broker_names) > 1:
+                broker_buying_power = self._get_broker_buying_power()
+                buckets = routing_utils.parallel_partition_symbols(
+                    symbols, broker_names, broker_buying_power, self._routing_cfg, min_symbols=1
+                )
+                for broker_name, batch in buckets.items():
+                    symbols_by_broker[broker_name] = set(batch)
+            elif routing_mode == "auto_split" and len(broker_names) > 1:
+                buckets = routing_utils.partition_symbols(symbols, broker_names, self._routing_cfg)
                 for broker_name, batch in buckets.items():
                     symbols_by_broker[broker_name] = set(batch)
         if symbols_by_broker:
@@ -1454,16 +1463,44 @@ class TradingAgent:
 
     def _build_symbol_batches(self, symbols: list[str]) -> list[tuple[str, str | None, list[str]]]:
         routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
-        if routing_mode == "auto_split" and len(self._broker_map) > 1:
+        broker_names = list(self._broker_map.keys())
+
+        if routing_mode == "parallel" and len(broker_names) > 1:
+            # Parallel mode: each broker gets symbols based on buying power
+            broker_buying_power = self._get_broker_buying_power()
+            buckets = routing_utils.parallel_partition_symbols(
+                symbols,
+                broker_names,
+                broker_buying_power,
+                self._routing_cfg,
+                min_symbols=1,
+            )
+            # Cache for active symbol labels
+            self._symbols_by_broker = buckets
+            return [
+                ("parallel", broker, batch)
+                for broker, batch in buckets.items()
+                if batch
+            ]
+
+        if routing_mode == "auto_split" and len(broker_names) > 1:
             if self._symbols_by_broker:
                 return [
                     ("auto_split", broker, batch)
                     for broker, batch in self._symbols_by_broker.items()
                     if batch
                 ]
-            buckets = routing_utils.partition_symbols(symbols, list(self._broker_map.keys()), self._routing_cfg)
+            buckets = routing_utils.partition_symbols(symbols, broker_names, self._routing_cfg)
             return [("auto_split", broker, batch) for broker, batch in buckets.items()]
+
         return [("default", None, symbols)]
+
+    def _get_broker_buying_power(self) -> dict[str, float]:
+        """Get buying power for all brokers from their state."""
+        result: dict[str, float] = {}
+        for name, state in self._broker_states.items():
+            result[name] = state.buying_power
+        return result
 
     def _update_open_order_queues(self) -> None:
         if len(self._broker_map) > 1:
@@ -1759,6 +1796,10 @@ class TradingAgent:
                         ACCOUNT_INVESTED_BY_BROKER.labels(broker=name).set(equity - cash)
                         broker_equities[str(name)] = equity
                         self._update_broker_equity_state(str(name), equity)
+                        # Update buying power in broker state for parallel routing
+                        broker_state = self._broker_states.get(str(name))
+                        if broker_state:
+                            broker_state.buying_power = buying_power
                 elif "equity" in account:
                     total_val = float(account.get("equity") or 0.0)
                     cash_val = float(account.get("cash") or 0.0)

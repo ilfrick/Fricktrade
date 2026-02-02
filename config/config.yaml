@@ -147,7 +147,7 @@ risk:
   cooldown_seconds: 5
   hard_stop_pct: 1.5
   trailing_stop_pct: 0.7
-  circuit_breaker_drawdown_pct: 1.0
+  circuit_breaker_drawdown_pct: 3.0
   vol_targeting:
     enabled: true
     target_vol_pct: 2.0
@@ -752,7 +752,8 @@ execution:
   brokers:
     enabled: true
     routing:
-      mode: auto_split
+      mode: parallel
+      buying_power_scaling: true
       default: alpaca
       symbols: {}
       strategies: {}
