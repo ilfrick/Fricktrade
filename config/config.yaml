@@ -344,6 +344,10 @@ learning:
     - 10
     rsi_periods:
     - 14
+    adx_periods:
+    - 14
+    trend_strength_periods:
+    - 14
   registry:
     enabled: true
     path: /app/models/model_registry.json

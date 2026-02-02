@@ -99,6 +99,103 @@ def _rsi(values: np.ndarray, period: int) -> float:
     return float(100.0 - (100.0 / (1.0 + rs)))
 
 
+def _adx(
+    highs: np.ndarray,
+    lows: np.ndarray,
+    closes: np.ndarray,
+    period: int,
+) -> tuple[float, float, float]:
+    """
+    Calculate ADX with +DI and -DI.
+
+    Returns:
+        (adx, plus_di, minus_di) - all in range 0-100
+    """
+    if period <= 0 or closes.size < period + 1:
+        return (25.0, 50.0, 50.0)  # Neutral defaults
+
+    n = closes.size
+    # True Range
+    tr = np.zeros(n)
+    tr[0] = highs[0] - lows[0]
+    for i in range(1, n):
+        hl = highs[i] - lows[i]
+        hc = abs(highs[i] - closes[i - 1])
+        lc = abs(lows[i] - closes[i - 1])
+        tr[i] = max(hl, hc, lc)
+
+    # Directional Movement
+    plus_dm = np.zeros(n)
+    minus_dm = np.zeros(n)
+    for i in range(1, n):
+        up = highs[i] - highs[i - 1]
+        down = lows[i - 1] - lows[i]
+        if up > down and up > 0:
+            plus_dm[i] = up
+        if down > up and down > 0:
+            minus_dm[i] = down
+
+    # Wilder's smoothing (EMA-style with alpha = 1/period)
+    def wilder_smooth(arr: np.ndarray, p: int) -> np.ndarray:
+        result = np.zeros_like(arr)
+        # Initial sum for first smoothed value
+        result[p - 1] = np.mean(arr[:p])
+        alpha = 1.0 / p
+        for i in range(p, len(arr)):
+            result[i] = result[i - 1] * (1 - alpha) + arr[i] * alpha
+        return result
+
+    atr = wilder_smooth(tr, period)
+    smooth_plus = wilder_smooth(plus_dm, period)
+    smooth_minus = wilder_smooth(minus_dm, period)
+
+    # +DI and -DI
+    plus_di = np.zeros(n)
+    minus_di = np.zeros(n)
+    for i in range(period - 1, n):
+        if atr[i] > 0:
+            plus_di[i] = 100.0 * smooth_plus[i] / atr[i]
+            minus_di[i] = 100.0 * smooth_minus[i] / atr[i]
+
+    # DX and ADX
+    dx = np.zeros(n)
+    for i in range(period - 1, n):
+        denom = plus_di[i] + minus_di[i]
+        if denom > 0:
+            dx[i] = 100.0 * abs(plus_di[i] - minus_di[i]) / denom
+
+    adx = wilder_smooth(dx, period)
+
+    # Clamp values to valid range (can exceed 100 in edge cases due to smoothing)
+    final_adx = float(np.clip(adx[-1], 0.0, 100.0))
+    final_plus_di = float(np.clip(plus_di[-1], 0.0, 100.0))
+    final_minus_di = float(np.clip(minus_di[-1], 0.0, 100.0))
+
+    return (final_adx, final_plus_di, final_minus_di)
+
+
+def _trend_strength(closes: np.ndarray, period: int) -> float:
+    """
+    Calculate trend strength as efficiency ratio.
+
+    Returns value in [-1, 1]:
+    - +1.0 = perfect uptrend
+    - -1.0 = perfect downtrend
+    - 0.0 = choppy/no trend
+    """
+    if period <= 0 or closes.size < period:
+        return 0.0
+
+    window = closes[-period:]
+    net_change = window[-1] - window[0]
+    total_path = np.sum(np.abs(np.diff(window)))
+
+    if total_path < 1e-10:
+        return 0.0
+
+    return float(np.clip(net_change / total_path, -1.0, 1.0))
+
+
 def observation_size(window_size: int, feature_config: dict | None = None) -> int:
     base = window_size * 2 + 3
     if not feature_config:
@@ -117,6 +214,10 @@ def observation_size(window_size: int, feature_config: dict | None = None) -> in
     if include_risk_features:
         extra += risk_feature_size(include_decision=True)
     extra += len(sma_periods) + len(ema_periods) + len(rsi_periods)
+    adx_periods = feature_config.get("adx_periods", [])
+    trend_strength_periods = feature_config.get("trend_strength_periods", [])
+    extra += len(adx_periods) * 3  # ADX returns 3 values: adx, +DI, -DI
+    extra += len(trend_strength_periods)
     return base + extra
 
 
@@ -129,6 +230,8 @@ def build_observation(
     buying_power_pct: float,
     feature_config: dict | None = None,
     risk_features: list[float] | None = None,
+    highs: Sequence[float] | None = None,
+    lows: Sequence[float] | None = None,
 ) -> np.ndarray:
     if not closes:
         raise ValueError("closes must contain at least one value")
@@ -200,6 +303,21 @@ def build_observation(
             features.append(np.array([_ema(closes_window, int(period))], dtype=np.float32))
         for period in feature_config.get("rsi_periods", []):
             features.append(np.array([_rsi(closes_window, int(period))], dtype=np.float32))
+        for period in feature_config.get("adx_periods", []):
+            if highs is not None and lows is not None:
+                highs_arr = np.asarray(highs, dtype=np.float32)
+                lows_arr = np.asarray(lows, dtype=np.float32)
+                if highs_arr.size < window_size:
+                    highs_arr = np.pad(highs_arr, (window_size - highs_arr.size, 0), mode="edge")
+                    lows_arr = np.pad(lows_arr, (window_size - lows_arr.size, 0), mode="edge")
+                highs_window = highs_arr[-window_size:]
+                lows_window = lows_arr[-window_size:]
+                adx_val, plus_di, minus_di = _adx(highs_window, lows_window, closes_window, int(period))
+                features.append(np.array([adx_val, plus_di, minus_di], dtype=np.float32))
+            else:
+                features.append(np.array([25.0, 50.0, 50.0], dtype=np.float32))
+        for period in feature_config.get("trend_strength_periods", []):
+            features.append(np.array([_trend_strength(closes_window, int(period))], dtype=np.float32))
 
     obs = np.concatenate(features)
     return obs

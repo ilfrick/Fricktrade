@@ -141,6 +141,8 @@ class TradingEnv(gym.Env):
     def _get_obs(self) -> np.ndarray:
         closes = self.data.loc[: self.step_index, "Close"].tolist()
         volumes = self.data.loc[: self.step_index, "Volume"].tolist()
+        highs = self.data.loc[: self.step_index, "High"].tolist() if "High" in self.data.columns else None
+        lows = self.data.loc[: self.step_index, "Low"].tolist() if "Low" in self.data.columns else None
         cash_pct = self.cash / self.initial_cash if self.initial_cash else 1.0
         return build_observation(
             closes,
@@ -150,6 +152,8 @@ class TradingEnv(gym.Env):
             float(cash_pct),
             float(cash_pct),
             feature_config=self.feature_config,
+            highs=highs,
+            lows=lows,
         )
 
     def _trade_cost(self, price: float) -> float:

@@ -319,6 +319,8 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `learning.features.include_signal_features`: Include signal features in vector.
 - `learning.features.signal_interval`: Interval for signal features.
 - `learning.features.sma_periods/ema_periods/rsi_periods`: Indicator periods.
+- `learning.features.adx_periods`: List of periods for ADX calculation. Each period adds 3 features: ADX (trend strength 0-100), +DI (bullish pressure), -DI (bearish pressure).
+- `learning.features.trend_strength_periods`: List of periods for trend efficiency ratio. Returns value in [-1, +1] where +1 is perfect uptrend, -1 is perfect downtrend.
 - `learning.registry.*`: Model registry settings and active pointer path.
 - `learning.registry.enabled`: Enable registry writes.
 - `learning.registry.path`: Registry JSON path.

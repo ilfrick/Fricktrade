@@ -112,6 +112,8 @@ class RLPolicyStrategy(Strategy):
             buying_power_pct=buying_power_pct,
             feature_config=self.feature_config,
             risk_features=risk_features,
+            highs=market_state.get("highs"),
+            lows=market_state.get("lows"),
         )
         if self._drift_monitor:
             self._drift_monitor.update_features(obs)
