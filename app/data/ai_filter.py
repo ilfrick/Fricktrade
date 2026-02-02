@@ -26,6 +26,7 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from app.data.news import fetch_catalyst_symbols_for_config
 from app.data.market_cache import MarketCache, interval_to_seconds
 from app.data.yfinance_utils import fetch_yfinance_bars
+from app.learning.features import _adx, _trend_strength
 from app.utils.signal_features import compute_signal_metrics_from_window
 from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart # Import GPU state utilities
 
@@ -832,6 +833,8 @@ def _features_and_labels(frame: pd.DataFrame, cfg: AISymbolFilterConfig, catalys
         return np.empty((0, 0)), np.empty((0,))
     close = frame["close"].astype(float).values
     volume = frame["volume"].astype(float).values
+    high = frame["high"].astype(float).values if "high" in frame.columns else None
+    low = frame["low"].astype(float).values if "low" in frame.columns else None
     returns = np.diff(close) / close[:-1]
     if len(returns) < cfg.window + 1:
         return np.empty((0, 0)), np.empty((0,))
@@ -842,8 +845,13 @@ def _features_and_labels(frame: pd.DataFrame, cfg: AISymbolFilterConfig, catalys
         window_vol = volume[idx - cfg.window : idx]
         window_prices = close[idx - cfg.window : idx + 1]
         window_vol_prices = volume[idx - cfg.window : idx + 1]
+        window_highs = high[idx - cfg.window : idx + 1] if high is not None else None
+        window_lows = low[idx - cfg.window : idx + 1] if low is not None else None
         feat_rows.append(
-            _feature_vector(window_ret, window_vol, catalyst, window_prices, window_vol_prices, cfg.interval)
+            _feature_vector(
+                window_ret, window_vol, catalyst, window_prices, window_vol_prices, cfg.interval,
+                highs=window_highs, lows=window_lows,
+            )
         )
         labels.append(_target_value(returns[idx + 1], window_vol, cfg.objective, cfg.time_penalty_per_bar))
     return np.array(feat_rows, dtype=float), np.array(labels, dtype=float)
@@ -854,6 +862,8 @@ def _latest_features(frame: pd.DataFrame, window: int, catalyst: bool, interval:
         return None
     close = frame["close"].astype(float).values
     volume = frame["volume"].astype(float).values
+    high = frame["high"].astype(float).values if "high" in frame.columns else None
+    low = frame["low"].astype(float).values if "low" in frame.columns else None
     returns = np.diff(close) / close[:-1]
     if len(returns) < window:
         return None
@@ -861,7 +871,12 @@ def _latest_features(frame: pd.DataFrame, window: int, catalyst: bool, interval:
     window_vol = volume[-window:]
     window_prices = close[-(window + 1) :]
     window_vol_prices = volume[-(window + 1) :]
-    return _feature_vector(window_ret, window_vol, catalyst, window_prices, window_vol_prices, interval)
+    window_highs = high[-(window + 1) :] if high is not None else None
+    window_lows = low[-(window + 1) :] if low is not None else None
+    return _feature_vector(
+        window_ret, window_vol, catalyst, window_prices, window_vol_prices, interval,
+        highs=window_highs, lows=window_lows,
+    )
 
 
 def build_feature_vector_from_series(
@@ -870,11 +885,15 @@ def build_feature_vector_from_series(
     window: int,
     catalyst: bool,
     interval: str,
+    highs: Iterable[float] | None = None,
+    lows: Iterable[float] | None = None,
 ) -> np.ndarray | None:
     close = np.array(list(prices), dtype=float)
     if close.size < 2:
         return None
     volume = np.array(list(volumes), dtype=float)
+    high_arr = np.array(list(highs), dtype=float) if highs is not None else None
+    low_arr = np.array(list(lows), dtype=float) if lows is not None else None
     returns = np.diff(close) / close[:-1]
     if len(returns) < window:
         return None
@@ -890,7 +909,12 @@ def build_feature_vector_from_series(
         window_vol_prices = volume[-(window + 1) :]
     else:
         window_vol_prices = volume
-    return _feature_vector(window_ret, window_vol, catalyst, window_prices, window_vol_prices, interval)
+    window_highs = high_arr[-(window + 1) :] if high_arr is not None and high_arr.size >= window + 1 else None
+    window_lows = low_arr[-(window + 1) :] if low_arr is not None and low_arr.size >= window + 1 else None
+    return _feature_vector(
+        window_ret, window_vol, catalyst, window_prices, window_vol_prices, interval,
+        highs=window_highs, lows=window_lows,
+    )
 
 
 def latest_features_for_symbol(
@@ -916,6 +940,8 @@ def _feature_vector(
     prices: np.ndarray | None,
     prices_volume: np.ndarray | None,
     interval: str,
+    highs: np.ndarray | None = None,
+    lows: np.ndarray | None = None,
 ) -> np.ndarray:
     mean_ret = float(np.mean(returns))
     std_ret = float(np.std(returns))
@@ -945,6 +971,14 @@ def _feature_vector(
                 signal_vals.get("signal_drawdown_abs", 0.0),
             ]
         )
+    # ADX and trend strength features
+    if highs is not None and lows is not None and prices is not None and len(prices) >= 14:
+        adx_val, plus_di, minus_di = _adx(highs, lows, prices, 14)
+        trend_str = _trend_strength(prices, 14)
+        features.extend([adx_val, plus_di, minus_di, trend_str])
+    else:
+        # Neutral defaults when high/low not available
+        features.extend([25.0, 50.0, 50.0, 0.0])
     return np.array(features, dtype=float)
 
 

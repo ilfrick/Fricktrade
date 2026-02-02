@@ -1135,12 +1135,16 @@ class RLStrategyOrchestrator:
         catalyst = bool(market_state.get("catalyst", False))
         prices = market_state.get("prices") or []
         volumes = market_state.get("volumes") or []
+        highs = market_state.get("highs") or []
+        lows = market_state.get("lows") or []
         features = ai_filter_module.build_feature_vector_from_series(
             prices,
             volumes,
             window,
             catalyst,
             interval=str(self._ai_filter_cfg.get("interval", "5m")),
+            highs=highs if highs else None,
+            lows=lows if lows else None,
         )
         allow_fetch = bool(self._ai_filter_cfg.get("allow_orchestrator_fetch", False))
         if features is None and allow_fetch:
@@ -1285,7 +1289,7 @@ def _feature_vector(market_state: dict, risk_cfg: dict | None = None) -> list[fl
 
 
 def _ai_feature_dim() -> int:
-    return 14
+    return 18  # 14 original + 4 ADX/trend features (adx, +di, -di, trend_strength)
 
 
 def _order_feature_dim() -> int:
