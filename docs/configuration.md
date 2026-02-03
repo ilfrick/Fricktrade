@@ -291,29 +291,23 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `learning.use_best_model`: Prefer best model if available.
 - `learning.device`: `auto`, `cpu`, or `cuda`.
 - `learning.window_size`: Observation window size (bars).
-- `learning.reward_time_penalty_per_step`: Base penalty per step.
-- `learning.reward_*`: Reward shaping parameters (win/loss, streaks, Sharpe, frequency).
-- `learning.reward_win_trade_bonus`: Reward bonus per winning trade.
-- `learning.reward_loss_trade_penalty`: Penalty per losing trade.
-- `learning.reward_win_streak_bonus_scale`: Win streak bonus scale.
-- `learning.reward_loss_streak_penalty_scale`: Loss streak penalty scale.
-- `learning.reward_max_streak_bonus`: Cap for win streak bonus.
-- `learning.reward_max_streak_penalty`: Cap for loss streak penalty.
-- `learning.reward_sharpe_bonus_scale`: Sharpe-like bonus scale.
-- `learning.reward_sharpe_window_size`: Rolling window for Sharpe bonus.
-- `learning.reward_target_trade_frequency`: Target trade frequency ratio.
-- `learning.reward_frequency_penalty_scale`: Penalty scale for low/high frequency.
-- `learning.reward_pnl_mode`: PnL reward mode (`abs` or `pct`).
-- `learning.reward_pnl_scale`: Scale factor for PnL reward.
+- `learning.reward.*`: Dense per-step reward configuration (replaces sparse reward shaping).
+- `learning.reward.nav_weight` (float, default 1.0): Weight for differential NAV change component.
+- `learning.reward.time_penalty_weight` (float, default 0.5): Weight for position holding time penalty.
+- `learning.reward.profit_bonus_weight` (float, default 2.0): Bonus weight for realized profitable trades.
+- `learning.reward.velocity_weight` (float, default 0.3): Weight for equity curve velocity component.
+- `learning.reward.nav_normalizer` (float, default 100000.0): Normalizer for reward magnitudes (typically set to initial_cash).
+- `learning.reward.time_normalizer` (float, default 390.0): Minutes in trading day for time penalty scaling.
+- `learning.reward.velocity_window` (int, default 20): Number of steps for equity velocity lookback.
+- `learning.reward.bar_interval_minutes` (float, default 5.0): Minutes per price bar.
 - `learning.live_rewards.*`: Live reward capture settings.
 - `learning.live_rewards.enabled`: Enable live reward capture from fills.
 - `learning.live_rewards.path`: JSONL path for live rewards.
 - `learning.live_rewards.positions_path`: Path to persist open positions for reward calc.
 - `learning.live_rewards.max_days`: Max days of live rewards to use in training.
 - `learning.live_rewards.mode`: Reward merge mode (`add` or `override`).
-- `learning.enable_time_aware_penalty`: Use minutes since last trade for penalty.
-- `learning.base_time_penalty_per_minute`: Penalty per minute idle.
-- `learning.bar_interval_minutes`: Bar duration in minutes.
+- `learning.live_rewards.reward_pnl_mode`: PnL reward mode for live fills (`abs` or `pct`).
+- `learning.live_rewards.reward_pnl_scale`: Scale factor for live fill PnL reward.
 - `learning.features.*`: Feature toggles and technical indicator periods.
 - `learning.features.include_returns`: Include returns in feature vector.
 - `learning.features.include_signal_features`: Include signal features in vector.

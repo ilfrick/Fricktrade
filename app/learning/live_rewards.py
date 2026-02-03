@@ -45,8 +45,9 @@ def _reward_paths(cfg: dict) -> tuple[Path, Path]:
 
 def _reward_mode(cfg: dict) -> tuple[str, float]:
     learning_cfg = cfg.get("learning", {}) if isinstance(cfg, dict) else {}
-    mode = str(learning_cfg.get("reward_pnl_mode", "abs") or "abs").lower()
-    scale = float(learning_cfg.get("reward_pnl_scale", 1.0))
+    lr_cfg = learning_cfg.get("live_rewards", {})
+    mode = str(lr_cfg.get("reward_pnl_mode", learning_cfg.get("reward_pnl_mode", "abs")) or "abs").lower()
+    scale = float(lr_cfg.get("reward_pnl_scale", learning_cfg.get("reward_pnl_scale", 1.0)))
     return mode, scale
 
 

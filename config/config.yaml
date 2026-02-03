@@ -309,30 +309,23 @@ learning:
   use_best_model: false
   device: auto
   window_size: 50
-  reward_time_penalty_per_step: 0.15
-  # New reward shaping parameters
-  reward_win_trade_bonus: 0.5
-  reward_loss_trade_penalty: 0.4
-  reward_win_streak_bonus_scale: 0.1
-  reward_loss_streak_penalty_scale: 0.15
-  reward_max_streak_bonus: 1.0
-  reward_max_streak_penalty: 2.0
-  reward_sharpe_bonus_scale: 0.1
-  reward_sharpe_window_size: 100
-  reward_target_trade_frequency: 0.07
-  reward_frequency_penalty_scale: 1.0
-  reward_pnl_mode: pct
-  reward_pnl_scale: 1.0
+  reward:
+    nav_weight: 1.0
+    time_penalty_weight: 0.5
+    profit_bonus_weight: 2.0
+    velocity_weight: 0.3
+    nav_normalizer: 100000.0
+    time_normalizer: 390.0
+    velocity_window: 20
+    bar_interval_minutes: 5.0
   live_rewards:
     enabled: true
     path: /data/learning/live_rewards.jsonl
     positions_path: /data/learning/live_positions.json
     max_days: 7
     mode: add
-  # Time-aware penalty settings
-  enable_time_aware_penalty: true
-  base_time_penalty_per_minute: 0.01
-  bar_interval_minutes: 5.0
+    reward_pnl_mode: pct
+    reward_pnl_scale: 1.0
   features:
     include_returns: true
     include_signal_features: true

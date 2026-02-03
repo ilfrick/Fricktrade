@@ -40,9 +40,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     timesteps = int(training_cfg.get("timesteps", 200_000))
     eval_split = float(training_cfg.get("eval_split", 0.2))
     checkpoint_best_only = bool(training_cfg.get("checkpoint_best_only", True))
-    time_penalty = float(
-        training_cfg.get("reward_time_penalty_per_step", learning_cfg.get("reward_time_penalty_per_step", 0.0))
-    )
+    reward_cfg = learning_cfg.get("reward", {})
 
     if resume is None:
         resume = bool(training_cfg.get("resume", True))
@@ -51,7 +49,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
     live_overrides = {}
     if training_cfg.get("use_live_rewards") and learning_cfg.get("live_rewards", {}).get("enabled", False):
         try:
-            live_overrides = load_live_reward_overrides(cfg, float(learning_cfg.get("bar_interval_minutes", 5.0)))
+            live_overrides = load_live_reward_overrides(cfg, float(reward_cfg.get("bar_interval_minutes", 5.0)))
         except Exception as exc:
             logging.warning("Failed to load live reward overrides: %s", exc)
     envs = []
@@ -74,24 +72,8 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
                 initial_cash=training_cfg.get("initial_cash", cfg["backtest"]["initial_cash"]),
                 commission_pct=training_cfg.get("commission_pct", cfg["backtest"]["commission_pct"]),
                 slippage_bps=training_cfg.get("slippage_bps", cfg["backtest"]["slippage_bps"]),
-                time_penalty_per_step=time_penalty,
                 feature_config=feature_config,
-                # New reward shaping parameters
-                win_trade_bonus=float(learning_cfg.get("reward_win_trade_bonus", 0.5)),
-                loss_trade_penalty=float(learning_cfg.get("reward_loss_trade_penalty", 0.2)),
-                win_streak_bonus_scale=float(learning_cfg.get("reward_win_streak_bonus_scale", 0.1)),
-                loss_streak_penalty_scale=float(learning_cfg.get("reward_loss_streak_penalty_scale", 0.15)),
-                max_streak_bonus=float(learning_cfg.get("reward_max_streak_bonus", 1.0)),
-                max_streak_penalty=float(learning_cfg.get("reward_max_streak_penalty", 2.0)),
-                sharpe_bonus_scale=float(learning_cfg.get("reward_sharpe_bonus_scale", 0.1)),
-                sharpe_window_size=int(learning_cfg.get("reward_sharpe_window_size", 100)),
-                target_trade_frequency=float(learning_cfg.get("reward_target_trade_frequency", 0.1)),
-                frequency_penalty_scale=float(learning_cfg.get("reward_frequency_penalty_scale", 0.5)),
-                enable_time_aware_penalty=bool(learning_cfg.get("enable_time_aware_penalty", False)),
-                base_time_penalty_per_minute=float(learning_cfg.get("base_time_penalty_per_minute", 0.01)),
-                bar_interval_minutes=float(learning_cfg.get("bar_interval_minutes", 5.0)),
-                reward_pnl_mode=str(learning_cfg.get("reward_pnl_mode", "abs")),
-                reward_pnl_scale=float(learning_cfg.get("reward_pnl_scale", 1.0)),
+                reward_config=reward_cfg,
                 symbol=str(sym) if sym else None,
                 reward_overrides=ov,
                 reward_override_mode=str(learning_cfg.get("live_rewards", {}).get("mode", "add")),

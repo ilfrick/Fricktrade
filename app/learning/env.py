@@ -7,8 +7,109 @@ import numpy as np
 import pandas as pd
 import gymnasium as gym
 from collections import deque
+from dataclasses import dataclass
 
 from app.learning.features import build_observation, observation_size
+
+
+@dataclass
+class RewardConfig:
+    nav_weight: float = 1.0            # w1 - differential NAV
+    time_penalty_weight: float = 0.5   # w2 - position holding penalty
+    profit_bonus_weight: float = 2.0   # w3 - realized profit bonus
+    velocity_weight: float = 0.3       # w4 - equity velocity
+    nav_normalizer: float = 100_000.0  # normalizes all components
+    time_normalizer: float = 390.0     # minutes in a trading day
+    velocity_window: int = 20          # lookback steps for equity velocity
+    bar_interval_minutes: float = 5.0  # minutes per bar
+
+
+@dataclass
+class RewardBreakdown:
+    nav_change: float = 0.0
+    time_penalty: float = 0.0
+    profit_bonus: float = 0.0
+    velocity: float = 0.0
+    override: float = 0.0
+    total: float = 0.0
+
+
+class TradingRewardCalculator:
+    def __init__(self, config: RewardConfig):
+        self.cfg = config
+        self.prev_nav: float = 0.0
+        self.equity_buffer: deque[float] = deque(maxlen=config.velocity_window)
+        self.position_entry_step: int = 0
+        self.position_entry_price: float = 0.0
+        self.in_position: bool = False
+
+    def reset(self, initial_nav: float) -> None:
+        self.prev_nav = initial_nav
+        self.equity_buffer.clear()
+        self.equity_buffer.append(initial_nav)
+        self.position_entry_step = 0
+        self.position_entry_price = 0.0
+        self.in_position = False
+
+    def on_position_open(self, step: int, price: float) -> None:
+        self.in_position = True
+        self.position_entry_step = step
+        self.position_entry_price = price
+
+    def on_position_close(self) -> None:
+        self.in_position = False
+        self.position_entry_step = 0
+        self.position_entry_price = 0.0
+
+    def compute(
+        self,
+        nav: float,
+        step: int,
+        realized_pnl: float,
+        override: float = 0.0,
+        override_mode: str = "add",
+    ) -> RewardBreakdown:
+        norm = max(self.cfg.nav_normalizer, 1e-6)
+        bd = RewardBreakdown()
+
+        # 1. Differential NAV
+        bd.nav_change = self.cfg.nav_weight * (nav - self.prev_nav) / norm
+
+        # 2. Time penalty (only while in position)
+        if self.in_position:
+            steps_held = max(step - self.position_entry_step, 0)
+            minutes_held = steps_held * self.cfg.bar_interval_minutes
+            bd.time_penalty = -self.cfg.time_penalty_weight * minutes_held / max(self.cfg.time_normalizer, 1e-6)
+
+        # 3. Transaction costs - implicit in NAV change (already deducted)
+
+        # 4. Realized profit bonus (only on close with profit)
+        if realized_pnl > 0:
+            bd.profit_bonus = self.cfg.profit_bonus_weight * realized_pnl / norm
+
+        # 5. Equity velocity
+        self.equity_buffer.append(nav)
+        if len(self.equity_buffer) >= 2:
+            changes = []
+            buf = list(self.equity_buffer)
+            for i in range(1, len(buf)):
+                changes.append(buf[i] - buf[i - 1])
+            avg_change = sum(changes) / len(changes)
+            bd.velocity = self.cfg.velocity_weight * avg_change / norm
+
+        # Override handling
+        bd.override = override
+
+        # Total
+        bd.total = bd.nav_change + bd.time_penalty + bd.profit_bonus + bd.velocity
+        if override:
+            if override_mode == "override":
+                bd.total = override
+            else:
+                bd.total += override
+
+        self.prev_nav = nav
+        return bd
 
 
 class TradingEnv(gym.Env):
@@ -21,24 +122,8 @@ class TradingEnv(gym.Env):
         initial_cash: float = 100000.0,
         commission_pct: float = 0.05,
         slippage_bps: float = 2.0,
-        time_penalty_per_step: float = 0.0,
         feature_config: dict | None = None,
-        # New reward shaping parameters
-        win_trade_bonus: float = 0.5,
-        loss_trade_penalty: float = 0.2,
-        win_streak_bonus_scale: float = 0.1,
-        loss_streak_penalty_scale: float = 0.15,
-        max_streak_bonus: float = 1.0,
-        max_streak_penalty: float = 2.0,
-        sharpe_bonus_scale: float = 0.1,
-        sharpe_window_size: int = 100,
-        target_trade_frequency: float = 0.1,
-        frequency_penalty_scale: float = 0.5,
-        enable_time_aware_penalty: bool = False,
-        base_time_penalty_per_minute: float = 0.01,
-        bar_interval_minutes: float = 5.0,
-        reward_pnl_mode: str = "abs",
-        reward_pnl_scale: float = 1.0,
+        reward_config: RewardConfig | dict | None = None,
         symbol: str | None = None,
         reward_overrides: dict[str, float] | None = None,
         reward_override_mode: str = "add",
@@ -51,42 +136,28 @@ class TradingEnv(gym.Env):
         self.initial_cash = float(initial_cash)
         self.commission_pct = float(commission_pct)
         self.slippage_bps = float(slippage_bps)
-        self.time_penalty_per_step = float(time_penalty_per_step)
         self.feature_config = feature_config or {}
 
-        # New reward shaping parameters
-        self.win_trade_bonus = float(win_trade_bonus)
-        self.loss_trade_penalty = float(loss_trade_penalty)
-        self.win_streak_bonus_scale = float(win_streak_bonus_scale)
-        self.loss_streak_penalty_scale = float(loss_streak_penalty_scale)
-        self.max_streak_bonus = float(max_streak_bonus)
-        self.max_streak_penalty = float(max_streak_penalty)
-        self.sharpe_bonus_scale = float(sharpe_bonus_scale)
-        self.sharpe_window_size = int(sharpe_window_size)
-        self.target_trade_frequency = float(target_trade_frequency)
-        self.frequency_penalty_scale = float(frequency_penalty_scale)
-        self.enable_time_aware_penalty = bool(enable_time_aware_penalty)
-        self.base_time_penalty_per_minute = float(base_time_penalty_per_minute)
-        self.bar_interval_minutes = float(bar_interval_minutes)
-        self.reward_pnl_mode = str(reward_pnl_mode or "abs").lower()
-        self.reward_pnl_scale = float(reward_pnl_scale)
+        if isinstance(reward_config, dict):
+            self.reward_config = RewardConfig(**{
+                k: v for k, v in reward_config.items()
+                if k in RewardConfig.__dataclass_fields__
+            })
+        elif reward_config is None:
+            self.reward_config = RewardConfig()
+        else:
+            self.reward_config = reward_config
+        self.reward_calculator = TradingRewardCalculator(self.reward_config)
+
         self.symbol = str(symbol) if symbol else None
         self.reward_overrides = reward_overrides or {}
         self.reward_override_mode = str(reward_override_mode or "add").lower()
 
-        self.position_entry_price = 0.0 # Track entry price for current position
-        self.position_entry_qty = 0.0   # Track quantity for current position
-        self.total_realized_pnl = 0.0   # Track total realized PnL
-        self.last_portfolio_value = self.initial_cash # Keep track for overall change for flat periods
-
-        # New tracking variables
-        self.consecutive_wins = 0
-        self.consecutive_losses = 0
+        self.position_entry_price = 0.0
+        self.total_realized_pnl = 0.0
         self.gross_profits = 0.0
         self.gross_losses = 0.0
-        self.recent_returns = deque(maxlen=self.sharpe_window_size)
         self.trades_this_episode = 0
-        self.last_trade_step = 0
 
         self.action_space = gym.spaces.Discrete(3)
         obs_len = observation_size(window_size, self.feature_config)
@@ -99,35 +170,19 @@ class TradingEnv(gym.Env):
 
         self._reset_state()
 
-    def _pnl_reward(self, realized_pnl: float, entry_price: float, entry_qty: float) -> float:
-        if realized_pnl == 0:
-            return 0.0
-        if self.reward_pnl_mode == "pct":
-            denom = entry_price * abs(entry_qty)
-            if denom <= 0:
-                return 0.0
-            return (realized_pnl / denom) * self.reward_pnl_scale
-        return realized_pnl * self.reward_pnl_scale
-
     def _reset_state(self) -> None:
         last_index = max(len(self.data) - 1, 0)
         self.step_index = min(self.window_size, last_index)
         self.position = 0
         self.cash = self.initial_cash
         self.position_qty = 0.0
-        self.last_value = self.initial_cash
         self.position_entry_price = 0.0
-        self.position_entry_qty = 0.0
         self.total_realized_pnl = 0.0
-        self.last_portfolio_value = self.initial_cash
-        # Reset new tracking variables
-        self.consecutive_wins = 0
-        self.consecutive_losses = 0
+        self.last_value = self.initial_cash
+        self.trades_this_episode = 0
         self.gross_profits = 0.0
         self.gross_losses = 0.0
-        self.recent_returns.clear()
-        self.trades_this_episode = 0
-        self.last_trade_step = 0
+        self.reward_calculator.reset(self.initial_cash)
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
@@ -164,6 +219,8 @@ class TradingEnv(gym.Env):
     def step(self, action: int):
         done = False
         price = self._get_price(self.step_index)
+
+        # Resolve live reward override
         reward_override = 0.0
         if self.reward_overrides and "datetime" in self.data.columns:
             try:
@@ -176,24 +233,11 @@ class TradingEnv(gym.Env):
                 except Exception:
                     ts_val = None
                 if ts_val is not None and not pd.isna(ts_val):
-                    bucket = ts_val.floor(f"{int(self.bar_interval_minutes)}min")
+                    bucket = ts_val.floor(f"{int(self.reward_config.bar_interval_minutes)}min")
                     key = bucket.isoformat()
                     reward_override = float(self.reward_overrides.get(key, 0.0) or 0.0)
-        close_entry_price = self.position_entry_price
-        close_entry_qty = self.position_entry_qty
 
-        # Initialize reward with time penalty
-        if self.enable_time_aware_penalty:
-            # Time-aware penalty based on steps since last trade
-            steps_since_trade = self.step_index - self.last_trade_step
-            minutes_since_trade = steps_since_trade * self.bar_interval_minutes
-            time_penalty = self.base_time_penalty_per_minute * minutes_since_trade
-            reward = -time_penalty
-        else:
-            # Legacy static time penalty
-            reward = -self.time_penalty_per_step
-
-        # Variables to store realized PnL for the current step, if any
+        # Variables to store realized PnL for the current step
         realized_pnl_this_step = 0.0
 
         # Current position status before action
@@ -204,113 +248,73 @@ class TradingEnv(gym.Env):
         is_closing_short = (action == 1 or action == 0) and current_position == -1
 
         if is_closing_long:
-            # Calculate realized PnL for closed long trade
-            closed_pnl = (price - self.position_entry_price) * self.position_entry_qty
-            trade_cost = self._trade_cost(self.position_entry_price) * self.position_entry_qty + \
-                         self._trade_cost(price) * self.position_entry_qty
+            closed_pnl = (price - self.position_entry_price) * self.position_qty
+            trade_cost = self._trade_cost(self.position_entry_price) * self.position_qty + \
+                         self._trade_cost(price) * self.position_qty
             realized_pnl_this_step += closed_pnl - trade_cost
             self.total_realized_pnl += realized_pnl_this_step
             self.cash += self.position_qty * price - self._trade_cost(price)
-            # Reset position tracking
             self.position = 0
             self.position_qty = 0.0
             self.position_entry_price = 0.0
+            self.reward_calculator.on_position_close()
 
         elif is_closing_short:
-            # Calculate realized PnL for closed short trade
-            closed_pnl = (self.position_entry_price - price) * abs(self.position_entry_qty)
-            trade_cost = self._trade_cost(self.position_entry_price) * abs(self.position_entry_qty) + \
-                         self._trade_cost(price) * abs(self.position_entry_qty)
+            closed_pnl = (self.position_entry_price - price) * abs(self.position_qty)
+            trade_cost = self._trade_cost(self.position_entry_price) * abs(self.position_qty) + \
+                         self._trade_cost(price) * abs(self.position_qty)
             realized_pnl_this_step += closed_pnl - trade_cost
             self.total_realized_pnl += realized_pnl_this_step
             self.cash += abs(self.position_qty) * price - self._trade_cost(price)
-            # Reset position tracking
             self.position = 0
             self.position_qty = 0.0
             self.position_entry_price = 0.0
+            self.reward_calculator.on_position_close()
 
-        # Apply action to open new position or change existing one
-        if action == 1:  # Go long
-            if self.position == 0: # Only open if currently flat
-                self.position = 1
-                self.position_qty = 1.0 # Assume fixed quantity
-                self.position_entry_price = price
-                self.cash -= price + self._trade_cost(price)
-            # If already long, do nothing (hold long)
-        elif action == 2:  # Go short
-            if self.position == 0: # Only open if currently flat
-                self.position = -1
-                self.position_qty = -1.0 # Assume fixed quantity
-                self.position_entry_price = price
-                self.cash += price - self._trade_cost(price)
-            # If already short, do nothing (hold short)
-        # If action is 0 (flat), and position was closed above, we are now flat.
-        # If action is 0 and we were already flat, we remain flat.
-
-        # Add realized PnL reward from closed trades to the reward for this step
-        reward += self._pnl_reward(realized_pnl_this_step, close_entry_price, close_entry_qty)
-
-        # Apply reward shaping if a trade was closed
+        # Track wins/losses for info dict
         if realized_pnl_this_step != 0:
             self.trades_this_episode += 1
-            self.last_trade_step = self.step_index
-
-            # 1. Win-rate reward shaping
             if realized_pnl_this_step > 0:
-                reward += self.win_trade_bonus
-                self.consecutive_wins += 1
-                self.consecutive_losses = 0
                 self.gross_profits += realized_pnl_this_step
-
-                # 2. Win streak bonus
-                streak_bonus = min(self.consecutive_wins * self.win_streak_bonus_scale, self.max_streak_bonus)
-                reward += streak_bonus
             else:
-                reward -= self.loss_trade_penalty
-                self.consecutive_losses += 1
-                self.consecutive_wins = 0
                 self.gross_losses += abs(realized_pnl_this_step)
 
-                # 2. Loss streak penalty
-                streak_penalty = min(self.consecutive_losses * self.loss_streak_penalty_scale, self.max_streak_penalty)
-                reward -= streak_penalty
+        # Apply action to open new position
+        if action == 1:  # Go long
+            if self.position == 0:
+                self.position = 1
+                self.position_qty = 1.0
+                self.position_entry_price = price
+                self.cash -= price + self._trade_cost(price)
+                self.reward_calculator.on_position_open(self.step_index, price)
+        elif action == 2:  # Go short
+            if self.position == 0:
+                self.position = -1
+                self.position_qty = -1.0
+                self.position_entry_price = price
+                self.cash += price - self._trade_cost(price)
+                self.reward_calculator.on_position_open(self.step_index, price)
 
-            # 4. Sharpe-like risk-adjusted reward
-            if abs(close_entry_price) > 1e-6 and abs(close_entry_qty) > 0:
-                trade_return_pct = realized_pnl_this_step / (close_entry_price * abs(close_entry_qty))
-                self.recent_returns.append(trade_return_pct)
-
-                if len(self.recent_returns) >= 10:
-                    mean_return = float(np.mean(self.recent_returns))
-                    std_return = float(np.std(self.recent_returns))
-                    if std_return > 1e-6:
-                        sharpe_like = mean_return / std_return
-                        reward += sharpe_like * self.sharpe_bonus_scale
-
-        # 5. Trade frequency incentive
-        if self.step_index > 0:
-            actual_frequency = self.trades_this_episode / self.step_index
-            frequency_diff = abs(actual_frequency - self.target_trade_frequency)
-            frequency_reward = -frequency_diff * self.frequency_penalty_scale
-            reward += frequency_reward
-
-        # Update last_value for portfolio_value tracking, though not directly used for reward in this scheme
+        # Compute NAV = cash + mark-to-market position value
         portfolio_value = self.cash + (self.position_qty * price if self.position != 0 else 0)
-        self.last_value = portfolio_value # Keep for consistency or future use
+        self.last_value = portfolio_value
+
+        # Compute reward via calculator
+        bd = self.reward_calculator.compute(
+            nav=portfolio_value,
+            step=self.step_index,
+            realized_pnl=realized_pnl_this_step,
+            override=reward_override,
+            override_mode=self.reward_override_mode,
+        )
+        reward = bd.total
 
         self.step_index += 1
         if self.step_index >= len(self.data) - 1:
             done = True
 
-        if reward_override:
-            if self.reward_override_mode == "override":
-                reward = reward_override
-            else:
-                reward += reward_override
-
         obs = self._get_obs()
 
-        # Calculate profit factor for info
         profit_factor = self.gross_profits / max(self.gross_losses, 1e-6)
 
         info = {
@@ -318,8 +322,6 @@ class TradingEnv(gym.Env):
             "position": self.position,
             "cash": self.cash,
             "total_realized_pnl": self.total_realized_pnl,
-            "consecutive_wins": self.consecutive_wins,
-            "consecutive_losses": self.consecutive_losses,
             "gross_profits": self.gross_profits,
             "gross_losses": self.gross_losses,
             "profit_factor": profit_factor,

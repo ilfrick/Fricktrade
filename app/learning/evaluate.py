@@ -61,7 +61,6 @@ def evaluate_model(
     results = []
     equity_curves = []
     for df in datasets:
-        time_penalty = float(training_cfg.get("reward_time_penalty_per_step", 0.0))
         env = DummyVecEnv(
             [
                 lambda data=df: TradingEnv(
@@ -70,24 +69,8 @@ def evaluate_model(
                     initial_cash=training_cfg.get("initial_cash", 100000),
                     commission_pct=training_cfg.get("commission_pct", 0.05),
                     slippage_bps=training_cfg.get("slippage_bps", 2),
-                    time_penalty_per_step=time_penalty,
                     feature_config=feature_config,
-                    # New reward shaping parameters
-                    win_trade_bonus=float(training_cfg.get("reward_win_trade_bonus", 0.5)),
-                    loss_trade_penalty=float(training_cfg.get("reward_loss_trade_penalty", 0.2)),
-                    win_streak_bonus_scale=float(training_cfg.get("reward_win_streak_bonus_scale", 0.1)),
-                    loss_streak_penalty_scale=float(training_cfg.get("reward_loss_streak_penalty_scale", 0.15)),
-                    max_streak_bonus=float(training_cfg.get("reward_max_streak_bonus", 1.0)),
-                    max_streak_penalty=float(training_cfg.get("reward_max_streak_penalty", 2.0)),
-                    sharpe_bonus_scale=float(training_cfg.get("reward_sharpe_bonus_scale", 0.1)),
-                    sharpe_window_size=int(training_cfg.get("reward_sharpe_window_size", 100)),
-                    target_trade_frequency=float(training_cfg.get("reward_target_trade_frequency", 0.1)),
-                    frequency_penalty_scale=float(training_cfg.get("reward_frequency_penalty_scale", 0.5)),
-                    enable_time_aware_penalty=bool(training_cfg.get("enable_time_aware_penalty", False)),
-                    base_time_penalty_per_minute=float(training_cfg.get("base_time_penalty_per_minute", 0.01)),
-                    bar_interval_minutes=float(training_cfg.get("bar_interval_minutes", 5.0)),
-                    reward_pnl_mode=str(training_cfg.get("reward_pnl_mode", "abs")),
-                    reward_pnl_scale=float(training_cfg.get("reward_pnl_scale", 1.0)),
+                    reward_config=training_cfg.get("reward", {}),
                 )
             ]
         )
@@ -157,11 +140,9 @@ def evaluate_from_config(cfg: dict) -> dict:
     eval_split = float(training_cfg.get("eval_split", 0.2))
     report_path = training_cfg.get("report_path", "/app/models/training_report.json")
     plot_dir = training_cfg.get("report_plot_dir", "/app/models/reports")
-    if "reward_time_penalty_per_step" not in training_cfg:
+    if "reward" not in training_cfg:
         training_cfg = dict(training_cfg)
-        training_cfg["reward_time_penalty_per_step"] = float(
-            learning_cfg.get("reward_time_penalty_per_step", 0.0)
-        )
+        training_cfg["reward"] = learning_cfg.get("reward", {})
 
     datasets = load_csv_data(data_dir, interval=interval)
     eval_sets = []
