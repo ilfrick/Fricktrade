@@ -29,6 +29,11 @@ except Exception:
         return None
 
 TRADES = Counter("trades_total", "Total trades executed", ["symbol", "side"])
+TRADES_BY_BROKER = Counter(
+    "trades_by_broker_total",
+    "Total trades executed (per broker)",
+    ["broker", "symbol", "side"],
+)
 SKIPPED_ORDERS = Counter(
     "orders_skipped_total",
     "Orders skipped by safety checks",
@@ -51,6 +56,8 @@ PDT_BLOCKS = Counter(
 )
 PNL = Gauge("pnl_percent", "Current PnL percent")
 DRAWDOWN = Gauge("drawdown_percent", "Current drawdown percent")
+PNL_BY_BROKER = Gauge("pnl_percent_by_broker", "Current PnL percent (per broker)", ["broker"])
+DRAWDOWN_BY_BROKER = Gauge("drawdown_percent_by_broker", "Current drawdown percent (per broker)", ["broker"])
 ACCOUNT_TOTAL = Gauge("account_total", "Account total equity")
 ACCOUNT_CASH = Gauge("account_cash", "Account available cash")
 ACCOUNT_BUYING_POWER = Gauge("account_buying_power", "Account buying power")

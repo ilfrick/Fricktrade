@@ -59,6 +59,9 @@ from app.monitoring.metrics import (
     DECISION_LATENCY,
     ORDER_LATENCY,
     SKIPPED_ORDERS_BY_BROKER,
+    TRADES_BY_BROKER,
+    PNL_BY_BROKER,
+    DRAWDOWN_BY_BROKER,
 )
 from app.monitoring.audit import AuditLogger, ComplianceLogger
 from app.risk.manager import RiskManager
@@ -1095,6 +1098,7 @@ class TradingAgent:
                     broker_state.pending_entry_strategy[symbol] = {"strategy": strategy_label, "ts": now}
             if order_id and action in ("buy", "sell"):
                 TRADES.labels(symbol=symbol, side=action).inc()
+                TRADES_BY_BROKER.labels(broker=broker_name, symbol=symbol, side=action).inc()
                 broker_state.last_trade_at = now
                 self._emit_decision_trace(
                     trace,
@@ -1755,15 +1759,20 @@ class TradingAgent:
         strategy = chosen.get("name") if chosen else None
         return "sell", reduce_pct, strategy
 
-    def _update_broker_equity_state(self, broker_name: str, equity: float) -> None:
+    def _update_broker_equity_state(self, broker_name: str, equity: float, last_equity: float | None = None) -> None:
         broker_state = self._broker_state(broker_name)
         if broker_state.equity_start is None:
             broker_state.equity_start = equity
         if broker_state.equity_peak is None or equity > broker_state.equity_peak:
             broker_state.equity_peak = equity
+        base_equity = last_equity if last_equity else broker_state.equity_start
+        if base_equity:
+            pnl_pct = (equity - base_equity) / base_equity * 100.0
+            PNL_BY_BROKER.labels(broker=broker_name).set(pnl_pct)
         if broker_state.equity_peak:
             drawdown_pct = (broker_state.equity_peak - equity) / broker_state.equity_peak * 100.0
             broker_state.current_drawdown_pct = max(drawdown_pct, 0.0)
+            DRAWDOWN_BY_BROKER.labels(broker=broker_name).set(max(drawdown_pct, 0.0))
         today = datetime.utcnow().date()
         if broker_state.day_start_date != today or broker_state.day_start_equity is None:
             broker_state.day_start_date = today
@@ -1790,12 +1799,18 @@ class TradingAgent:
                         equity = float(details.get("equity") or 0.0)
                         cash = float(details.get("cash") or 0.0)
                         buying_power = float(details.get("buying_power") or 0.0)
+                        broker_last_equity = None
+                        if details.get("last_equity") is not None:
+                            try:
+                                broker_last_equity = float(details["last_equity"])
+                            except (TypeError, ValueError):
+                                broker_last_equity = None
                         ACCOUNT_TOTAL_BY_BROKER.labels(broker=name).set(equity)
                         ACCOUNT_CASH_BY_BROKER.labels(broker=name).set(cash)
                         ACCOUNT_BUYING_POWER_BY_BROKER.labels(broker=name).set(buying_power)
                         ACCOUNT_INVESTED_BY_BROKER.labels(broker=name).set(equity - cash)
                         broker_equities[str(name)] = equity
-                        self._update_broker_equity_state(str(name), equity)
+                        self._update_broker_equity_state(str(name), equity, last_equity=broker_last_equity)
                         # Update buying power in broker state for parallel routing
                         broker_state = self._broker_states.get(str(name))
                         if broker_state:
