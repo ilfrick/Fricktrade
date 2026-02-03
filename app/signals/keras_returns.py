@@ -135,7 +135,7 @@ def _log_returns(values: np.ndarray) -> np.ndarray:
 def _load_model(model_path: str, device: str):
     try:
         import tensorflow as tf  # noqa: F401
-        import tf_keras as keras
+        import keras
     except Exception as exc:
         logger.warning("TensorFlow not available; keras_returns disabled (%s)", exc)
         return None
