@@ -35,6 +35,7 @@ except Exception:
     ai_filter_module = None
 
 from app.learning.features import risk_feature_vector, risk_feature_size
+from app.learning.env import RewardConfig, TradingRewardCalculator
 from app.brokers.config_utils import get_alpaca_account_cfg
 from app.data.yfinance_utils import fetch_yfinance_bars
 
@@ -167,35 +168,12 @@ class RLOrchestratorConfig:
 
 
 @dataclass
-class PolicyRewardConfig:
-    time_penalty_per_step: float = 0.0
-    enable_time_aware_penalty: bool = False
-    base_time_penalty_per_minute: float = 0.0
-    bar_interval_minutes: float = 5.0
-    win_trade_bonus: float = 0.5
-    loss_trade_penalty: float = 0.2
-    win_streak_bonus_scale: float = 0.1
-    loss_streak_penalty_scale: float = 0.15
-    max_streak_bonus: float = 1.0
-    max_streak_penalty: float = 2.0
-    sharpe_bonus_scale: float = 0.1
-    sharpe_window_size: int = 100
-    target_trade_frequency: float = 0.1
-    frequency_penalty_scale: float = 0.5
-    reward_pnl_mode: str = "abs"
-    reward_pnl_scale: float = 1.0
-
-
-@dataclass
 class PolicyRewardState:
+    calculator: TradingRewardCalculator = None
+    cumulative_pnl: float = 0.0
+    in_position: bool = False
+    position_open_step: int = 0
     step_index: int = 0
-    trades_count: int = 0
-    last_trade_step: int = 0
-    consecutive_wins: int = 0
-    consecutive_losses: int = 0
-    gross_profits: float = 0.0
-    gross_losses: float = 0.0
-    recent_returns: deque = None
 
 class StrategyOrchestrator:
     def __init__(self, cfg: dict | None):
@@ -463,7 +441,7 @@ class RLStrategyOrchestrator:
         self._last_selection: dict[tuple[str, str], str] = {}
         self._order_feedback: dict[tuple[str, str], dict[str, float]] = {}
         self._lock = threading.RLock()
-        self._policy_reward_cfg: PolicyRewardConfig | None = None
+        self._policy_reward_cfg: RewardConfig | None = None
         self._policy_reward_state: dict[tuple[str, str], PolicyRewardState] = {}
         self._pending_trade_rewards: dict[tuple[str, str], list[dict[str, float]]] = {}
         # Initialize global account activity tracker
@@ -480,56 +458,30 @@ class RLStrategyOrchestrator:
     def is_enabled(self) -> bool:
         return self.cfg.enabled
 
-    def _build_policy_reward_config(self, cfg: dict) -> PolicyRewardConfig:
+    def _build_policy_reward_config(self, cfg: dict) -> RewardConfig:
         learning_cfg = cfg.get("learning", {}) if isinstance(cfg, dict) else {}
-        return PolicyRewardConfig(
-            time_penalty_per_step=float(learning_cfg.get("reward_time_penalty_per_step", 0.0)),
-            enable_time_aware_penalty=bool(learning_cfg.get("enable_time_aware_penalty", False)),
-            base_time_penalty_per_minute=float(learning_cfg.get("base_time_penalty_per_minute", 0.0)),
-            bar_interval_minutes=float(learning_cfg.get("bar_interval_minutes", 5.0)),
-            win_trade_bonus=float(learning_cfg.get("reward_win_trade_bonus", 0.5)),
-            loss_trade_penalty=float(learning_cfg.get("reward_loss_trade_penalty", 0.2)),
-            win_streak_bonus_scale=float(learning_cfg.get("reward_win_streak_bonus_scale", 0.1)),
-            loss_streak_penalty_scale=float(learning_cfg.get("reward_loss_streak_penalty_scale", 0.15)),
-            max_streak_bonus=float(learning_cfg.get("reward_max_streak_bonus", 1.0)),
-            max_streak_penalty=float(learning_cfg.get("reward_max_streak_penalty", 2.0)),
-            sharpe_bonus_scale=float(learning_cfg.get("reward_sharpe_bonus_scale", 0.1)),
-            sharpe_window_size=int(learning_cfg.get("reward_sharpe_window_size", 100)),
-            target_trade_frequency=float(learning_cfg.get("reward_target_trade_frequency", 0.1)),
-            frequency_penalty_scale=float(learning_cfg.get("reward_frequency_penalty_scale", 0.5)),
-            reward_pnl_mode=str(learning_cfg.get("reward_pnl_mode", "abs")),
-            reward_pnl_scale=float(learning_cfg.get("reward_pnl_scale", 1.0)),
-        )
+        reward_dict = learning_cfg.get("reward", {})
+        return RewardConfig(**{
+            k: v for k, v in reward_dict.items()
+            if k in RewardConfig.__dataclass_fields__
+        })
 
     def _policy_state(self, key: tuple[str, str]) -> PolicyRewardState:
         state = self._policy_reward_state.get(key)
         if state is not None:
             return state
-        cfg = self._policy_reward_cfg or PolicyRewardConfig()
+        cfg = self._policy_reward_cfg or RewardConfig()
+        calc = TradingRewardCalculator(cfg)
+        calc.reset(cfg.nav_normalizer)
         state = PolicyRewardState(
+            calculator=calc,
+            cumulative_pnl=0.0,
+            in_position=False,
+            position_open_step=0,
             step_index=0,
-            trades_count=0,
-            last_trade_step=0,
-            consecutive_wins=0,
-            consecutive_losses=0,
-            gross_profits=0.0,
-            gross_losses=0.0,
-            recent_returns=deque(maxlen=cfg.sharpe_window_size),
         )
         self._policy_reward_state[key] = state
         return state
-
-    def _policy_pnl_reward(self, realized_pnl: float, entry_price: float, entry_qty: float) -> float:
-        cfg = self._policy_reward_cfg
-        if cfg is None or realized_pnl == 0.0:
-            return 0.0
-        mode = str(cfg.reward_pnl_mode or "abs").lower()
-        if mode == "pct":
-            denom = entry_price * abs(entry_qty)
-            if denom <= 0:
-                return 0.0
-            return (realized_pnl / denom) * cfg.reward_pnl_scale
-        return realized_pnl * cfg.reward_pnl_scale
 
     def _policy_step_reward(self, key: tuple[str, str], trade_events: list[dict[str, float]]) -> float:
         cfg = self._policy_reward_cfg
@@ -540,64 +492,29 @@ class RLStrategyOrchestrator:
 
     def _policy_step_reward_for_state(
         self,
-        cfg: PolicyRewardConfig,
+        cfg: RewardConfig,
         state: PolicyRewardState,
         trade_events: list[dict[str, float]],
     ) -> float:
-        if cfg.enable_time_aware_penalty:
-            steps_since_trade = state.step_index - state.last_trade_step
-            minutes_since_trade = steps_since_trade * cfg.bar_interval_minutes
-            time_penalty = cfg.base_time_penalty_per_minute * minutes_since_trade
-            reward = -time_penalty
-        else:
-            reward = -cfg.time_penalty_per_step
-
+        total_realized = 0.0
         for event in trade_events:
             realized_pnl = float(event.get("realized_pnl", 0.0) or 0.0)
-            entry_price = float(event.get("entry_price", 0.0) or 0.0)
-            entry_qty = float(event.get("entry_qty", 0.0) or 0.0)
-            if realized_pnl == 0.0 or entry_qty == 0.0:
+            if realized_pnl == 0.0:
                 continue
-            reward += self._policy_pnl_reward(realized_pnl, entry_price, entry_qty)
-            state.trades_count += 1
-            state.last_trade_step = state.step_index
+            total_realized += realized_pnl
+            state.cumulative_pnl += realized_pnl
+            if state.in_position:
+                state.calculator.on_position_close()
+                state.in_position = False
 
-            if realized_pnl > 0:
-                reward += cfg.win_trade_bonus
-                state.consecutive_wins += 1
-                state.consecutive_losses = 0
-                state.gross_profits += realized_pnl
-                streak_bonus = min(state.consecutive_wins * cfg.win_streak_bonus_scale, cfg.max_streak_bonus)
-                reward += streak_bonus
-            else:
-                reward -= cfg.loss_trade_penalty
-                state.consecutive_losses += 1
-                state.consecutive_wins = 0
-                state.gross_losses += abs(realized_pnl)
-                streak_penalty = min(state.consecutive_losses * cfg.loss_streak_penalty_scale, cfg.max_streak_penalty)
-                reward -= streak_penalty
-
-            if abs(entry_price) > 1e-6 and abs(entry_qty) > 0:
-                trade_return_pct = realized_pnl / (entry_price * abs(entry_qty))
-                state.recent_returns.append(trade_return_pct)
-                if len(state.recent_returns) >= 10:
-                    if np is not None:
-                        mean_return = float(np.mean(state.recent_returns))
-                        std_return = float(np.std(state.recent_returns))
-                    else:
-                        mean_return = sum(state.recent_returns) / len(state.recent_returns)
-                        variance = sum((r - mean_return) ** 2 for r in state.recent_returns) / len(state.recent_returns)
-                        std_return = variance ** 0.5
-                    if std_return > 1e-6:
-                        reward += (mean_return / std_return) * cfg.sharpe_bonus_scale
-
-        if state.step_index > 0:
-            actual_frequency = state.trades_count / state.step_index
-            frequency_diff = abs(actual_frequency - cfg.target_trade_frequency)
-            reward += -frequency_diff * cfg.frequency_penalty_scale
-
+        nav = cfg.nav_normalizer + state.cumulative_pnl
+        bd = state.calculator.compute(
+            nav=nav,
+            step=state.step_index,
+            realized_pnl=total_realized,
+        )
         state.step_index += 1
-        return reward
+        return bd.total
 
     def bootstrap(self, strategy_names: list[str], build_strategy, strategy_params: dict, data_cfg: dict) -> None:
         if not self.cfg.enabled:
@@ -992,21 +909,20 @@ class RLStrategyOrchestrator:
                 seq = deque(maxlen=self.cfg.seq_len)
                 policy_states = {}
                 if use_policy_reward:
-                    cfg = self._policy_reward_cfg or PolicyRewardConfig()
+                    cfg = self._policy_reward_cfg or RewardConfig()
                     for name in strategy_names:
+                        calc = TradingRewardCalculator(cfg)
+                        calc.reset(cfg.nav_normalizer)
                         policy_states[name] = {
                             "position": 0,
                             "entry_price": 0.0,
                             "entry_qty": 0.0,
                             "reward_state": PolicyRewardState(
+                                calculator=calc,
+                                cumulative_pnl=0.0,
+                                in_position=False,
+                                position_open_step=0,
                                 step_index=0,
-                                trades_count=0,
-                                last_trade_step=0,
-                                consecutive_wins=0,
-                                consecutive_losses=0,
-                                gross_profits=0.0,
-                                gross_losses=0.0,
-                                recent_returns=deque(maxlen=cfg.sharpe_window_size),
                             ),
                         }
                 for idx in range(warmup, len(prices) - 1):
@@ -1039,7 +955,7 @@ class RLStrategyOrchestrator:
                     if not actions:
                         continue
                     if use_policy_reward:
-                        cfg = self._policy_reward_cfg or PolicyRewardConfig()
+                        cfg = self._policy_reward_cfg or RewardConfig()
                         rewards = {}
                         price = prices[idx]
                         for name, action in actions.items():
@@ -1066,6 +982,10 @@ class RLStrategyOrchestrator:
                                 state["position"] = 1
                                 state["entry_price"] = price
                                 state["entry_qty"] = 1.0
+                                rstate = state["reward_state"]
+                                rstate.in_position = True
+                                rstate.position_open_step = rstate.step_index
+                                rstate.calculator.on_position_open(rstate.step_index, price)
                             reward = self._policy_step_reward_for_state(
                                 cfg,
                                 state["reward_state"],

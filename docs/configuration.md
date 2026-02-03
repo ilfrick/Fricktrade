@@ -257,7 +257,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `orchestrator.rl.epsilon`: Exploration probability.
 - `orchestrator.rl.min_price_move_pct`: Ignore tiny moves below this threshold.
 - `orchestrator.rl.reward_mode`: Reward mode (`price_move` or `policy` to match RL policy rewards).
-  - When `policy`, the orchestrator uses the `learning.reward_*` settings (PnL + streaks + Sharpe + frequency).
+  - When `policy`, the orchestrator uses the `learning.reward` settings (differential NAV, time penalty, profit bonus, equity velocity).
 - `orchestrator.rl.reward_scale`: Scale factor for rewards.
 - `orchestrator.rl.entropy_coef/baseline_alpha/max_grad_norm`: RL stabilizers.
 - `orchestrator.rl.save_interval_seconds`: Model save cadence.
