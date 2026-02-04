@@ -36,7 +36,7 @@ except Exception:
 
 from app.learning.features import risk_feature_vector, risk_feature_size
 from app.learning.env import RewardConfig, TradingRewardCalculator
-from app.brokers.config_utils import get_alpaca_account_cfg
+from app.brokers.config_utils import get_alpaca_account_cfg, merge_cfg
 from app.data.yfinance_utils import fetch_yfinance_bars
 
 try:
@@ -364,8 +364,10 @@ class StrategyOrchestrator:
 
 
 class RLStrategyOrchestrator:
-    def __init__(self, cfg: dict | None):
+    def __init__(self, cfg: dict | None, account_cfgs: dict | None = None):
         cfg = cfg or {}
+        self._account_cfgs = account_cfgs or {}
+        self._raw_cfg = cfg
         orchestrator_cfg = cfg.get("orchestrator", cfg)
         rl_cfg = orchestrator_cfg.get("rl", orchestrator_cfg.get("ml", {}))
         self._mode = str(orchestrator_cfg.get("mode", "select"))
@@ -466,11 +468,24 @@ class RLStrategyOrchestrator:
             if k in RewardConfig.__dataclass_fields__
         })
 
+    def _get_policy_reward_cfg(self, broker_name: str) -> RewardConfig:
+        acct_cfg = self._account_cfgs.get(broker_name, {})
+        reward_overrides = acct_cfg.get("reward", {})
+        if not reward_overrides:
+            return self._policy_reward_cfg or RewardConfig()
+        base_reward = self._raw_cfg.get("learning", {}).get("reward", {})
+        merged = merge_cfg(base_reward, reward_overrides)
+        return RewardConfig(**{
+            k: v for k, v in merged.items()
+            if k in RewardConfig.__dataclass_fields__
+        })
+
     def _policy_state(self, key: tuple[str, str]) -> PolicyRewardState:
         state = self._policy_reward_state.get(key)
         if state is not None:
             return state
-        cfg = self._policy_reward_cfg or RewardConfig()
+        broker_name = key[0]
+        cfg = self._get_policy_reward_cfg(broker_name)
         calc = TradingRewardCalculator(cfg)
         calc.reset(cfg.nav_normalizer)
         state = PolicyRewardState(
@@ -484,7 +499,8 @@ class RLStrategyOrchestrator:
         return state
 
     def _policy_step_reward(self, key: tuple[str, str], trade_events: list[dict[str, float]]) -> float:
-        cfg = self._policy_reward_cfg
+        broker_name = key[0]
+        cfg = self._get_policy_reward_cfg(broker_name)
         if cfg is None:
             return 0.0
         state = self._policy_state(key)

@@ -116,7 +116,15 @@ brokers:
     base_url: https://paper-api.alpaca.markets
     api_key: ${ALPACA_API_KEY}
     api_secret: ${ALPACA_API_SECRET}
-    accounts: []
+    accounts:
+    - name: Realistic
+      risk:
+        trailing_stop_pct: 0.5
+        hard_stop_pct: 1.0
+      reward:
+        time_penalty_weight: 0.8
+        time_normalizer: 240.0
+    - name: Higher
     fees:
       commission_pct: 0.0
       per_trade_fee: 0.0
@@ -145,8 +153,8 @@ risk:
   max_short_exposure_pct: 30.0
   max_positions: 30
   cooldown_seconds: 5
-  hard_stop_pct: 1.5
-  trailing_stop_pct: 0.7
+  hard_stop_pct: 0.8
+  trailing_stop_pct: 0.35
   circuit_breaker_drawdown_pct: 3.0
   vol_targeting:
     enabled: true
@@ -223,14 +231,14 @@ strategy:
   params:
     lookback_minutes: 10
     entry_threshold_pct: 0.5
-    exit_threshold_pct: 0.25
+    exit_threshold_pct: 0.15
     position_horizon_minutes: 20
     allow_shorts: true
     trend_following:
       fast_window: 10
       slow_window: 30
       breakout_pct: 0.3
-      exit_pct: 0.2
+      exit_pct: 0.15
     factor_model:
       momentum_weight: 0.6
       liquidity_weight: 0.3
@@ -278,11 +286,11 @@ orchestrator:
     max_grad_norm: 1.0
     save_interval_seconds: 60
     score_ema_alpha: 0.1
-    time_penalty_per_bar: 0.05
+    time_penalty_per_bar: 0.15
     global_time_penalty:
-      enabled: false
-      max_idle_minutes: 30.0
-      penalty_scale: 0.01
+      enabled: true
+      max_idle_minutes: 15.0
+      penalty_scale: 0.03
       penalty_type: exponential
     pretrain:
       enabled: true
@@ -311,11 +319,11 @@ learning:
   window_size: 50
   reward:
     nav_weight: 1.0
-    time_penalty_weight: 0.5
-    profit_bonus_weight: 2.0
+    time_penalty_weight: 1.5
+    profit_bonus_weight: 3.0
     velocity_weight: 0.3
     nav_normalizer: 100000.0
-    time_normalizer: 390.0
+    time_normalizer: 120.0
     velocity_window: 20
     bar_interval_minutes: 5.0
   live_rewards:
@@ -367,7 +375,7 @@ learning:
     params:
       lookback_minutes: 30
       entry_threshold_pct: 0.8
-      exit_threshold_pct: 0.4
+      exit_threshold_pct: 0.2
     allow_shorts: false
   online:
     enabled: true

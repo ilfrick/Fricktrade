@@ -44,6 +44,118 @@
 - Trader logs: `docker compose logs -f trader`.
 - Audit/compliance logs: `monitoring.audit.*` and `monitoring.compliance.*`.
 
+## Tuning Trading Frequency (Position Close Rate)
+
+Multiple parameters across different layers control how often positions are closed.
+After changing reward parameters the RL model must be retrained for the new behavior
+to take effect. Online training will also adapt over subsequent sessions.
+
+### Reward System (`learning.reward`)
+
+| Parameter | Effect |
+|-----------|--------|
+| `time_penalty_weight` | Penalty per step while in a position. Higher = stronger pressure to exit. Penalty formula: `-time_penalty_weight * minutes_held / time_normalizer`. |
+| `time_normalizer` | Number of minutes at which the time penalty reaches `-time_penalty_weight`. Lower = penalty ramps up faster. 390 = one full trading day. |
+| `profit_bonus_weight` | Bonus on profitable trade close. Higher = more incentive to take profits quickly rather than hold for bigger gains. Formula: `profit_bonus_weight * realized_pnl / nav_normalizer`. |
+| `bar_interval_minutes` | Minutes per bar step. Must match actual data interval. Affects how fast time penalty accumulates per step. |
+
+### Orchestrator (`orchestrator.rl`)
+
+| Parameter | Effect |
+|-----------|--------|
+| `time_penalty_per_bar` | Per-bar penalty in orchestrator reward for strategy selection. Higher = prefer strategies that close faster. |
+| `global_time_penalty.enabled` | When true, penalizes account-wide inactivity. |
+| `global_time_penalty.max_idle_minutes` | Minutes of no-trade before penalty kicks in. |
+| `global_time_penalty.penalty_scale` | Magnitude of the idle penalty. |
+| `global_time_penalty.penalty_type` | `exponential` or `linear`. |
+
+### Strategy Parameters (`strategy.params`)
+
+| Parameter | Effect |
+|-----------|--------|
+| `exit_threshold_pct` | Intraday momentum: exit when price change falls below this. Higher = more aggressive exits. |
+| `position_horizon_minutes` | Max intended hold time for intraday momentum. Lower = tighter hold window. |
+| `trend_following.exit_pct` | Trend following exit threshold. Higher = exits on smaller reversals. |
+
+### Risk Manager (`risk`)
+
+| Parameter | Effect |
+|-----------|--------|
+| `hard_stop_pct` | Force exit when position drops this much. Tighter = faster exit on losers. |
+| `trailing_stop_pct` | Trailing stop from peak price. Tighter = locks in gains faster, exits on smaller pullbacks. |
+| `circuit_breaker_drawdown_pct` | Stops all trading at this account drawdown level. |
+
+### Guardrail (`learning.guardrail`)
+
+| Parameter | Effect |
+|-----------|--------|
+| `exit_threshold_pct` | Lower = guardrail more willing to confirm sell/exit signals from the RL agent. |
+| `mode` | `confirm` requires both RL agent and guardrail to agree. `override` lets guardrail force exits independently. |
+
+### Recommended Approach
+
+For the biggest impact on closing frequency:
+
+1. Raise `time_penalty_weight` (e.g. 0.5 -> 1.0-1.5).
+2. Lower `time_normalizer` (e.g. 390 -> 195).
+3. Tighten `trailing_stop_pct` (e.g. 0.7 -> 0.3-0.5) for immediate mechanical exits.
+4. Retrain the RL model after config changes.
+5. Let online training adapt over subsequent sessions.
+
+### Current Global Defaults (Optimized for Frequent Trades)
+
+The global defaults in `config/config.yaml` are tuned for frequent profitable
+trades (suited for accounts allowed to day trade, e.g. Higher).
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `learning.reward.time_penalty_weight` | 1.5 | 30-min hold costs -0.375 reward, strongly discouraging multi-hour holds. |
+| `learning.reward.time_normalizer` | 120 | Full penalty at 2 hours instead of a full day. |
+| `learning.reward.profit_bonus_weight` | 3.0 | Bigger carrot for taking profits. |
+| `risk.trailing_stop_pct` | 0.35 | Locks in gains faster, cuts losers at half the pullback. |
+| `risk.hard_stop_pct` | 0.8 | Exit losers at -0.8%. |
+| `orchestrator.rl.time_penalty_per_bar` | 0.15 | Orchestrator penalizes hold-heavy strategies 3x more. |
+| `orchestrator.rl.global_time_penalty.enabled` | true | Penalizes account-wide inactivity. |
+| `orchestrator.rl.global_time_penalty.max_idle_minutes` | 15 | Penalty starts after 15 min idle. |
+| `orchestrator.rl.global_time_penalty.penalty_scale` | 0.03 | Triple the idle penalty magnitude. |
+| `learning.guardrail.params.exit_threshold_pct` | 0.2 | Match strategy exit thresholds so guardrail doesn't block exits. |
+| `strategy.params.exit_threshold_pct` | 0.15 | Exit on smaller reversals. |
+| `strategy.params.trend_following.exit_pct` | 0.15 | Exit on smaller counter-trend moves. |
+
+### Per-Account Overrides
+
+Accounts with different risk profiles or regulatory constraints (e.g. PDT) can
+override `risk` and `reward` parameters. Overrides are defined in
+`brokers.alpaca.accounts[]` in `config/config.yaml` and are deep-merged onto the
+global defaults at startup.
+
+Each account entry can contain:
+- `risk: { ... }` — overrides keys in the global `risk` section for that account's
+  `RiskManager`.
+- `reward: { ... }` — overrides keys in `learning.reward` for that account's
+  orchestrator `RewardConfig`.
+
+The account `name` must match the env-var account name (from `ALPACA_ACCOUNT_NAMES`)
+so the YAML overrides are merged onto the env-var credentials automatically.
+
+**Current per-account overrides:**
+
+| Account | Parameter | Value | Rationale |
+|---------|-----------|-------|-----------|
+| Realistic ($250, PDT-constrained) | `risk.trailing_stop_pct` | 0.5 | Wider stops to avoid burning PDT allowances on marginal trades. |
+| Realistic | `risk.hard_stop_pct` | 1.0 | More room before force-exiting losers. |
+| Realistic | `reward.time_penalty_weight` | 0.8 | Less pressure to close positions quickly. |
+| Realistic | `reward.time_normalizer` | 240 | Full penalty at 4 hours, not 2. |
+| Higher ($2585, day trading allowed) | *(uses global defaults)* | — | Aggressive turnover is appropriate. |
+
+**PDT note:** Accounts under $25k equity are limited to 3 day trades per 5 rolling
+business days. The Realistic account overrides reduce trade frequency to conserve
+PDT allowances.
+
+**Tuning:** If turnover is too aggressive (many small losses from premature exits),
+dial `time_penalty_weight` back to 1.0 or raise `time_normalizer` to 180. These
+can be set globally or per-account.
+
 ## Daily Reporting Email
 - Daily report email uses Alertmanager SMTP settings from `.env` (do not commit secrets).
 - Required keys are listed in `.env.example`.

@@ -78,7 +78,7 @@ from app.data.market_cache import build_market_cache, build_market_cache_config,
 from app.learning.drift import DriftMonitor
 from app.learning.registry import load_active_model, load_latest_feature_stats
 from app.learning.live_rewards import LiveRewardTracker
-from app.brokers.config_utils import get_alpaca_account_cfg
+from app.brokers.config_utils import get_alpaca_account_cfg, merge_cfg
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
 from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
 from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart # Import GPU state utilities
@@ -125,7 +125,7 @@ class BrokerState:
 
 
 class TradingAgent:
-    def __init__(self, broker, cfg: dict):
+    def __init__(self, broker, cfg: dict, account_cfgs: dict | None = None):
         self.cfg = cfg
         self.broker = broker
         self.learning_cfg = cfg.get("learning", {})
@@ -144,6 +144,7 @@ class TradingAgent:
             # Update backtest GPU usage
             if "backtest" in self.cfg:
                 self.cfg["backtest"]["use_gpu"] = False
+        self._account_cfgs = account_cfgs or {}
         self._account_snapshot: dict[str, object] = {}
         params = cfg["strategy"]["params"]
         self._strategy_params = params
@@ -163,9 +164,11 @@ class TradingAgent:
             for name, item in self._broker_map.items()
         }
         self._order_queue = self._order_queues.get(self._broker_name)
-        self._broker_states: dict[str, BrokerState] = {
-            name: BrokerState(risk=RiskManager(cfg["risk"])) for name in self._broker_map.keys()
-        }
+        self._broker_states: dict[str, BrokerState] = {}
+        for name in self._broker_map.keys():
+            acct_cfg = self._account_cfgs.get(name, {})
+            broker_risk_cfg = merge_cfg(cfg["risk"], acct_cfg.get("risk", {}))
+            self._broker_states[name] = BrokerState(risk=RiskManager(broker_risk_cfg))
         self._last_market_open = None
         self._started_at = datetime.utcnow()
         self._news_cache: dict[str, bool] = {}
@@ -176,7 +179,7 @@ class TradingAgent:
         self._news_inflight_at: datetime | None = None
         self._strategy_names = self._resolve_strategy_names()
         self._combine_mode = cfg["strategy"].get("combine", "priority")
-        self._orchestrator = RLStrategyOrchestrator(cfg)
+        self._orchestrator = RLStrategyOrchestrator(cfg, account_cfgs=self._account_cfgs)
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
         self._open_orders_labels: set[tuple[str, str]] = set()

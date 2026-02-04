@@ -15,8 +15,8 @@ def get_alpaca_account_cfg(cfg_or_brokers: dict, prefer_name: str | None = None)
         if prefer_name:
             for acct in accounts:
                 if str(acct.get("name", "")).strip() == prefer_name:
-                    return _merge_cfg(alpaca_cfg, acct)
-        return _merge_cfg(alpaca_cfg, accounts[0])
+                    return merge_cfg(alpaca_cfg, acct)
+        return merge_cfg(alpaca_cfg, accounts[0])
     return dict(alpaca_cfg)
 
 
@@ -28,8 +28,8 @@ def get_ibkr_account_cfg(cfg_or_brokers: dict, prefer_name: str | None = None) -
         if prefer_name:
             for acct in accounts:
                 if str(acct.get("name", "")).strip() == prefer_name:
-                    return _merge_cfg(ibkr_cfg, acct)
-        return _merge_cfg(ibkr_cfg, accounts[0])
+                    return merge_cfg(ibkr_cfg, acct)
+        return merge_cfg(ibkr_cfg, accounts[0])
     return dict(ibkr_cfg)
 
 
@@ -38,9 +38,9 @@ def iter_alpaca_accounts(cfg: dict) -> Iterable[dict[str, Any]]:
     alpaca_cfg = brokers_cfg.get("alpaca", {}) or {}
     if not alpaca_cfg.get("enabled", True):
         return []
-    accounts = _enabled_accounts(alpaca_cfg.get("accounts"))
-    if not accounts:
-        accounts = _load_alpaca_env_accounts(alpaca_cfg)
+    yaml_accounts = _enabled_accounts(alpaca_cfg.get("accounts"))
+    env_accounts = _load_alpaca_env_accounts(alpaca_cfg)
+    accounts = _merge_env_and_yaml_accounts(yaml_accounts, env_accounts)
     if not accounts:
         return [
             {
@@ -55,7 +55,7 @@ def iter_alpaca_accounts(cfg: dict) -> Iterable[dict[str, Any]]:
     for idx, acct in enumerate(accounts):
         acct_name = str(acct.get("name") or f"account{idx + 1}")
         broker_name = f"alpaca:{acct_name}" if use_suffix else "alpaca"
-        merged = _merge_cfg(alpaca_cfg, acct)
+        merged = merge_cfg(alpaca_cfg, acct)
         merged["name"] = broker_name
         results.append(merged)
     return results
@@ -84,10 +84,30 @@ def iter_ibkr_accounts(cfg: dict) -> Iterable[dict[str, Any]]:
     for idx, acct in enumerate(accounts):
         acct_name = str(acct.get("name") or f"account{idx + 1}")
         broker_name = f"ibkr:{acct_name}" if use_suffix else "ibkr"
-        merged = _merge_cfg(ibkr_cfg, acct)
+        merged = merge_cfg(ibkr_cfg, acct)
         merged["name"] = broker_name
         results.append(merged)
     return results
+
+
+def _merge_env_and_yaml_accounts(
+    yaml_accounts: list[dict[str, Any]],
+    env_accounts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if env_accounts and yaml_accounts:
+        yaml_by_name = {str(a.get("name", "")).strip(): a for a in yaml_accounts}
+        merged: list[dict[str, Any]] = []
+        for env_acct in env_accounts:
+            name = str(env_acct.get("name", "")).strip()
+            yaml_overrides = yaml_by_name.pop(name, None)
+            if yaml_overrides:
+                merged.append(merge_cfg(env_acct, yaml_overrides))
+            else:
+                merged.append(env_acct)
+        for leftover in yaml_by_name.values():
+            merged.append(leftover)
+        return merged
+    return env_accounts or yaml_accounts
 
 
 def _brokers_cfg(cfg_or_brokers: dict) -> dict[str, Any]:
@@ -96,9 +116,15 @@ def _brokers_cfg(cfg_or_brokers: dict) -> dict[str, Any]:
     return cfg_or_brokers
 
 
-def _merge_cfg(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+def merge_cfg(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base)
-    merged.update({k: v for k, v in override.items() if v is not None})
+    for k, v in override.items():
+        if v is None:
+            continue
+        if isinstance(v, dict) and isinstance(merged.get(k), dict):
+            merged[k] = merge_cfg(merged[k], v)
+        else:
+            merged[k] = v
     return merged
 
 

@@ -585,6 +585,7 @@ def _session_gain_pct(data, prices: list[float], mode: str) -> float:
 
 def _build_broker(cfg: dict):
     brokers: dict[str, object] = {}
+    account_cfgs: dict[str, dict] = {}
     paper = os.getenv("TRADING_MODE", "paper").lower() == "paper"
     market_cfg = cfg.get("market", {}) if isinstance(cfg, dict) else {}
     default_currency = str(market_cfg.get("default_currency") or "USD").upper()
@@ -604,6 +605,7 @@ def _build_broker(cfg: dict):
                 logging.warning("Alpaca account %s unavailable; skipping.", account["name"])
                 continue
             brokers[account["name"]] = broker
+            account_cfgs[account["name"]] = account
         except Exception as exc:
             logging.warning("Alpaca account %s failed to initialize: %s", account.get("name", "unknown"), exc)
             continue
@@ -625,18 +627,19 @@ def _build_broker(cfg: dict):
                 logging.warning("IBKR account %s unavailable; skipping.", account["name"])
                 continue
             brokers[account["name"]] = broker
+            account_cfgs[account["name"]] = account
         except Exception as exc:
             logging.warning("IBKR account %s failed to initialize: %s", account.get("name", "unknown"), exc)
             continue
     exec_cfg = cfg.get("execution", {}).get("brokers", {})
     if len(brokers) > 1:
         if exec_cfg.get("enabled", False):
-            return BrokerRouter(brokers, exec_cfg.get("routing", {}))
+            return BrokerRouter(brokers, exec_cfg.get("routing", {})), account_cfgs
         logging.warning("Multiple brokers configured but routing disabled; defaulting to BrokerRouter.")
-        return BrokerRouter(brokers, exec_cfg.get("routing", {}))
+        return BrokerRouter(brokers, exec_cfg.get("routing", {})), account_cfgs
     if len(brokers) == 1:
-        return next(iter(brokers.values()))
-    return None
+        return next(iter(brokers.values())), account_cfgs
+    return None, account_cfgs
 
 
 def _primary_alpaca_cfg(cfg: dict) -> dict:
@@ -772,8 +775,8 @@ def main():
         return
 
     if args.cmd == "trade":
-        broker = _build_broker(cfg)
-        agent = TradingAgent(broker, cfg)
+        broker, account_cfgs = _build_broker(cfg)
+        agent = TradingAgent(broker, cfg, account_cfgs=account_cfgs)
         symbols = cfg["data"]["symbols"]
         cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
         market_cache = build_market_cache(cfg.get("market_cache", {}))
