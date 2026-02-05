@@ -210,6 +210,10 @@ strategy:
   - rl_policy
   - rl_policy_fees
   - trend_following
+  - factor_model
+  - stat_arb_pairs
+  - market_maker
+  - pattern_trading
   combine: vote
   fee_aware:
     min_edge_pct: 0.005
