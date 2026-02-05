@@ -512,9 +512,9 @@ class ChangepointDetector:
 | 1.3 Multi-timeframe | 3-5 | High | +0.1 to +0.3 | **DONE** (5m→15m→1h) |
 | 1.5 Regime detection | 4-6 | High | +0.1 to +0.2 | **DONE** (8 features) |
 | 2.1 TCN/Transformer | 6-10 | Medium-High | +0.2 to +0.4 | **DONE** (TCN extractor) |
-| 2.2 Ensemble | 8-12 | Medium | +0.1 to +0.3 | Pending |
-| 2.3 HPO | 10-12 | Medium | +0.1 to +0.2 | Pending |
-| 3.1-3.3 Execution | 10-16 | Medium | +0.1 to +0.2 (cost reduction) | Pending |
+| 2.2 Ensemble | 8-12 | Medium | +0.1 to +0.3 | **DONE** (LightGBM, meta-learning) |
+| 2.3 HPO | 10-12 | Medium | +0.1 to +0.2 | **DONE** (Optuna integration) |
+| 3.1-3.3 Execution | 10-16 | Medium | +0.1 to +0.2 (cost reduction) | **DONE** (SmartRouter, TCA) |
 | 4.1-4.3 Portfolio | 14-20 | Medium | +0.1 to +0.2 | Pending |
 | 5.1-5.3 Advanced regime | 18-24 | Low-Medium | +0.05 to +0.15 | Pending |
 
@@ -597,6 +597,23 @@ pip install lightgbm  # Gradient boosting
   - TCNExtractor compatible with Stable Baselines3
   - `create_tcn_policy_kwargs()` helper function
 - `app/learning/train_rl.py` - TCN integration when `learning.tcn.enabled=true`
+- `app/learning/ensemble/` - Ensemble methods:
+  - `base.py`: BasePredictor, ReturnPredictor, DirectionPredictor, SignalPredictor
+  - `lgbm_predictor.py`: LGBMReturnPredictor, LGBMDirectionPredictor, LGBMSignalPredictor
+  - `ensemble.py`: EnsemblePredictor with meta-learning, StackingEnsemble
+- `app/learning/hpo/` - Hyperparameter optimization:
+  - `search_space.py`: Optuna search spaces for PPO, TCN, reward params
+  - `optimize.py`: HPOObjective, run_hpo(), apply_best_params()
+
+**Phase 3: Execution Quality**
+- `app/execution/smart_router.py` - Smart order routing:
+  - SmartOrderRouter with automatic algo selection
+  - Almgren-Chriss market impact model
+  - almgren_chriss_optimal_trajectory() for IS minimization
+- `app/execution/tca.py` - Transaction cost analysis:
+  - TCAAnalyzer with slippage, impact, timing cost metrics
+  - TCAReport with by-symbol, by-algo, by-venue breakdowns
+  - compute_vwap_slippage() utility
 
 **Configuration (config/config.yaml)**
 ```yaml
@@ -611,15 +628,17 @@ learning:
     num_layers: 3
     kernel_size: 3
     dropout: 0.1
+  training:
+    timesteps: 50000
 ```
 
 **Total new observation size**: ~190 dimensions (up from ~150)
 
 ### Next Steps
-1. Retrain RL model with new features (`python -m app.main --train`)
-2. Monitor performance metrics in Grafana
-3. Implement Phase 2.2 (Ensemble methods) when baseline is stable
-4. Add Optuna-based HPO for hyperparameter tuning
+1. Model training in progress (50,000 timesteps with TCN)
+2. Monitor performance metrics in Grafana after training completes
+3. Implement Phase 4 (Portfolio optimization) when baseline is stable
+4. Run HPO to tune hyperparameters (requires `pip install optuna`)
 
 ---
 
@@ -633,5 +652,5 @@ The existing infrastructure (orchestrator, multi-broker routing, risk management
 is solid and can support these upgrades without major refactoring. The main work is in the
 `app/learning/` and `app/strategies/` directories.
 
-**Current status**: Phase 1 (features) and Phase 2.1 (TCN) are complete. Next: retrain model
-and evaluate performance before proceeding to ensemble methods.
+**Current status**: Phases 1, 2, and 3 are complete. Model training with 50k timesteps in progress.
+Next: Phase 4 (portfolio optimization) and Phase 5 (advanced regime detection).
