@@ -21,6 +21,33 @@ Ensure your Docker build environment is non-interactive by setting `DEBIAN_FRONT
   ```
   Then restart containers with `./scripts/compose_up.sh --build`.
 
+### GPU Allocation
+The GPU is shared between services. By default:
+- **Trader**: Gets exclusive GPU access for AI filter (~5GB) and RL model inference.
+- **Ollama**: Runs on CPU only to avoid OOM conflicts with the trader.
+
+This is controlled in `docker-compose.yml`:
+```yaml
+ollama:
+  environment:
+    - CUDA_VISIBLE_DEVICES=  # Force CPU mode
+    - NVIDIA_VISIBLE_DEVICES=
+
+trader:
+  environment:
+    - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - capabilities: ["gpu"]
+```
+
+To give Ollama GPU access (requires >8GB VRAM total):
+1. Remove `CUDA_VISIBLE_DEVICES=` from ollama service
+2. Set `NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}` for ollama
+3. Use a smaller LLM model to fit in remaining VRAM
+
 ### CPU Fallback Behavior
 When GPU is unavailable or disabled:
 1. **RL Training/Inference**: Falls back to CPU via `_resolve_device()` in `train_rl.py`

@@ -14,6 +14,17 @@ Acquire bars, scan symbols, and support AI filtering.
 - AI symbol filter (PPO): `app/data/ai_filter.py`.
 - Market cache: `app/data/market_cache.py` + `app/data/market_cache_service.py`.
 
+## Symbol Filtering
+The scanner (`app/data/scanner.py`) automatically excludes problematic symbol types:
+- **Preferred shares**: `.PR`, `.PRA` through `.PRZ`
+- **Units/Rights/Warrants**: `.U`, `.UN`, `.RT`, `.W`, `.WS`, `.WT`
+- **Class shares**: `.A`, `.B`, `.C`
+- **SPAC warrants**: 5+ character symbols ending in W or U (e.g., NHICW, RFAIU)
+- **ADRs**: Symbols ending in Y (except whitelisted: SONY, BKSY, RELY, TORY, LAZY)
+
+Legitimate tickers that would otherwise be excluded are in `_WHITELIST`:
+`SNOW`, `FLOW`, `GROW`, `MENU`, `GURU`, `CREW`, `META`, `MSCI`, `ROKU`, `DOCU`, `DKNG`.
+
 ## Configuration
 `config/config.yaml`:
 - `data.provider` (yfinance/alpaca/brokers; yfinance uses batched caching).

@@ -102,6 +102,53 @@ def _fetch_snapshots(client, symbols: list[str], feed: str, timeout_seconds: int
     return None
 
 
+_EXCLUDE_SUFFIXES = (
+    # Preferred shares (all variants)
+    ".PR", ".PRA", ".PRB", ".PRC", ".PRD", ".PRE", ".PRF", ".PRG", ".PRH",
+    ".PRI", ".PRJ", ".PRK", ".PRL", ".PRM", ".PRN", ".PRO", ".PRP", ".PRQ",
+    ".PRR", ".PRS", ".PRT", ".PRU", ".PRV", ".PRW", ".PRX", ".PRY", ".PRZ",
+    # Units, rights, warrants with dots
+    ".U", ".UN", ".RT", ".W", ".WS", ".WT",
+    # Class shares
+    ".A", ".B", ".C",
+)
+
+# Legitimate tickers that would otherwise be excluded
+_WHITELIST = {
+    "SNOW", "FLOW", "GROW", "MENU", "GURU", "CREW",
+    "META", "MSCI", "ROKU", "DOCU", "DKNG",
+}
+
+
+def _is_excluded_symbol(symbol: str) -> bool:
+    """Check if symbol should be excluded (preferred shares, warrants, units, etc.)."""
+    if not symbol:
+        return True
+    upper = symbol.upper()
+
+    # Whitelist overrides all other checks
+    if upper in _WHITELIST:
+        return False
+
+    # Check dot suffixes
+    for suffix in _EXCLUDE_SUFFIXES:
+        if upper.endswith(suffix):
+            return True
+
+    # Check warrant/unit endings (5+ chars ending in W or U without dot)
+    # These are typically SPACs/warrants like NHICW, BFRIW, RFAIU
+    if len(upper) >= 5 and upper[-1] in ("W", "U") and "." not in upper:
+        return True
+
+    # ADRs ending in Y (foreign stocks) - often have data issues
+    if len(upper) >= 4 and upper.endswith("Y") and upper[-2:-1].isalpha():
+        # Allow common ADRs
+        if upper not in {"SONY", "BKSY", "RELY", "TORY", "LAZY"}:
+            return True
+
+    return False
+
+
 def load_universe(
     api_key: str,
     api_secret: str,
@@ -125,6 +172,8 @@ def load_universe(
                 continue
             symbol = asset.get("symbol")
             if not symbol:
+                continue
+            if _is_excluded_symbol(symbol):
                 continue
             symbols.append(symbol)
             if len(symbols) >= max_universe:

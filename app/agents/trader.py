@@ -2398,7 +2398,11 @@ class TradingAgent:
     def _merge_symbols_with_positions(self, symbols: list[str], portfolio: dict) -> list[str]:
         positions = portfolio.get("positions", {})
         if not positions:
+            logging.debug("_merge_symbols_with_positions: no positions in portfolio")
             return symbols
+        held_symbols = [s for s, p in positions.items() if float(p.get("qty", 0) or 0) != 0]
+        if held_symbols:
+            logging.debug("_merge_symbols_with_positions: adding held positions %s", held_symbols[:10])
         merged = set(symbols)
         for symbol, position in positions.items():
             qty = float(position.get("qty", 0.0) or 0.0)

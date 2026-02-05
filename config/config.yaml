@@ -623,7 +623,7 @@ market_cache:
   file_dir: /data/market_cache
   batch_size: 50
   delay_seconds: 3.0
-  max_age_multiplier: 2
+  max_age_multiplier: 24  # 5m * 24 = 2 hours TTL
   cache_only: true
   ignore_staleness: true
   allow_pickle: false
@@ -704,7 +704,7 @@ reports:
       enabled: true
       provider: ollama
       base_url: http://ollama:11434
-      model: llama3.1:8b
+      model: llama3.2:3b  # Smaller model to avoid GPU OOM
       timeout_seconds: 30
       max_text_chars: 800
     email:
@@ -726,8 +726,8 @@ news:
     enabled: true
     provider: ollama
     base_url: http://ollama:11434
-    model: llama3.1:8b
-    timeout_seconds: 60
+    model: llama3.2:3b  # Smaller model to avoid GPU OOM
+    timeout_seconds: 120  # CPU mode is slow, needs longer timeout
     max_items: 25
     max_text_chars: 800
 pattern_trading:

@@ -141,7 +141,15 @@ def _load_model(model_path: str, device: str):
         return None
     _force_tf_cpu(tf, device)
     try:
-        return keras.models.load_model(model_path)
+        # Try safe_mode=False first for models saved with different Keras versions
+        return keras.models.load_model(model_path, safe_mode=False)
+    except TypeError:
+        # Fall back to default loading if safe_mode not supported
+        try:
+            return keras.models.load_model(model_path)
+        except Exception as exc:
+            logger.warning("Failed to load Keras model at %s (%s)", model_path, exc)
+            return None
     except Exception as exc:
         logger.warning("Failed to load Keras model at %s (%s)", model_path, exc)
         return None
