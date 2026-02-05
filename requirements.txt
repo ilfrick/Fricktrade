@@ -33,3 +33,9 @@ hypothesis==6.112.0
 docker==7.1.0
 httpx
 
+# Ensemble and HPO dependencies
+lightgbm>=4.0.0
+optuna>=3.5.0
+hmmlearn>=0.3.0
+ta>=0.11.0
+
