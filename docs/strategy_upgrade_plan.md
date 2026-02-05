@@ -652,17 +652,49 @@ learning:
     num_layers: 3
     kernel_size: 3
     dropout: 0.1
+  regime:
+    enabled: true
+    n_regimes: 3
+    lookback: 100
   training:
     timesteps: 50000
+portfolio:
+  enabled: true
+  method: risk_parity
+  constraints:
+    max_position_pct: 0.25
 ```
 
 **Total new observation size**: ~190 dimensions (up from ~150)
 
+### Components Wired Into Trading Loop
+
+| Component | Location | Integration Point | Status |
+|-----------|----------|-------------------|--------|
+| **RegimeHMM** | `trader.py` | Before orchestrator selection | ✅ WIRED |
+| **EnsemblePredictor** | `orchestrator.py` | Optional signal aggregation | ✅ WIRED |
+| **PortfolioOptimizer** | `trader.py` | Position sizing via `_portfolio_position_scale()` | ✅ WIRED |
+| **TCN Extractor** | `train_rl.py` | RL policy feature extraction | ✅ WIRED |
+
+### All Strategies Enabled
+```yaml
+strategy:
+  names:
+  - rl_policy
+  - rl_policy_fees
+  - trend_following
+  - factor_model
+  - stat_arb_pairs
+  - market_maker
+  - pattern_trading
+```
+
 ### Next Steps
-1. ~~Model training in progress (50,000 timesteps with TCN)~~ **COMPLETE** - TCN model trained
-2. Monitor performance metrics in Grafana
-3. Run HPO to tune hyperparameters: `python -m app.learning.hpo.optimize`
-4. Consider longer training runs (200k+ timesteps) for improved model quality
+1. ~~Model training (50,000 timesteps with TCN)~~ **COMPLETE**
+2. ~~Wire remaining components~~ **COMPLETE**
+3. Monitor performance metrics in Grafana
+4. Run HPO: `python -m app.learning.hpo.optimize`
+5. Consider longer training runs (200k+ timesteps)
 
 ---
 
@@ -676,7 +708,14 @@ The existing infrastructure (orchestrator, multi-broker routing, risk management
 is solid and can support these upgrades without major refactoring. The main work is in the
 `app/learning/` and `app/strategies/` directories.
 
-**Current status**: ALL PHASES COMPLETE (1-5). TCN model trained (50k timesteps) and deployed.
+**Current status**: ALL PHASES COMPLETE (1-5). All components wired and deployed.
+
+**What's Running:**
+- TCN model trained (50k timesteps) and deployed
+- RegimeHMM detecting market regimes (3-state: low/med/high vol)
+- PortfolioOptimizer adjusting position sizes
+- All 7 strategies enabled (rl_policy, trend_following, factor_model, etc.)
+- Ensemble predictor available (LightGBM-based)
 
 **Dependencies added to requirements.txt:**
 - `lightgbm>=4.0.0` - Gradient boosting for ensemble

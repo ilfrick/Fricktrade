@@ -46,6 +46,12 @@
 - AI symbol filter PPO: `/data/ai_symbol_filter.zip` with `.meta.json`.
 - Orchestrator model: `/data/orchestrator_model.pt`.
 
+## Advanced Components
+- **RegimeHMM** (`learning.regime.enabled`): Detects market volatility regime (low/med/high). Adds `regime`, `regime_name` to market_state.
+- **PortfolioOptimizer** (`portfolio.enabled`): Adjusts position sizes based on allocation constraints.
+- **EnsemblePredictor** (`orchestrator.ensemble.enabled`): LightGBM-based signal aggregation.
+- **TCN Extractor** (`learning.tcn.enabled`): Temporal convolutional network for RL feature extraction.
+
 ## Logs and Audit
 - Trader logs: `docker compose logs -f trader`.
 - Audit/compliance logs: `monitoring.audit.*` and `monitoring.compliance.*`.
