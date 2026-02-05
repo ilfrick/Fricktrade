@@ -39,6 +39,14 @@ from app.learning.env import RewardConfig, TradingRewardCalculator
 from app.brokers.config_utils import get_alpaca_account_cfg, merge_cfg
 from app.data.yfinance_utils import fetch_yfinance_bars
 
+# Optional ensemble predictor
+try:
+    from app.learning.ensemble import EnsemblePredictor, LGBMReturnPredictor, LGBM_AVAILABLE
+except ImportError:
+    EnsemblePredictor = None
+    LGBMReturnPredictor = None
+    LGBM_AVAILABLE = False
+
 try:
     import numpy as np
 except Exception:
@@ -454,6 +462,25 @@ class RLStrategyOrchestrator:
                 penalty_scale=self.cfg.global_time_penalty_scale,
                 penalty_type=self.cfg.global_time_penalty_type,
             )
+        # Initialize ensemble predictor (optional)
+        ensemble_cfg = orchestrator_cfg.get("ensemble", {})
+        self._ensemble_enabled = bool(ensemble_cfg.get("enabled", False)) and LGBM_AVAILABLE
+        self._ensemble_predictor: EnsemblePredictor | None = None
+        self._ensemble_weight = float(ensemble_cfg.get("weight", 0.3))
+        if self._ensemble_enabled and EnsemblePredictor is not None:
+            try:
+                predictors = []
+                if LGBMReturnPredictor is not None:
+                    predictors.append(LGBMReturnPredictor(ensemble_cfg.get("lgbm", {})))
+                if predictors:
+                    self._ensemble_predictor = EnsemblePredictor(
+                        predictors=predictors,
+                        use_meta_learning=ensemble_cfg.get("use_meta_learning", True),
+                    )
+                    logging.info("Ensemble predictor initialized with %d predictors", len(predictors))
+            except Exception as exc:
+                logging.warning("Failed to initialize ensemble predictor: %s", exc)
+                self._ensemble_enabled = False
         if self.cfg.reward_mode.lower() == "policy":
             self._policy_reward_cfg = self._build_policy_reward_config(cfg)
 

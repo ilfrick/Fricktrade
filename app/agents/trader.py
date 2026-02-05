@@ -99,6 +99,8 @@ from app.utils.market import is_market_open, is_venue_extended, is_venue_open
 from app.utils.restart import should_restart
 from app.agents.orchestrator import RLStrategyOrchestrator
 from app.agents.pipeline import DecisionPipeline
+from app.learning.regime_hmm import RegimeHMM, RegimeState
+from app.portfolio import PortfolioOptimizer, RiskModel
 
 
 @dataclass
@@ -180,6 +182,28 @@ class TradingAgent:
         self._strategy_names = self._resolve_strategy_names()
         self._combine_mode = cfg["strategy"].get("combine", "priority")
         self._orchestrator = RLStrategyOrchestrator(cfg, account_cfgs=self._account_cfgs)
+        # Regime detection
+        regime_cfg = cfg.get("learning", {}).get("regime", {})
+        self._regime_enabled = regime_cfg.get("enabled", False)
+        self._regime_hmm: RegimeHMM | None = None
+        self._regime_state: RegimeState | None = None
+        self._regime_returns_buffer: list[float] = []
+        self._regime_buffer_size = int(regime_cfg.get("lookback", 100))
+        if self._regime_enabled:
+            self._regime_hmm = RegimeHMM(
+                n_regimes=int(regime_cfg.get("n_regimes", 3)),
+                config=regime_cfg,
+            )
+            logging.info("RegimeHMM initialized: n_regimes=%d", self._regime_hmm.n_regimes)
+        # Portfolio optimization
+        portfolio_cfg = cfg.get("portfolio", {})
+        self._portfolio_enabled = portfolio_cfg.get("enabled", False)
+        self._portfolio_optimizer: PortfolioOptimizer | None = None
+        self._risk_model: RiskModel | None = None
+        if self._portfolio_enabled:
+            self._portfolio_optimizer = PortfolioOptimizer(portfolio_cfg)
+            self._risk_model = RiskModel(portfolio_cfg.get("risk_model", {}))
+            logging.info("PortfolioOptimizer initialized")
         self._open_orders_cache: list[dict] = []
         self._open_orders_at: datetime | None = None
         self._open_orders_labels: set[tuple[str, str]] = set()
@@ -665,6 +689,30 @@ class TradingAgent:
             return None
         return float(sum(vals) / len(vals))
 
+    def _detect_regime(self, market_state: dict) -> RegimeState | None:
+        """Detect current market regime using HMM."""
+        if self._regime_hmm is None:
+            return None
+        # Extract return from market state
+        prices = market_state.get("prices", [])
+        if len(prices) >= 2:
+            ret = (prices[-1] - prices[-2]) / prices[-2] if prices[-2] != 0 else 0.0
+            self._regime_returns_buffer.append(ret)
+            # Keep buffer size limited
+            if len(self._regime_returns_buffer) > self._regime_buffer_size:
+                self._regime_returns_buffer = self._regime_returns_buffer[-self._regime_buffer_size:]
+        # Need minimum samples for regime detection
+        if len(self._regime_returns_buffer) < 20:
+            return None
+        import numpy as np
+        returns = np.array(self._regime_returns_buffer)
+        try:
+            self._regime_state = self._regime_hmm.get_state(returns)
+            return self._regime_state
+        except Exception as exc:
+            logging.debug("Regime detection failed: %s", exc)
+            return None
+
     def _update_signal_metrics(self, symbol: str, market_state: dict) -> None:
         self._update_signal_metrics_from_values(symbol, market_state)
 
@@ -832,6 +880,18 @@ class TradingAgent:
 
         with self._lock:
             self._update_orchestrator(symbol, market_state, strategy_broker)
+
+        # UNLOCKED: Regime detection (before orchestrator)
+        if self._regime_enabled and self._regime_hmm is not None:
+            regime_state = self._detect_regime(market_state)
+            if regime_state is not None:
+                market_state["regime"] = regime_state.regime
+                market_state["regime_name"] = regime_state.regime_name
+                market_state["regime_probability"] = regime_state.probability
+                market_state["regime_probs"] = regime_state.regime_probs
+                if trace:
+                    trace["regime"] = regime_state.regime
+                    trace["regime_name"] = regime_state.regime_name
 
         # UNLOCKED: Orchestrator inference (CPU heavy)
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
@@ -1201,9 +1261,11 @@ class TradingAgent:
         current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
         current_value = current_qty * last_price
         max_pos_pct = float(self.cfg["risk"]["max_position_size_pct"])
-        max_pos_pct *= self._vol_target_scale(market_state)
+        vol_scale = self._vol_target_scale(market_state)
+        portfolio_scale = self._portfolio_position_scale(symbol, market_state, portfolio)
+        max_pos_pct *= vol_scale * portfolio_scale
         max_short_pct = float(self.cfg["risk"]["max_short_exposure_pct"])
-        max_short_pct *= self._vol_target_scale(market_state)
+        max_short_pct *= vol_scale * portfolio_scale
         allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
         limits = self.cfg.get("trading_limits", {})
         if limits.get("enabled") and not limits.get("allow_shorts", True):
@@ -1299,6 +1361,41 @@ class TradingAgent:
         min_scale = float(cfg.get("min_scale", 0.5))
         max_scale = float(cfg.get("max_scale", 1.5))
         return max(min(scale, max_scale), min_scale)
+
+    def _portfolio_position_scale(self, symbol: str, market_state: dict, portfolio: dict) -> float:
+        """Adjust position size based on portfolio optimization."""
+        if not self._portfolio_enabled or self._portfolio_optimizer is None:
+            return 1.0
+        try:
+            positions = portfolio.get("positions", {})
+            if not positions:
+                return 1.0
+            # Get current weights
+            equity = float(portfolio.get("equity", 0.0) or 0.0)
+            if equity <= 0:
+                return 1.0
+            current_weights = {}
+            for sym, pos in positions.items():
+                qty = float(pos.get("qty", 0.0) or 0.0)
+                price = float(pos.get("current_price", 0.0) or market_state.get("last_price", 0.0) or 0.0)
+                if price > 0 and qty > 0:
+                    current_weights[sym] = (qty * price) / equity
+            if symbol not in current_weights:
+                current_weights[symbol] = 0.0
+            # Check if symbol is over-allocated (risk parity adjustment)
+            portfolio_cfg = self.cfg.get("portfolio", {})
+            max_pos_pct = float(portfolio_cfg.get("constraints", {}).get("max_position_pct", 0.25))
+            current_weight = current_weights.get(symbol, 0.0)
+            if current_weight >= max_pos_pct:
+                return 0.5  # Reduce allocation if overweight
+            # Scale based on distance from max
+            headroom = max_pos_pct - current_weight
+            if headroom < 0.05:  # Less than 5% headroom
+                return 0.7
+            return 1.0
+        except Exception as exc:
+            logging.debug("Portfolio position scale failed: %s", exc)
+            return 1.0
 
     def _limits_enabled(self) -> bool:
         return bool(self.cfg.get("trading_limits", {}).get("enabled", False))

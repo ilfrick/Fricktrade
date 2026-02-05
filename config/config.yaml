@@ -415,6 +415,27 @@ learning:
     net_arch:
       pi: [64, 64]
       vf: [64, 64]
+  # Regime detection (HMM-based)
+  regime:
+    enabled: true
+    n_regimes: 3
+    lookback: 100
+    vol_window: 20
+    skew_window: 20
+# Portfolio optimization
+portfolio:
+  enabled: true
+  method: risk_parity
+  risk_model:
+    method: ledoit_wolf
+    window: 60
+  constraints:
+    max_position_pct: 0.25
+    min_position_pct: 0.01
+    max_sector_pct: 0.40
+  rebalance:
+    threshold_pct: 5.0
+    min_interval_minutes: 30
 backtest:
   data_dir: /data
   start: '2025-10-23'
