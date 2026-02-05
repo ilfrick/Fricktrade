@@ -659,10 +659,10 @@ learning:
 **Total new observation size**: ~190 dimensions (up from ~150)
 
 ### Next Steps
-1. Model training in progress (50,000 timesteps with TCN)
-2. Monitor performance metrics in Grafana after training completes
-3. Implement Phase 4 (Portfolio optimization) when baseline is stable
-4. Run HPO to tune hyperparameters (requires `pip install optuna`)
+1. ~~Model training in progress (50,000 timesteps with TCN)~~ **COMPLETE** - TCN model trained
+2. Monitor performance metrics in Grafana
+3. Run HPO to tune hyperparameters: `python -m app.learning.hpo.optimize`
+4. Consider longer training runs (200k+ timesteps) for improved model quality
 
 ---
 
@@ -676,7 +676,7 @@ The existing infrastructure (orchestrator, multi-broker routing, risk management
 is solid and can support these upgrades without major refactoring. The main work is in the
 `app/learning/` and `app/strategies/` directories.
 
-**Current status**: ALL PHASES COMPLETE (1-5). Model training with 50k timesteps in progress.
+**Current status**: ALL PHASES COMPLETE (1-5). TCN model trained (50k timesteps) and deployed.
 
 **Dependencies added to requirements.txt:**
 - `lightgbm>=4.0.0` - Gradient boosting for ensemble
