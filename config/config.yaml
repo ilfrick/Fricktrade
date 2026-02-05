@@ -337,6 +337,9 @@ learning:
   features:
     include_returns: true
     include_signal_features: true
+    include_extended_indicators: true
+    include_regime_features: true
+    include_mtf_features: true
     signal_interval: 5m
     sma_periods:
     - 5

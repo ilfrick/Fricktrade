@@ -85,6 +85,7 @@ def _cfg() -> ai_filter.AISymbolFilterConfig:
         market_cache_cache_only=False,
         market_cache_ignore_staleness=False,
         market_cache_allow_pickle=False,
+        market_cache_max_age_multiplier=1,
         keras_enabled=False,
         keras_model_path="/tmp/keras_model.keras",
         keras_interval="5m",

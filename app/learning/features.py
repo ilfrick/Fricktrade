@@ -7,6 +7,9 @@ from collections.abc import Sequence
 import numpy as np
 
 from app.utils.signal_features import compute_signal_metrics_from_window
+from app.learning.indicators import indicator_feature_vector, INDICATOR_FEATURE_SIZE
+from app.learning.regime import compute_regime_features, REGIME_FEATURE_SIZE
+from app.learning.multi_timeframe import build_mtf_observation, MTF_FEATURE_SIZE
 
 # Ordered list of risk config paths (dot-separated) and default values
 _RISK_FEATURE_FIELDS = [
@@ -203,6 +206,9 @@ def observation_size(window_size: int, feature_config: dict | None = None) -> in
     include_returns = feature_config.get("include_returns", True)
     include_signal_features = feature_config.get("include_signal_features", False)
     include_risk_features = feature_config.get("include_risk_features", True)
+    include_extended_indicators = feature_config.get("include_extended_indicators", False)
+    include_regime_features = feature_config.get("include_regime_features", False)
+    include_mtf_features = feature_config.get("include_mtf_features", False)
     sma_periods = feature_config.get("sma_periods", [])
     ema_periods = feature_config.get("ema_periods", [])
     rsi_periods = feature_config.get("rsi_periods", [])
@@ -213,6 +219,12 @@ def observation_size(window_size: int, feature_config: dict | None = None) -> in
         extra += 8
     if include_risk_features:
         extra += risk_feature_size(include_decision=True)
+    if include_extended_indicators:
+        extra += INDICATOR_FEATURE_SIZE
+    if include_regime_features:
+        extra += REGIME_FEATURE_SIZE
+    if include_mtf_features:
+        extra += MTF_FEATURE_SIZE
     extra += len(sma_periods) + len(ema_periods) + len(rsi_periods)
     adx_periods = feature_config.get("adx_periods", [])
     trend_strength_periods = feature_config.get("trend_strength_periods", [])
@@ -318,6 +330,39 @@ def build_observation(
                 features.append(np.array([25.0, 50.0, 50.0], dtype=np.float32))
         for period in feature_config.get("trend_strength_periods", []):
             features.append(np.array([_trend_strength(closes_window, int(period))], dtype=np.float32))
+
+        # Extended indicators (25+ technical indicators)
+        if feature_config.get("include_extended_indicators", False):
+            if highs is not None and lows is not None:
+                highs_arr = np.asarray(highs, dtype=np.float32)
+                lows_arr = np.asarray(lows, dtype=np.float32)
+                if highs_arr.size < window_size:
+                    highs_arr = np.pad(highs_arr, (window_size - highs_arr.size, 0), mode="edge")
+                    lows_arr = np.pad(lows_arr, (window_size - lows_arr.size, 0), mode="edge")
+                highs_window = highs_arr[-window_size:]
+                lows_window = lows_arr[-window_size:]
+                # Use closes as opens approximation if not available
+                opens_window = np.roll(closes_window, 1)
+                opens_window[0] = closes_window[0]
+                indicator_vec = indicator_feature_vector(
+                    opens_window, highs_window, lows_window, closes_window, volumes_window
+                )
+            else:
+                # Approximate highs/lows from closes
+                indicator_vec = indicator_feature_vector(
+                    closes_window, closes_window, closes_window, closes_window, volumes_window
+                )
+            features.append(indicator_vec)
+
+        # Regime features (volatility, trend, liquidity regimes)
+        if feature_config.get("include_regime_features", False):
+            regime_vec = compute_regime_features(closes_window, volumes_window)
+            features.append(regime_vec)
+
+        # Multi-timeframe features (5m, 15m, 1h)
+        if feature_config.get("include_mtf_features", False):
+            mtf_vec = build_mtf_observation(closes_arr, volumes_arr, window=window_size)
+            features.append(mtf_vec)
 
     obs = np.concatenate(features)
     return obs
