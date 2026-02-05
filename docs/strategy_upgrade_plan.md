@@ -505,18 +505,18 @@ class ChangepointDetector:
 
 ## Implementation Priority & Timeline
 
-| Phase | Weeks | Priority | Expected Impact on Sharpe |
-|-------|-------|----------|---------------------------|
-| 1.1 Microstructure features | 1-3 | Critical | +0.2 to +0.4 |
-| 1.2 Technical indicators | 2-4 | High | +0.1 to +0.2 |
-| 1.3 Multi-timeframe | 3-5 | High | +0.1 to +0.3 |
-| 1.5 Regime detection | 4-6 | High | +0.1 to +0.2 |
-| 2.1 TCN/Transformer | 6-10 | Medium-High | +0.2 to +0.4 |
-| 2.2 Ensemble | 8-12 | Medium | +0.1 to +0.3 |
-| 2.3 HPO | 10-12 | Medium | +0.1 to +0.2 |
-| 3.1-3.3 Execution | 10-16 | Medium | +0.1 to +0.2 (cost reduction) |
-| 4.1-4.3 Portfolio | 14-20 | Medium | +0.1 to +0.2 |
-| 5.1-5.3 Advanced regime | 18-24 | Low-Medium | +0.05 to +0.15 |
+| Phase | Weeks | Priority | Expected Impact on Sharpe | Status |
+|-------|-------|----------|---------------------------|--------|
+| 1.1 Microstructure features | 1-3 | Critical | +0.2 to +0.4 | **DONE** |
+| 1.2 Technical indicators | 2-4 | High | +0.1 to +0.2 | **DONE** (22 indicators) |
+| 1.3 Multi-timeframe | 3-5 | High | +0.1 to +0.3 | **DONE** (5m→15m→1h) |
+| 1.5 Regime detection | 4-6 | High | +0.1 to +0.2 | **DONE** (8 features) |
+| 2.1 TCN/Transformer | 6-10 | Medium-High | +0.2 to +0.4 | **DONE** (TCN extractor) |
+| 2.2 Ensemble | 8-12 | Medium | +0.1 to +0.3 | Pending |
+| 2.3 HPO | 10-12 | Medium | +0.1 to +0.2 | Pending |
+| 3.1-3.3 Execution | 10-16 | Medium | +0.1 to +0.2 (cost reduction) | Pending |
+| 4.1-4.3 Portfolio | 14-20 | Medium | +0.1 to +0.2 | Pending |
+| 5.1-5.3 Advanced regime | 18-24 | Low-Medium | +0.05 to +0.15 | Pending |
 
 **Cumulative expected Sharpe improvement: +0.8 to +1.5** (from current ~0.3-0.5 to target 1.0-2.0)
 
@@ -570,6 +570,59 @@ pip install lightgbm  # Gradient boosting
 
 ---
 
+## Implementation Progress (2026-02-05)
+
+### Completed
+
+**Phase 1: Feature Engineering**
+- `app/learning/indicators.py` - 22 extended technical indicators:
+  - Volatility: ATR, Bollinger Bands, historical volatility, Keltner channels
+  - Momentum: Stochastic K/D, Williams %R, CCI, ROC, momentum
+  - Volume: OBV, MFI, VWAP deviation
+  - Trend: Donchian position, Parabolic SAR, Supertrend, Ichimoku (5 components)
+  - Mean reversion: Hurst exponent
+- `app/learning/regime.py` - 8 regime detection features:
+  - Volatility regime (0/1/2), trend regime (0/1/2), liquidity regime (0/1/2)
+  - Volatility percentile, trend strength, Hurst exponent
+  - Volatility ratio, realized volatility
+- `app/learning/multi_timeframe.py` - 9 MTF features:
+  - 5m, 15m, 1h timeframe aggregation
+  - Per-timeframe: return, volatility, volume ratio
+- `app/learning/features.py` - Integrated all modules into observation builder
+
+**Phase 2: Model Architecture**
+- `app/learning/networks/tcn.py` - TCN feature extractor for SB3 PPO:
+  - TemporalBlock with dilated causal convolutions
+  - TCN module with exponential dilation
+  - TCNExtractor compatible with Stable Baselines3
+  - `create_tcn_policy_kwargs()` helper function
+- `app/learning/train_rl.py` - TCN integration when `learning.tcn.enabled=true`
+
+**Configuration (config/config.yaml)**
+```yaml
+learning:
+  features:
+    include_extended_indicators: true
+    include_regime_features: true
+    include_mtf_features: true
+  tcn:
+    enabled: true
+    features_dim: 64
+    num_layers: 3
+    kernel_size: 3
+    dropout: 0.1
+```
+
+**Total new observation size**: ~190 dimensions (up from ~150)
+
+### Next Steps
+1. Retrain RL model with new features (`python -m app.main --train`)
+2. Monitor performance metrics in Grafana
+3. Implement Phase 2.2 (Ensemble methods) when baseline is stable
+4. Add Optuna-based HPO for hyperparameter tuning
+
+---
+
 ## Conclusion
 
 The plan prioritizes **feature engineering** because it provides the highest ROI with the lowest
@@ -580,4 +633,5 @@ The existing infrastructure (orchestrator, multi-broker routing, risk management
 is solid and can support these upgrades without major refactoring. The main work is in the
 `app/learning/` and `app/strategies/` directories.
 
-Start with Phase 1 quick wins, measure impact, then proceed to model upgrades.
+**Current status**: Phase 1 (features) and Phase 2.1 (TCN) are complete. Next: retrain model
+and evaluate performance before proceeding to ensemble methods.
