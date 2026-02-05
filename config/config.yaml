@@ -390,7 +390,7 @@ learning:
   training:
     data_dir: /data/rl_train_small
     interval: 5m
-    timesteps: 5000
+    timesteps: 50000
     checkpoint_best_only: false
     use_live_rewards: false
     initial_cash: 200
