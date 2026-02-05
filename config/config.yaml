@@ -401,6 +401,16 @@ learning:
     report_path: /app/models/training_report.json
     best_report_path: /app/models/training_report_best.json
     report_plot_dir: /app/models/reports
+  # TCN (Temporal Convolutional Network) feature extractor config
+  tcn:
+    enabled: true
+    features_dim: 64
+    num_layers: 3
+    kernel_size: 3
+    dropout: 0.1
+    net_arch:
+      pi: [64, 64]
+      vf: [64, 64]
 backtest:
   data_dir: /data
   start: '2025-10-23'

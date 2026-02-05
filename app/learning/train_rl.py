@@ -20,6 +20,7 @@ from app.learning.drift import compute_feature_stats
 from app.learning.env import TradingEnv
 from app.learning.live_rewards import load_live_reward_overrides
 from app.learning.evaluate import evaluate_model
+from app.learning.networks import create_tcn_policy_kwargs
 from app.learning.registry import build_active_record, register_model, set_active_model
 from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart
 
@@ -98,7 +99,28 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
                     logging.warning("RL model shape mismatch; rebuilding model: %s", exc)
                     model = None
             if model is None:
-                model = PPO("MlpPolicy", vec_env, verbose=1, device=current_device)
+                tcn_cfg = learning_cfg.get("tcn", {})
+                if tcn_cfg.get("enabled", False):
+                    net_arch_cfg = tcn_cfg.get("net_arch", {})
+                    net_arch = [dict(
+                        pi=net_arch_cfg.get("pi", [64, 64]),
+                        vf=net_arch_cfg.get("vf", [64, 64]),
+                    )]
+                    policy_kwargs = create_tcn_policy_kwargs(
+                        features_dim=int(tcn_cfg.get("features_dim", 64)),
+                        num_layers=int(tcn_cfg.get("num_layers", 3)),
+                        kernel_size=int(tcn_cfg.get("kernel_size", 3)),
+                        dropout=float(tcn_cfg.get("dropout", 0.1)),
+                        net_arch=net_arch,
+                    )
+                    logging.info(
+                        "Using TCN feature extractor: features_dim=%d layers=%d",
+                        tcn_cfg.get("features_dim", 64),
+                        tcn_cfg.get("num_layers", 3),
+                    )
+                    model = PPO("MlpPolicy", vec_env, verbose=1, device=current_device, policy_kwargs=policy_kwargs)
+                else:
+                    model = PPO("MlpPolicy", vec_env, verbose=1, device=current_device)
             
             # If successful, break out of retry loop
             break
