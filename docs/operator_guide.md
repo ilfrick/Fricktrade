@@ -9,6 +9,12 @@
 - Stop stack: `docker compose down`
 - Minimal services (closed markets): autoheal, healthwatch, prometheus, daily-report, tests-when-closed.
 
+## GPU Management
+- GPU auto-disables on CUDA errors (latched in `/data/gpu_state.json`)
+- Re-enable GPU: `sudo ./scripts/enable_gpu.sh` then restart stack
+- Check GPU status: `cat data/gpu_state.json`
+- Verify GPU in use: `docker logs fricktrade-trader-1 2>&1 | grep "Using.*device"`
+
 ## Health Checks
 - API health: `http://localhost:18081/health`
 - Grafana: `http://localhost:3002`

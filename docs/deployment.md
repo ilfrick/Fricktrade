@@ -15,6 +15,25 @@ Ensure your Docker build environment is non-interactive by setting `DEBIAN_FRONT
 - Force CPU: set `learning.device: cpu`.
 - Disable GPU in backtests: `backtest.use_gpu: false`.
 - The system automatically falls back to CPU for GPU-reliant components upon `CUDA out of memory` or similar errors. This fallback is latched until the next restart to prevent continuous failures.
+- GPU state is stored in `/data/gpu_state.json`. To manually re-enable GPU after an error:
+  ```bash
+  sudo ./scripts/enable_gpu.sh
+  ```
+  Then restart containers with `./scripts/compose_up.sh --build`.
+
+### CPU Fallback Behavior
+When GPU is unavailable or disabled:
+1. **RL Training/Inference**: Falls back to CPU via `_resolve_device()` in `train_rl.py`
+2. **AI Symbol Filter**: Retries with CPU on CUDA OOM errors (see `ai_filter.py`)
+3. **Keras Models**: Force CPU via `_force_tf_cpu()` when GPU disabled
+
+### Multithreading on CPU
+All processing remains multithreaded regardless of GPU availability:
+- Risk manager: Thread-safe with `threading.Lock()`
+- Order queue: Thread-safe execution
+- Reporting loop: Runs in dedicated daemon thread
+- Healthwatch: Parallel health checks
+- Parallel symbol routing: `ThreadPoolExecutor` for multi-broker dispatch
 
 
 ## Live vs Dev
