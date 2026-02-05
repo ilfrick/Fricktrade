@@ -515,8 +515,8 @@ class ChangepointDetector:
 | 2.2 Ensemble | 8-12 | Medium | +0.1 to +0.3 | **DONE** (LightGBM, meta-learning) |
 | 2.3 HPO | 10-12 | Medium | +0.1 to +0.2 | **DONE** (Optuna integration) |
 | 3.1-3.3 Execution | 10-16 | Medium | +0.1 to +0.2 (cost reduction) | **DONE** (SmartRouter, TCA) |
-| 4.1-4.3 Portfolio | 14-20 | Medium | +0.1 to +0.2 | Pending |
-| 5.1-5.3 Advanced regime | 18-24 | Low-Medium | +0.05 to +0.15 | Pending |
+| 4.1-4.3 Portfolio | 14-20 | Medium | +0.1 to +0.2 | **DONE** (MV, risk parity, rebalance) |
+| 5.1-5.3 Advanced regime | 18-24 | Low-Medium | +0.05 to +0.15 | **DONE** (HMM, changepoint) |
 
 **Cumulative expected Sharpe improvement: +0.8 to +1.5** (from current ~0.3-0.5 to target 1.0-2.0)
 
@@ -615,6 +615,30 @@ pip install lightgbm  # Gradient boosting
   - TCAReport with by-symbol, by-algo, by-venue breakdowns
   - compute_vwap_slippage() utility
 
+**Phase 4: Portfolio Optimization**
+- `app/portfolio/optimizer.py` - Portfolio construction:
+  - Mean-variance optimization (Markowitz)
+  - Risk parity (equal risk contribution)
+  - Maximum Sharpe ratio optimization
+  - Black-Litterman with investor views
+  - Minimum variance portfolio
+- `app/portfolio/risk_model.py` - Risk estimation:
+  - Ledoit-Wolf shrinkage covariance
+  - EWMA covariance
+  - Factor risk decomposition
+  - VaR/CVaR computation
+- `app/portfolio/rebalance.py` - Dynamic rebalancing:
+  - Threshold-based rebalancing
+  - AdaptiveRebalancer (volatility/liquidity aware)
+  - Optimal rebalance schedule computation
+
+**Phase 5: Advanced Regime Detection**
+- `app/learning/regime_hmm.py` - HMM and changepoint:
+  - RegimeHMM with Gaussian emissions (3-state: low/med/high vol)
+  - ChangepointDetector using CUSUM
+  - RegimeAwareStrategy for regime-conditional trading
+  - create_regime_strategies() for default behaviors
+
 **Configuration (config/config.yaml)**
 ```yaml
 learning:
@@ -652,5 +676,10 @@ The existing infrastructure (orchestrator, multi-broker routing, risk management
 is solid and can support these upgrades without major refactoring. The main work is in the
 `app/learning/` and `app/strategies/` directories.
 
-**Current status**: Phases 1, 2, and 3 are complete. Model training with 50k timesteps in progress.
-Next: Phase 4 (portfolio optimization) and Phase 5 (advanced regime detection).
+**Current status**: ALL PHASES COMPLETE (1-5). Model training with 50k timesteps in progress.
+
+**Dependencies added to requirements.txt:**
+- `lightgbm>=4.0.0` - Gradient boosting for ensemble
+- `optuna>=3.5.0` - Hyperparameter optimization
+- `hmmlearn>=0.3.0` - Hidden Markov Models
+- `ta>=0.11.0` - Technical analysis library
