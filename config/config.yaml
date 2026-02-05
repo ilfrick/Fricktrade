@@ -548,7 +548,7 @@ data:
         learning_rate: 0.001
         steps: 10
         timesteps: 256
-        max_symbols: 50000
+        max_symbols: 500
       news:
         enabled: true
         provider: alpaca
