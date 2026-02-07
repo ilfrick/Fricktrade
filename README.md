@@ -276,11 +276,17 @@ This auto-enables GPU if available and falls back to CPU otherwise. Use `docker 
 Services:
 - `trader`: live trading loop
 - `api`: FastAPI config/health/UI
+- `market-cache`: Redis-backed yfinance bar cache
+- `redis`: in-memory cache store
+- `learner`: RL online training updates
 - `prometheus`, `grafana`, `alertmanager`: monitoring
 - `calendar-updater`: weekly market holidays refresh
 - `tests-when-closed`: runs tests/backtests when markets are closed
-- `healthwatch`: health probes + Prometheus metrics
+- `healthwatch`: health probes + market-based sleep/wake scheduler
+- `autoheal`: automatic container restart on health failure
+- `docker-socket-proxy`: isolated Docker socket access for healthwatch/autoheal
 - `daily-report`: daily top movers email + training data export
+- `ollama`: local LLM gate for news catalyst processing
 
 ## Common Commands
 Download data:
@@ -315,6 +321,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- **v3.0 code review**: 19 issues resolved — concurrency safety (regime detection under lock, enrich snapshots), exception narrowing in financial paths, full `datetime.utcnow()` migration, RiskManager timezone-aware daily reset, persistent ThreadPoolExecutor, OrderQueue FIFO stability + retry budget reset, code deduplication (`_calc_exposure_metrics`, `_build_rl_strategy`, `extract_equity_cash`), dead code removal (pipeline.py, market_state.py), Docker socket proxy for healthwatch/autoheal, Prometheus cardinality fix.
 - Switched trading loop to parallel execution (ThreadPoolExecutor) with fine-grained locking and decoupled metric reporting for better responsiveness.
 - Switched live market data and AI filter bars to batched yfinance with coverage filtering.
 - Added live profiling scripts for the trading loop.

@@ -47,6 +47,7 @@ stateDiagram-v2
 Keep services (default):
 - `healthwatch`
 - `autoheal`
+- `docker-socket-proxy`
 - `daily-report`
 - `prometheus`
 - `tests-when-closed`
