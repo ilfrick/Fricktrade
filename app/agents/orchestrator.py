@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import deque
 from datetime import datetime, timedelta, timezone
 import json
@@ -159,8 +159,8 @@ class RLOrchestratorConfig:
     pretrain_enabled: bool = True
     pretrain_in_trader: bool = False
     pretrain_provider: str = "yfinance"
-    pretrain_alpaca_api_key: str = ""
-    pretrain_alpaca_api_secret: str = ""
+    pretrain_alpaca_api_key: str = field(default="", repr=False)
+    pretrain_alpaca_api_secret: str = field(default="", repr=False)
     pretrain_lookback_days: int = 30
     pretrain_interval: str = "5m"
     pretrain_window_days: int = 60

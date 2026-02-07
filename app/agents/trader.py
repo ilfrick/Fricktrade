@@ -78,6 +78,8 @@ from app.utils.market import is_market_open, is_venue_extended
 from app.utils.restart import should_restart
 from app.agents.account_metrics import AccountMetricsUpdater
 from app.agents.open_orders import OpenOrderManager
+from app.agents.strategy_config import StrategyConfig
+from app.execution.config import ExecutionConfig
 from app.agents.orchestrator import RLStrategyOrchestrator
 from app.agents.performance import PerformanceTracker
 from app.agents.symbol_manager import SymbolManager
@@ -131,18 +133,20 @@ class TradingAgent:
                 self.cfg["backtest"]["use_gpu"] = False
         self._account_cfgs = account_cfgs or {}
         self._account_snapshot: dict[str, object] = {}
-        params = cfg["strategy"]["params"]
+        self._strategy_cfg = StrategyConfig.from_dict(cfg.get("strategy", {}))
+        self._execution_cfg = ExecutionConfig.from_dict(cfg.get("execution", {}))
+        params = self._strategy_cfg.params
         self._strategy_params = params
         self._strategy_by_symbol: dict[tuple[str, str], dict[str, object]] = {}
         self._guardrail_by_symbol: dict[tuple[str, str], object] = {}
         self.executor = ExecutionEngine(broker)
-        self._routing_cfg = cfg.get("execution", {}).get("brokers", {}).get("routing", {})
+        self._routing_cfg = self._execution_cfg.routing
         self._broker_map = self._resolve_broker_map()
         self._broker_names = list(self._broker_map.keys())
         self._broker_name = self._resolve_default_broker_name()
         self._broker_name = routing_utils.normalize_broker_name(self._broker_name, self._broker_names)
-        retry_cfg = cfg.get("execution", {}).get("retry", {})
-        open_orders_cfg = cfg.get("execution", {}).get("open_orders", {})
+        retry_cfg = self._execution_cfg.retry
+        open_orders_cfg = self._execution_cfg.open_orders
         completion_grace = int(open_orders_cfg.get("missing_grace_seconds", 0))
         self._order_queues = {
             name: OrderQueue(item, name, retry_cfg, completion_grace_seconds=completion_grace)
@@ -163,7 +167,7 @@ class TradingAgent:
         self._news_future_lock = threading.Lock()
         self._news_inflight_at: datetime | None = None
         self._strategy_names = self._resolve_strategy_names()
-        self._combine_mode = cfg["strategy"].get("combine", "priority")
+        self._combine_mode = self._strategy_cfg.combine
         self._orchestrator = RLStrategyOrchestrator(cfg, account_cfgs=self._account_cfgs)
         # Regime detection
         regime_cfg = cfg.get("learning", {}).get("regime", {})
@@ -356,7 +360,7 @@ class TradingAgent:
                 device = self.learning_cfg.get("device", "auto")
                 feature_config = self.learning_cfg.get("features", {})
                 broker_fees = self.cfg.get("brokers", {}).get(self._broker_name, {}).get("fees", {})
-                fee_guard = self.cfg.get("strategy", {}).get("fee_aware", {})
+                fee_guard = self._strategy_cfg.fee_aware
                 risk_cfg = self.cfg.get("risk", {})
                 
                 # Attempt to build with current device setting
@@ -406,13 +410,8 @@ class TradingAgent:
             return StatArbPairsStrategy(params)
         if name == "market_maker":
             return MarketMakerStrategy(params)
-        logging.debug("Unknown strategy '%s' requested, returning None.", name)
-        return IntradayMomentumStrategy(
-            params["lookback_minutes"],
-            params["entry_threshold_pct"],
-            params["exit_threshold_pct"],
-            params["allow_shorts"],
-        )
+        logging.warning("Unknown strategy '%s' requested, skipping.", name)
+        return None
 
     def _select_model_path(self) -> str:
         registry_cfg = self.learning_cfg.get("registry", {}) or {}
@@ -566,7 +565,7 @@ class TradingAgent:
         return {}
 
     def _plan_execution(self, action: str, qty: int, last_price: float, market_state: dict, algo_name: str | None):
-        algo_cfg = self.cfg.get("execution", {}).get("algos", {})
+        algo_cfg = self._execution_cfg.algos
         if not algo_cfg.get("enabled", False):
             return []
         if action not in ("buy", "sell"):
@@ -578,7 +577,7 @@ class TradingAgent:
         name = algo_name or str(algo_cfg.get("default", "twap"))
         adaptive_cfg = algo_cfg.get("adaptive", {}) or {}
         if algo_name is None and adaptive_cfg.get("enabled", False):
-            impact_cfg = self.cfg.get("execution", {}).get("impact", {}) or {}
+            impact_cfg = self._execution_cfg.impact or {}
             impact = estimate_market_impact(notional, last_price, market_state, impact_cfg)
             thresholds = adaptive_cfg.get("impact_bps_thresholds", {}) or {}
             vwap_threshold = float(thresholds.get("vwap", 4.0))
@@ -794,7 +793,7 @@ class TradingAgent:
             if self._kill_switch_liquidated:
                 return None
             self._apply_kill_switch_profile(market_state)
-            exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
+            exec_cfg = self._execution_cfg.open_orders
             broker_hint = self._resolve_broker_for_symbol(symbol, self._strategy_names, None)
             broker_override = market_state.get("broker_override")
             if broker_override:
@@ -842,7 +841,7 @@ class TradingAgent:
 
         # UNLOCKED: Signal bias calculation (pure logic)
         bias = self._signal_bias(market_state)
-        guard_cfg = self.cfg.get("strategy", {}).get("signal_bias_guard", {}) or {}
+        guard_cfg = self._strategy_cfg.signal_bias_guard or {}
         if bias is not None:
             for signal in signals:
                 signal["signal_bias"] = bias
@@ -1467,12 +1466,10 @@ class TradingAgent:
     # Risk check methods moved to RiskManager (app/risk/manager.py)
 
     def _resolve_strategy_names(self) -> list[str]:
-        cfg = self.cfg.get("strategy", {})
-        names = cfg.get("names")
+        names = self._strategy_cfg.names
         if isinstance(names, list) and names:
             return [str(name) for name in names]
-        name = cfg.get("name", "intraday_momentum")
-        return [str(name)]
+        return [str(self._strategy_cfg.name)]
 
     def _resolve_broker_map(self) -> dict[str, object]:
         if hasattr(self.broker, "brokers"):
