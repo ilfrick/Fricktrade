@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.utils.volatility import realized_volatility_pct
+
 
 @dataclass
 class ImpactEstimate:
@@ -20,7 +22,8 @@ def estimate_market_impact(notional: float, price: float, market_state: dict, cf
     session_volume = float(market_state.get("session_volume", 0.0) or 0.0)
     dollar_volume = session_volume * price
     participation = (notional / dollar_volume) if dollar_volume > 0 else 0.0
-    volatility_pct = _realized_volatility_pct(market_state)
+    prices = market_state.get("prices", []) or []
+    volatility_pct = realized_volatility_pct(prices)
 
     base_bps = float(cfg.get("base_bps", 1.0))
     volume_scale_bps = float(cfg.get("volume_scale_bps", 50.0))
@@ -28,21 +31,3 @@ def estimate_market_impact(notional: float, price: float, market_state: dict, cf
     vol = max(volatility_pct, min_vol_pct)
     impact = base_bps + participation * volume_scale_bps * (vol / 100.0)
     return ImpactEstimate(impact_bps=impact, participation=participation, volatility_pct=volatility_pct)
-
-
-def _realized_volatility_pct(market_state: dict) -> float:
-    prices = market_state.get("prices", []) or []
-    if len(prices) < 3:
-        return 0.0
-    returns = []
-    for idx in range(1, len(prices)):
-        prev = prices[idx - 1]
-        curr = prices[idx]
-        if not prev:
-            continue
-        returns.append((curr - prev) / prev)
-    if not returns:
-        return 0.0
-    mean = sum(returns) / len(returns)
-    var = sum((r - mean) ** 2 for r in returns) / max(len(returns) - 1, 1)
-    return (var**0.5) * 100.0

@@ -8,7 +8,16 @@ This repo contains a Python intraday trading agent for US and EU equities (NYSE,
 ## Quick Orientation
 
 - `app/main.py` is the CLI entrypoint with subcommands: `trade`, `backtest`, `download`, `api`, `train`, `online-train`, `evaluate`, `ingest`.
-- Core loop: `app/agents/trader.py` + `app/strategies/intraday_momentum.py` + `app/execution/executor.py` + `app/risk/manager.py`.
+- Core loop: `app/agents/trader.py` orchestrates the trading loop, delegating to extracted modules:
+  - `app/agents/symbol_manager.py` (symbol selection, AI filter, venue mapping)
+  - `app/agents/market_state.py` (typed market state dataclass)
+  - `app/agents/performance.py` (trade recording, stats, kill switch)
+  - `app/agents/open_orders.py` (open order cache and pending-order checks)
+  - `app/agents/account_metrics.py` (equity tracking, drawdown, VaR/CVaR)
+  - `app/risk/manager.py` + `app/risk/config.py` (risk limits, cooldown, exposure caps, order limits)
+  - `app/utils/structured_log.py` (structured JSON logging for trade/risk events)
+  - `app/utils/volatility.py` (shared realized volatility calculation)
+  - `app/strategies/intraday_momentum.py` + `app/execution/executor.py`.
 - Broker adapters: `app/brokers/alpaca.py`, `app/brokers/ibkr.py`, abstract base in `app/brokers/base.py`.
 - Backtesting: `app/backtest/agent_engine.py` runs the real `TradingAgent` loop on CSVs; legacy SMA lives in `app/backtest/engine.py`.
 - Learning (RL): `app/learning/` for env, data loading, training, and online updates; `app/strategies/rl_policy.py` for inference.

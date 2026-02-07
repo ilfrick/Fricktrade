@@ -86,8 +86,14 @@ flowchart LR
 - `docker-compose.yml`: service orchestration (trader, market-cache, redis, api, learner, tests-when-closed, healthwatch, etc).
 
 ## Trading Loop (Core Runtime)
-- `app/agents/trader.py`: main loop orchestration; symbol refresh, market gating, strategy execution,
-  risk checks, order queue, metrics, audit/compliance.
+- `app/agents/trader.py`: main loop orchestration; delegates to extracted modules below.
+- `app/agents/symbol_manager.py`: symbol selection, AI filter integration, venue/sector mapping, universe resolution.
+- `app/agents/market_state.py`: typed `MarketState` dataclass for per-symbol market context.
+- `app/agents/performance.py`: `PerformanceTracker` — trade recording, stats computation, kill switch.
+- `app/agents/open_orders.py`: `OpenOrderManager` — open order cache, pending-order checks, metrics.
+- `app/agents/account_metrics.py`: `AccountMetricsUpdater` — equity tracking, drawdown, VaR/CVaR.
+- `app/utils/structured_log.py`: `StructuredLogger` — structured JSON logging for trade/risk events.
+- `app/utils/volatility.py`: shared realized volatility calculation.
 - Flow: symbols -> market state -> strategies -> orchestrator -> risk -> execution -> metrics/logging.
 
 ## Strategies
@@ -100,7 +106,8 @@ flowchart LR
   features and order feedback; online updates + pretraining.
 
 ## Risk
-- `app/risk/manager.py`: core limits (exposure, leverage, daily loss) and guardrails.
+- `app/risk/manager.py`: core limits (exposure, leverage, daily loss), cooldown checks, order limits, exposure caps.
+- `app/risk/config.py`: `RiskConfig` dataclass — typed risk configuration with `from_dict`/`to_dict`.
 - `app/risk/haircut.py`: stress/liquidity haircuts.
 - `risk.enabled: false` bypasses risk checks, but broker account flags and trading limits still block orders.
 - Risk gating is integrated in `app/agents/trader.py`.

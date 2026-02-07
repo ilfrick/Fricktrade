@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
+import copy
 import json
 import hashlib
 import logging
@@ -8,7 +9,7 @@ import os
 import time
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, wait
 
@@ -20,16 +21,6 @@ from app.execution import routing as routing_utils
 from app.monitoring.metrics import (
     TRADES,
     SKIPPED_ORDERS,
-    PNL,
-    DRAWDOWN,
-    ACCOUNT_TOTAL,
-    ACCOUNT_CASH,
-    ACCOUNT_BUYING_POWER,
-    ACCOUNT_INVESTED,
-    ACCOUNT_TOTAL_BY_BROKER,
-    ACCOUNT_CASH_BY_BROKER,
-    ACCOUNT_BUYING_POWER_BY_BROKER,
-    ACCOUNT_INVESTED_BY_BROKER,
     POSITION_QTY,
     POSITION_VALUE,
     POSITION_QTY_BY_BROKER,
@@ -42,26 +33,15 @@ from app.monitoring.metrics import (
     SIGNAL_ABS_MOVE,
     SIGNAL_RUNUP_ABS,
     SIGNAL_DRAWDOWN_ABS,
-    SYMBOL_ACTIVE,
-    SYMBOL_ACTIVE_BY_BROKER,
     STRATEGY_ACTIVE,
     ORCHESTRATOR_STRATEGY_ACTIVE,
     ORCHESTRATOR_STRATEGY_SELECTED,
-    STRATEGY_TRADES_REALIZED,
-    STRATEGY_WIN_RATE,
-    STRATEGY_AVG_PNL_PCT,
-    STRATEGY_DRAWDOWN_PCT,
-    STRATEGY_DISABLED,
-    OPEN_ORDERS,
-    OPEN_ORDERS_BY_BROKER,
     BROKER_ACTIVE,
     BROKER_MARKET_OPEN,
     DECISION_LATENCY,
     ORDER_LATENCY,
     SKIPPED_ORDERS_BY_BROKER,
     TRADES_BY_BROKER,
-    PNL_BY_BROKER,
-    DRAWDOWN_BY_BROKER,
 )
 from app.monitoring.audit import AuditLogger, ComplianceLogger
 from app.risk.manager import RiskManager
@@ -73,13 +53,16 @@ from app.strategies.stat_arb_pairs import StatArbPairsStrategy
 from app.strategies.market_maker import MarketMakerStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.data.news import fetch_catalyst_symbols_for_config
-from app.data.scanner import ScanFilters, filter_universe_by_price, load_symbol_venues, load_universe, scan_symbols
-from app.data.market_cache import build_market_cache, build_market_cache_config, interval_to_seconds
+from app.data.market_cache import build_market_cache, build_market_cache_config
 from app.learning.drift import DriftMonitor
 from app.learning.registry import load_active_model, load_latest_feature_stats
 from app.learning.live_rewards import LiveRewardTracker
-from app.brokers.config_utils import get_alpaca_account_cfg, merge_cfg
+from app.brokers.config_utils import merge_cfg
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
+from app.utils.structured_log import StructuredLogger
+from app.utils.volatility import realized_volatility_pct
+
+_slog = StructuredLogger("trading_agent")
 from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
 from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart # Import GPU state utilities
 import tensorflow as tf # Import tensorflow for GPU error handling
@@ -89,15 +72,15 @@ try:
 except Exception:
     _TORCH_OOM = ()
 _OOM_ERRORS = (tf.errors.ResourceExhaustedError,) + _TORCH_OOM
-try:
-    from app.data.ai_filter import score_symbols
-except Exception:
-    score_symbols = None
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.strategies.rl_policy_fees import FeeAwareRLPolicyStrategy
-from app.utils.market import is_market_open, is_venue_extended, is_venue_open
+from app.utils.market import is_market_open, is_venue_extended
 from app.utils.restart import should_restart
+from app.agents.account_metrics import AccountMetricsUpdater
+from app.agents.open_orders import OpenOrderManager
 from app.agents.orchestrator import RLStrategyOrchestrator
+from app.agents.performance import PerformanceTracker
+from app.agents.symbol_manager import SymbolManager
 from app.agents.pipeline import DecisionPipeline
 from app.learning.regime_hmm import RegimeHMM, RegimeState
 from app.portfolio import PortfolioOptimizer, RiskModel
@@ -172,7 +155,7 @@ class TradingAgent:
             broker_risk_cfg = merge_cfg(cfg["risk"], acct_cfg.get("risk", {}))
             self._broker_states[name] = BrokerState(risk=RiskManager(broker_risk_cfg))
         self._last_market_open = None
-        self._started_at = datetime.utcnow()
+        self._started_at = datetime.now(timezone.utc)
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
         self._news_executor = ThreadPoolExecutor(max_workers=1)
@@ -204,36 +187,16 @@ class TradingAgent:
             self._portfolio_optimizer = PortfolioOptimizer(portfolio_cfg)
             self._risk_model = RiskModel(portfolio_cfg.get("risk_model", {}))
             logging.info("PortfolioOptimizer initialized")
-        self._open_orders_cache: list[dict] = []
-        self._open_orders_at: datetime | None = None
-        self._open_orders_labels: set[tuple[str, str]] = set()
-        self._active_symbol_labels: set[str] = set()
-        self._active_symbol_labels_by_broker: dict[str, set[str]] = {}
-        self._open_orders_labels_by_broker: set[tuple[str, str, str]] = set()
+        self._open_order_mgr = OpenOrderManager(cfg, self._broker_name)
         self._live_reward_tracker: LiveRewardTracker | None = None
         if self.cfg.get("learning", {}).get("live_rewards", {}).get("enabled", False):
             self._live_reward_tracker = LiveRewardTracker(self.cfg)
-        self._dynamic_symbols_at: datetime | None = None
-        self._dynamic_symbols: list[str] = []
-        self._symbols: list[str] = []
-        self._symbols_by_broker: dict[str, list[str]] = {}
-        self._symbols_by_strategy: dict[str, list[str]] = {}
-        self._symbol_venues: dict[str, str] = {}
-        self._symbol_venues_at: datetime | None = None
         self._orchestrator_state: dict[tuple[str, str], dict[str, object]] = {}
         self._position_symbols: set[str] = set()
         self._position_symbols_by_broker: dict[str, set[str]] = {}
-        self._ai_filter_last_run_at: datetime | None = None
-        self._ai_filter_last_log_at: datetime | None = None
-        self._ai_filter_last_count: int = 0
-        self._ai_filter_last_signals: dict[str, dict[str, float]] = {}
-        self._ai_filter_executor = ThreadPoolExecutor(max_workers=1)
-        self._ai_filter_future = None
-        self._ai_filter_future_lock = threading.Lock()
-        self._ai_filter_inflight_at: datetime | None = None
-        self._ai_filter_inflight_log_at: datetime | None = None
         self._market_cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
         self._market_cache = build_market_cache(cfg.get("market_cache", {}))
+        self._symbol_mgr = SymbolManager(cfg, self._broker_map, self._broker_name, self._open_order_mgr, self._market_cache_cfg, self._market_cache)
         self._pipeline = DecisionPipeline(self)
         self._broker_missing_at: datetime | None = None
         self._broker_missing_last_log = 0.0
@@ -289,29 +252,12 @@ class TradingAgent:
         self._active_model_checked_at: datetime | None = None
         self._active_model_snapshot: dict | None = None
         self._init_drift_monitor()
-        self._equity_start: float | None = None
-        self._equity_peak: float | None = None
-        self._day_start_date = None
-        self._day_start_equity: float | None = None
-        self._current_drawdown_pct = 0.0
-        self._equity_history: list[float] = []
-        self._var_cvar: dict[str, float] = {}
+        self._account_metrics = AccountMetricsUpdater(cfg)
         self._active_kill_switch_profile: str | None = None
         self._checkpoint_at: datetime | None = None
         self._kill_switch_liquidated = False
         self._kill_switch_warned = False
-        self._performance_cfg = cfg.get("strategy", {}).get("performance", {})
-        self._performance_enabled = bool(self._performance_cfg.get("enabled", False))
-        self._performance_window_days = int(self._performance_cfg.get("window_days", 30))
-        self._performance_min_trades = int(self._performance_cfg.get("min_trades", 20))
-        self._performance_min_win_rate = float(self._performance_cfg.get("min_win_rate", 0.4))
-        self._performance_max_drawdown = float(self._performance_cfg.get("max_drawdown_pct", 12.0))
-        self._performance_report_interval = int(self._performance_cfg.get("report_interval_minutes", 10))
-        self._performance_report_path = str(
-            self._performance_cfg.get("report_path", "/data/reports/strategy_performance.json")
-        )
-        self._kill_switch_enabled = bool(self._performance_cfg.get("kill_switch", {}).get("enabled", True))
-        self._performance_last_report_at: datetime | None = None
+        self._perf_tracker = PerformanceTracker(cfg, self._strategy_names)
         self._lock = threading.RLock()
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
@@ -326,6 +272,7 @@ class TradingAgent:
         SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=reason).inc()
         if broker_name:
             SKIPPED_ORDERS_BY_BROKER.labels(broker=broker_name, symbol=symbol, side=action, reason=reason).inc()
+        _slog.event("info", "risk_blocked", symbol=symbol, action=action, reason=reason, broker=broker_name)
 
     def _broker_state(self, broker_name: str | None) -> BrokerState:
         if not broker_name:
@@ -353,7 +300,7 @@ class TradingAgent:
             "action": action,
             "allowed": allowed,
             "reason": reason,
-            "at": datetime.utcnow().isoformat(),
+            "at": datetime.now(timezone.utc).isoformat(),
         }
 
     def _risk_disabled(self) -> bool:
@@ -487,7 +434,7 @@ class TradingAgent:
         if not registry_cfg.get("use_active", True):
             return
         refresh_minutes = int(registry_cfg.get("refresh_minutes", 5))
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if self._active_model_checked_at and (now - self._active_model_checked_at).total_seconds() < refresh_minutes * 60:
             return
         active_path = registry_cfg.get("active_path", "/app/models/model_active.json")
@@ -583,7 +530,7 @@ class TradingAgent:
         if not avg_entry or float(avg_entry) <= 0:
             return False, ""
         avg_entry = float(avg_entry)
-        risk_cfg = self.cfg.get("risk", {})
+        risk_cfg = broker_state.risk.cfg
 
         # Hard stop: price dropped X% from entry
         hard_stop = float(risk_cfg.get("hard_stop_pct", 0) or 0)
@@ -601,7 +548,7 @@ class TradingAgent:
         horizon = float(self._strategy_params.get("position_horizon_minutes", 0) or 0)
         opened_at = pos.get("opened_at")
         if horizon > 0 and opened_at is not None:
-            if (datetime.utcnow() - opened_at).total_seconds() > horizon * 60:
+            if (datetime.now(timezone.utc) - opened_at).total_seconds() > horizon * 60:
                 return True, "time_exit"
 
         return False, ""
@@ -663,7 +610,7 @@ class TradingAgent:
             return {}
         trace = {
             "symbol": symbol,
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
         }
         if market_state:
             trace["signal_inputs"] = self._signal_snapshot(market_state)
@@ -747,7 +694,7 @@ class TradingAgent:
         try:
             self._regime_state = self._regime_hmm.get_state(returns)
             return self._regime_state
-        except Exception as exc:
+        except (ValueError, RuntimeError) as exc:
             logging.debug("Regime detection failed: %s", exc)
             return None
 
@@ -787,7 +734,7 @@ class TradingAgent:
 
     def _write_decision_trace(self, payload: dict) -> None:
         try:
-            date_str = datetime.utcnow().date().isoformat()
+            date_str = datetime.now(timezone.utc).date().isoformat()
             path = Path(self._decision_trace_dir) / f"{date_str}.jsonl"
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
@@ -856,7 +803,7 @@ class TradingAgent:
             market_state["risk_outcome"] = self._broker_state(strategy_broker).risk_outcomes.get(symbol, {})
             if trace:
                 trace["broker_hint"] = broker_hint
-            if exec_cfg.get("strategy_guard", False) and self._has_pending_order(symbol, broker=broker_hint):
+            if exec_cfg.get("strategy_guard", False) and self._open_order_mgr.has_pending(symbol, broker=broker_hint):
                 self._record_skip(symbol, "hold", "open_order", broker_hint)
                 logging.info("Skipping %s: open orders pending (strategy guard)", symbol)
                 self._emit_decision_trace(trace, "skip", "open_order", "strategy_guard")
@@ -887,7 +834,7 @@ class TradingAgent:
         for name, strategy in strategies_to_run:
             try:
                 signal = strategy.generate_signal(market_state)
-            except Exception as exc:
+            except (ValueError, KeyError, RuntimeError) as exc:
                 logging.warning("Strategy %s failed for %s: %s", name, symbol, exc)
                 continue
             signal["name"] = name
@@ -1023,6 +970,7 @@ class TradingAgent:
                             logging.info(
                                 "Position exit for %s: %s", symbol, _exit_reason
                             )
+                            _slog.event("info", "position_exit", symbol=symbol, reason=_exit_reason, broker=broker_name)
                             if trace:
                                 trace.update(
                                     action="sell_to_close",
@@ -1044,12 +992,12 @@ class TradingAgent:
                     trace["action"] = action
             if action == "hold":
                 if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
-                    self._remove_pending_orders(symbol, broker=broker_name)
+                    self._open_order_mgr.remove_pending(symbol, broker=broker_name)
                 self._emit_decision_trace(trace, "hold", "strategies_hold", "signal")
                 return None
             if action == "exit":
                 if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
-                    self._remove_pending_orders(symbol, broker=broker_name)
+                    self._open_order_mgr.remove_pending(symbol, broker=broker_name)
                 self.broker.close_position(symbol, broker=broker_name)
                 self._emit_decision_trace(trace, "exit", "strategy_exit", "signal")
                 return None
@@ -1061,9 +1009,9 @@ class TradingAgent:
                     trace["action"] = "sell"
                     trace["sell_to_close"] = True
 
-            if self._has_pending_order(symbol, broker=broker_name):
+            if self._open_order_mgr.has_pending(symbol, broker=broker_name):
                 if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
-                    self._remove_pending_orders(symbol, broker=broker_name)
+                    self._open_order_mgr.remove_pending(symbol, broker=broker_name)
                 else:
                     self._record_skip(symbol, "hold", "open_order", broker_name)
                     logging.info("Skipping %s: open orders pending", symbol)
@@ -1104,7 +1052,7 @@ class TradingAgent:
                 logging.info("Skipping %s for %s: account blocked", action, symbol)
                 self._emit_decision_trace(trace, "skip", "account_blocked", "account")
                 return None
-            var_reason = self._var_limit_reason(broker_name)
+            var_reason = self._account_metrics.var_limit_reason(broker_state)
             if not risk_disabled and var_reason:
                 self._record_risk_outcome(symbol, action, False, var_reason, broker_name)
                 self._record_skip(symbol, action, var_reason, broker_name)
@@ -1141,29 +1089,42 @@ class TradingAgent:
                     logging.info("Skipping %s for %s: %s", action, symbol, skip_reason)
                     self._emit_decision_trace(trace, "skip", str(skip_reason), "sizing")
                 return None
-            if not risk_disabled and self._violates_exposure_caps(symbol, action, qty, last_price, portfolio):
-                self._record_risk_outcome(symbol, action, False, "exposure_cap", broker_name)
-                self._record_skip(symbol, action, "exposure_cap", broker_name)
-                logging.info("Skipping %s for %s: exposure caps exceeded", action, symbol)
-                self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
-                return None
-            if not risk_disabled and self._violates_order_limits(symbol, action, qty, last_price):
-                self._record_risk_outcome(symbol, action, False, "order_limit", broker_name)
-                self._record_skip(symbol, action, "order_limit", broker_name)
-                logging.info("Skipping %s for %s: order limits", action, symbol)
-                self._emit_decision_trace(trace, "skip", "order_limit", "limits")
-                return None
+            if not risk_disabled:
+                caps_cfg = self.cfg.get("risk", {}).get("exposure_caps", {}) or {}
+                violates, _ = RiskManager.check_exposure_caps(
+                    symbol, action, qty, last_price, portfolio, caps_cfg,
+                    venue_fn=self._symbol_mgr.symbol_venue,
+                    sector_fn=self._symbol_mgr.symbol_sector,
+                )
+                if violates:
+                    self._record_risk_outcome(symbol, action, False, "exposure_cap", broker_name)
+                    self._record_skip(symbol, action, "exposure_cap", broker_name)
+                    logging.info("Skipping %s for %s: exposure caps exceeded", action, symbol)
+                    self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
+                    return None
+            if not risk_disabled:
+                violates, _ = broker_state.risk.check_order_limits(
+                    qty, last_price, self.cfg.get("trading_limits", {}),
+                )
+                if violates:
+                    self._record_risk_outcome(symbol, action, False, "order_limit", broker_name)
+                    self._record_skip(symbol, action, "order_limit", broker_name)
+                    logging.info("Skipping %s for %s: order limits", action, symbol)
+                    self._emit_decision_trace(trace, "skip", "order_limit", "limits")
+                    return None
             market_state["qty"] = qty
             if trace:
                 trace["qty"] = qty
 
-            now = datetime.utcnow()
-            if not risk_disabled and self._is_cooldown_active(market_state, now, broker_name):
-                self._record_risk_outcome(symbol, action, False, "cooldown", broker_name)
-                self._record_skip(symbol, action, "cooldown", broker_name)
-                logging.info("Skipping %s for %s: cooldown", action, symbol)
-                self._emit_decision_trace(trace, "skip", "cooldown", "cooldown")
-                return None
+            now = datetime.now(timezone.utc)
+            if not risk_disabled:
+                blocked, _ = broker_state.risk.check_cooldown(broker_state.last_trade_at, now)
+                if blocked:
+                    self._record_risk_outcome(symbol, action, False, "cooldown", broker_name)
+                    self._record_skip(symbol, action, "cooldown", broker_name)
+                    logging.info("Skipping %s for %s: cooldown", action, symbol)
+                    self._emit_decision_trace(trace, "skip", "cooldown", "cooldown")
+                    return None
             # Sell-to-close (reducing position) should bypass can_open_trade
             _is_closing_position = False
             if action == "sell":
@@ -1240,6 +1201,13 @@ class TradingAgent:
                 TRADES.labels(symbol=symbol, side=action).inc()
                 TRADES_BY_BROKER.labels(broker=broker_name, symbol=symbol, side=action).inc()
                 broker_state.last_trade_at = now
+                _slog.event(
+                    "info", "trade_executed",
+                    symbol=symbol, action=action, qty=qty,
+                    price=last_price, broker=broker_name,
+                    order_type=order_type, strategy=action_strategy,
+                    notional=qty * last_price,
+                )
                 self._emit_decision_trace(
                     trace,
                     "order_enqueued",
@@ -1257,7 +1225,7 @@ class TradingAgent:
             return order_id
 
     def _cancel_pending_if_needed(self, symbol: str, action: str, broker: str | None = None) -> bool:
-        pending = self._pending_orders(symbol, broker=broker)
+        pending = self._open_order_mgr.get_pending(symbol, broker=broker)
         if not pending:
             return False
         if action in ("hold", "exit"):
@@ -1304,22 +1272,6 @@ class TradingAgent:
                                 logging.warning("Orchestrator reward update failed: %s", exc)
                     except Exception as exc:
                         logging.warning("Live reward update failed: %s", exc)
-
-    def _pending_orders(self, symbol: str, broker: str | None = None) -> list[dict]:
-        pending = [order for order in self._open_orders_cache if order.get("symbol") == symbol]
-        if broker:
-            pending = [order for order in pending if order.get("broker") == broker]
-        return pending
-
-    def _remove_pending_orders(self, symbol: str, broker: str | None = None) -> None:
-        if broker:
-            self._open_orders_cache = [
-                order
-                for order in self._open_orders_cache
-                if order.get("symbol") != symbol or order.get("broker") != broker
-            ]
-            return
-        self._open_orders_cache = [order for order in self._open_orders_cache if order.get("symbol") != symbol]
 
     def _size_order(
         self,
@@ -1417,23 +1369,10 @@ class TradingAgent:
         if not cfg.get("enabled", False):
             return 1.0
         prices = market_state.get("prices", []) or []
-        if len(prices) < 3:
-            return 1.0
-        returns = []
-        for idx in range(1, len(prices)):
-            prev = prices[idx - 1]
-            curr = prices[idx]
-            if not prev:
-                continue
-            returns.append((curr - prev) / prev)
-        if not returns:
-            return 1.0
-        mean = sum(returns) / len(returns)
-        var = sum((r - mean) ** 2 for r in returns) / max(len(returns) - 1, 1)
-        realized = (var ** 0.5) * 100.0
-        target = float(cfg.get("target_vol_pct", 2.0))
+        realized = realized_volatility_pct(prices)
         if realized <= 0:
             return 1.0
+        target = float(cfg.get("target_vol_pct", 2.0))
         scale = target / realized
         min_scale = float(cfg.get("min_scale", 0.5))
         max_scale = float(cfg.get("max_scale", 1.5))
@@ -1470,7 +1409,7 @@ class TradingAgent:
             if headroom < 0.05:  # Less than 5% headroom
                 return 0.7
             return 1.0
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError) as exc:
             logging.debug("Portfolio position scale failed: %s", exc)
             return 1.0
 
@@ -1525,32 +1464,7 @@ class TradingAgent:
                     return raw
         return account
 
-    def _violates_order_limits(self, symbol: str, action: str, qty: int, last_price: float) -> bool:
-        if not self._limits_enabled():
-            return False
-        limits = self.cfg.get("trading_limits", {})
-        max_qty = limits.get("max_order_qty")
-        if max_qty is not None and qty > float(max_qty):
-            return True
-        notional = qty * last_price
-        max_notional = limits.get("max_order_notional")
-        if max_notional is not None and notional > float(max_notional):
-            return True
-        min_notional = limits.get("min_order_notional")
-        if min_notional is not None and notional < float(min_notional):
-            return True
-        return False
-
-    def _is_cooldown_active(
-        self, market_state: dict, now: datetime, broker_name: str | None = None
-    ) -> bool:
-        cfg = self.cfg.get("risk", {})
-        cooldown = int(cfg.get("cooldown_seconds", 0))
-        broker_state = self._broker_state(broker_name)
-        if cooldown <= 0 or not broker_state.last_trade_at:
-            return False
-        elapsed = (now - broker_state.last_trade_at).total_seconds()
-        return elapsed < cooldown
+    # Risk check methods moved to RiskManager (app/risk/manager.py)
 
     def _resolve_strategy_names(self) -> list[str]:
         cfg = self.cfg.get("strategy", {})
@@ -1604,44 +1518,6 @@ class TradingAgent:
     def _normalize_broker_name(self, broker_name: str) -> str:
         return routing_utils.normalize_broker_name(broker_name, list(self._broker_map.keys()))
 
-    def _update_active_symbol_metrics(self, symbols: list[str]) -> None:
-        current_symbols = set(symbols)
-        # Set active symbols to 1 first to avoid flipping between 0 and 1
-        for sym in symbols:
-            SYMBOL_ACTIVE.labels(symbol=sym).set(1)
-        # Then clear symbols that are no longer active
-        for sym in self._active_symbol_labels - current_symbols:
-            SYMBOL_ACTIVE.labels(symbol=sym).set(0)
-        self._active_symbol_labels = current_symbols
-        symbols_by_broker: dict[str, set[str]] = {}
-        if self._symbols_by_broker:
-            for broker_name, batch in self._symbols_by_broker.items():
-                symbols_by_broker[broker_name] = set(batch)
-        else:
-            routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
-            broker_names = list(self._broker_map.keys())
-            if routing_mode == "parallel" and len(broker_names) > 1:
-                broker_buying_power = self._get_broker_buying_power()
-                buckets = routing_utils.parallel_partition_symbols(
-                    symbols, broker_names, broker_buying_power, self._routing_cfg, min_symbols=1
-                )
-                for broker_name, batch in buckets.items():
-                    symbols_by_broker[broker_name] = set(batch)
-            elif routing_mode == "auto_split" and len(broker_names) > 1:
-                buckets = routing_utils.partition_symbols(symbols, broker_names, self._routing_cfg)
-                for broker_name, batch in buckets.items():
-                    symbols_by_broker[broker_name] = set(batch)
-        if symbols_by_broker:
-            for broker_name, active_syms in symbols_by_broker.items():
-                previous = self._active_symbol_labels_by_broker.get(broker_name, set())
-                # Set active symbols to 1 first to avoid flipping between 0 and 1
-                for sym in active_syms:
-                    SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(1)
-                # Then clear symbols that are no longer active
-                for sym in previous - active_syms:
-                    SYMBOL_ACTIVE_BY_BROKER.labels(broker=broker_name, symbol=sym).set(0)
-                self._active_symbol_labels_by_broker[broker_name] = set(active_syms)
-
     def _build_symbol_batches(self, symbols: list[str]) -> list[tuple[str, str | None, list[str]]]:
         routing_mode = str(self._routing_cfg.get("mode", "default")).lower()
         broker_names = list(self._broker_map.keys())
@@ -1657,7 +1533,7 @@ class TradingAgent:
                 min_symbols=1,
             )
             # Cache for active symbol labels
-            self._symbols_by_broker = buckets
+            self._symbol_mgr.symbols_by_broker = buckets
             return [
                 ("parallel", broker, batch)
                 for broker, batch in buckets.items()
@@ -1665,10 +1541,10 @@ class TradingAgent:
             ]
 
         if routing_mode == "auto_split" and len(broker_names) > 1:
-            if self._symbols_by_broker:
+            if self._symbol_mgr.symbols_by_broker:
                 return [
                     ("auto_split", broker, batch)
-                    for broker, batch in self._symbols_by_broker.items()
+                    for broker, batch in self._symbol_mgr.symbols_by_broker.items()
                     if batch
                 ]
             buckets = routing_utils.partition_symbols(symbols, broker_names, self._routing_cfg)
@@ -1686,31 +1562,14 @@ class TradingAgent:
     def _update_open_order_queues(self) -> None:
         if len(self._broker_map) > 1:
             orders_by_broker: dict[str, list[dict]] = {}
-            for order in self._open_orders_cache:
+            for order in self._open_order_mgr.cache:
                 broker_name = order.get("broker") or self._broker_name
                 orders_by_broker.setdefault(str(broker_name), []).append(order)
             for broker_name, queue in self._order_queues.items():
                 queue.update(orders_by_broker.get(broker_name, []))
         else:
             if self._order_queue:
-                self._order_queue.update(self._open_orders_cache)
-
-    def _update_market_open_metrics(self, market_open: bool) -> None:
-        with self._lock:
-            brokers_cfg = self.cfg.get("brokers", {})
-            broker_names = [
-                name
-                for name, cfg in brokers_cfg.items()
-                if not isinstance(cfg, dict) or cfg.get("enabled", True)
-            ]
-            if not broker_names:
-                broker_names = self._broker_names or [self._broker_name]
-            for name in broker_names:
-                BROKER_MARKET_OPEN.labels(broker=name).set(1 if market_open else 0)
-            if market_open != self._last_market_open:
-                state = "open" if market_open else "closed"
-                logging.info("Market is %s; %s trading loop.", state, "starting" if market_open else "waiting")
-                self._last_market_open = market_open
+                self._order_queue.update(self._open_order_mgr.cache)
 
     def _prepare_market_data(self, market_data_provider, symbols: list[str]) -> None:
         data_cfg = self.cfg.get("data", {}) or {}
@@ -1734,28 +1593,38 @@ class TradingAgent:
                 self._live_reward_tracker.sync_positions(portfolio)
             except Exception as exc:
                 logging.warning("Live reward sync failed: %s", exc)
-        self._update_account_metrics()
+        self._account_metrics.update(self.broker, self._broker_states, self._broker_name)
         self._update_position_metrics(portfolio)
-        if self._performance_enabled:
+        if self._perf_tracker.enabled:
             brokers = portfolio.get("brokers", {})
             if isinstance(brokers, dict) and brokers:
                 for broker_name in brokers.keys():
                     broker_portfolio = self._portfolio_for_broker(portfolio, broker_name)
-                    self._update_performance_from_positions(broker_portfolio, broker_name)
+                    broker_state = self._broker_state(broker_name)
+                    self._perf_tracker.update_from_positions(
+                        broker_state, broker_portfolio, broker_name,
+                        self._strategy_names, broker_state.last_prices,
+                    )
             else:
-                self._update_performance_from_positions(portfolio, self._broker_name)
-        self._maybe_report_performance()
+                broker_state = self._broker_state(self._broker_name)
+                self._perf_tracker.update_from_positions(
+                    broker_state, portfolio, self._broker_name,
+                    self._strategy_names, broker_state.last_prices,
+                )
+        self._perf_tracker.maybe_report(
+            self._broker_states, self._strategy_disabled_globally
+        )
         self._refresh_news_cache(symbols)
         self._log_news_cache()
-        self._refresh_dynamic_symbols(portfolio)
-        self._refresh_symbol_venues()
+        self._symbol_mgr.refresh_dynamic_symbols(portfolio, self._strategy_names, signal_metrics_fn=self._update_signal_metrics_from_values)
+        self._symbol_mgr.refresh_symbol_venues()
         self._maybe_checkpoint()
-        self._log_ai_filter_heartbeat()
+        self._symbol_mgr.log_ai_filter_heartbeat()
         self._maybe_reload_active_model()
-        symbols = self._resolve_active_symbols()
-        symbols = self._merge_symbols_with_positions(symbols, portfolio)
-        self._update_active_symbol_metrics(symbols)
-        self._refresh_open_orders_cache(symbols)
+        symbols = self._symbol_mgr.resolve_active_symbols()
+        symbols = self._symbol_mgr.merge_symbols_with_positions(symbols, portfolio)
+        self._symbol_mgr.update_active_symbol_metrics(symbols, self._routing_cfg, self._get_broker_buying_power)
+        self._open_order_mgr.refresh(self.broker, self._broker_map, symbols)
         self._maybe_force_liquidation(portfolio)
         return symbols
 
@@ -1767,7 +1636,7 @@ class TradingAgent:
         broker_override: str | None,
         skip_unchanged: bool,
     ) -> None:
-        if not self._is_symbol_market_open(sym):
+        if not self._symbol_mgr.is_symbol_market_open(sym):
             return
         
         # Fetch market data UNLOCKED (IO bound)
@@ -1798,20 +1667,22 @@ class TradingAgent:
                 market_state["risk_outcome"] = broker_state.risk_outcomes.get(sym, {})
 
             self._enrich_market_state(market_state, portfolio, sym)
-            
+
             if broker_override:
                 market_state["broker_override"] = broker_override
-            
+
             # Access strategy symbols with lock
             with self._lock:
-                market_state["strategy_symbols"] = self._symbols_by_strategy
-            
+                market_state["strategy_symbols"] = self._symbol_mgr.symbols_by_strategy
+
             self._update_signal_metrics(sym, market_state)
-            
+
             decision_start = time.perf_counter()
             market_state["_decision_start"] = decision_start
-            
-            self._pipeline.run(sym, market_state)
+
+            # Deep-copy market_state to prevent threads from mutating each other's data
+            ms_copy = copy.deepcopy(market_state)
+            self._pipeline.run(sym, ms_copy)
             
             DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
         except Exception as exc:
@@ -1936,110 +1807,7 @@ class TradingAgent:
         strategy = chosen.get("name") if chosen else None
         return "sell", reduce_pct, strategy
 
-    def _update_broker_equity_state(self, broker_name: str, equity: float, last_equity: float | None = None) -> None:
-        broker_state = self._broker_state(broker_name)
-        if broker_state.equity_start is None:
-            broker_state.equity_start = equity
-        if broker_state.equity_peak is None or equity > broker_state.equity_peak:
-            broker_state.equity_peak = equity
-        base_equity = last_equity if last_equity else broker_state.equity_start
-        if base_equity:
-            pnl_pct = (equity - base_equity) / base_equity * 100.0
-            PNL_BY_BROKER.labels(broker=broker_name).set(pnl_pct)
-        if broker_state.equity_peak:
-            drawdown_pct = (broker_state.equity_peak - equity) / broker_state.equity_peak * 100.0
-            broker_state.current_drawdown_pct = max(drawdown_pct, 0.0)
-            DRAWDOWN_BY_BROKER.labels(broker=broker_name).set(max(drawdown_pct, 0.0))
-        today = datetime.utcnow().date()
-        if broker_state.day_start_date != today or broker_state.day_start_equity is None:
-            broker_state.day_start_date = today
-            broker_state.day_start_equity = equity
-        if broker_state.day_start_equity:
-            day_pnl_pct = (equity - broker_state.day_start_equity) / broker_state.day_start_equity * 100.0
-            broker_state.risk.update_daily_loss(day_pnl_pct)
-
-    def _update_account_metrics(self) -> None:
-        try:
-            account = self.broker.get_account()
-        except Exception as exc:
-            logging.warning("Account metrics update failed: %s", exc)
-            return
-        with self._lock:
-            total_val = cash_val = buying_power_val = None
-            broker_equities: dict[str, float] = {}
-            if isinstance(account, dict):
-                if "brokers" in account and isinstance(account["brokers"], dict):
-                    total_val = float(account.get("equity") or 0.0)
-                    cash_val = float(account.get("cash") or 0.0)
-                    buying_power_val = float(account.get("buying_power") or 0.0)
-                    for name, details in account["brokers"].items():
-                        equity = float(details.get("equity") or 0.0)
-                        cash = float(details.get("cash") or 0.0)
-                        buying_power = float(details.get("buying_power") or 0.0)
-                        broker_last_equity = None
-                        if details.get("last_equity") is not None:
-                            try:
-                                broker_last_equity = float(details["last_equity"])
-                            except (TypeError, ValueError):
-                                broker_last_equity = None
-                        ACCOUNT_TOTAL_BY_BROKER.labels(broker=name).set(equity)
-                        ACCOUNT_CASH_BY_BROKER.labels(broker=name).set(cash)
-                        ACCOUNT_BUYING_POWER_BY_BROKER.labels(broker=name).set(buying_power)
-                        ACCOUNT_INVESTED_BY_BROKER.labels(broker=name).set(equity - cash)
-                        broker_equities[str(name)] = equity
-                        self._update_broker_equity_state(str(name), equity, last_equity=broker_last_equity)
-                        # Update buying power in broker state for parallel routing
-                        broker_state = self._broker_states.get(str(name))
-                        if broker_state:
-                            broker_state.buying_power = buying_power
-                elif "equity" in account:
-                    total_val = float(account.get("equity") or 0.0)
-                    cash_val = float(account.get("cash") or 0.0)
-                    buying_power_val = float(account.get("buying_power") or 0.0)
-                elif "NetLiquidation" in account:
-                    total_val = float(account.get("NetLiquidation") or 0.0)
-                    cash_val = float(account.get("TotalCashValue") or 0.0)
-                    buying_power_val = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
-            if total_val is None or cash_val is None:
-                return
-            if not broker_equities:
-                broker_equities[self._broker_name] = total_val
-                self._update_broker_equity_state(self._broker_name, total_val)
-            if self._equity_start is None:
-                self._equity_start = total_val
-            if self._equity_peak is None or total_val > self._equity_peak:
-                self._equity_peak = total_val
-            last_equity = None
-            if isinstance(account, dict):
-                last_equity = account.get("last_equity")
-            base_equity = self._equity_start
-            if last_equity is not None:
-                try:
-                    last_equity_val = float(last_equity)
-                except (TypeError, ValueError):
-                    last_equity_val = None
-                if last_equity_val:
-                    base_equity = last_equity_val
-            if base_equity:
-                pnl_pct = (total_val - base_equity) / base_equity * 100.0
-                PNL.set(pnl_pct)
-            if self._equity_peak:
-                drawdown_pct = (self._equity_peak - total_val) / self._equity_peak * 100.0
-                DRAWDOWN.set(max(drawdown_pct, 0.0))
-                self._current_drawdown_pct = max(drawdown_pct, 0.0)
-            ACCOUNT_TOTAL.set(total_val)
-            ACCOUNT_CASH.set(cash_val)
-            if buying_power_val is not None:
-                ACCOUNT_BUYING_POWER.set(buying_power_val)
-            ACCOUNT_INVESTED.set(total_val - cash_val)
-            today = datetime.utcnow().date()
-            if self._day_start_date != today or self._day_start_equity is None:
-                self._day_start_date = today
-                self._day_start_equity = total_val
-            if self._day_start_equity:
-                day_pnl_pct = (total_val - self._day_start_equity) / self._day_start_equity * 100.0
-                self._update_drift_monitor(day_pnl_pct)
-            self._update_var_cvar(total_val, broker_equities)
+    # Account metrics methods moved to AccountMetricsUpdater (app/agents/account_metrics.py)
 
     def _update_drift_monitor(self, day_pnl_pct: float) -> None:
         if not self._drift_monitor:
@@ -2066,86 +1834,7 @@ class TradingAgent:
             if not strategies:
                 del self._strategy_by_symbol[symbol]
 
-    def _update_var_cvar(self, total_val: float, broker_equities: dict[str, float] | None) -> None:
-        var_cfg = self.cfg.get("risk", {}).get("var", {}) or {}
-        if not var_cfg.get("enabled", False):
-            return
-        window = int(var_cfg.get("window", 60))
-        confidence = float(var_cfg.get("confidence", 0.95))
-        self._equity_history.append(total_val)
-        if len(self._equity_history) > window:
-            self._equity_history = self._equity_history[-window:]
-        self._var_cvar = _var_cvar_from_history(self._equity_history, confidence)
-        broker_equities = broker_equities or {}
-        for name, equity in broker_equities.items():
-            broker_state = self._broker_state(name)
-            broker_state.equity_history.append(float(equity))
-            if len(broker_state.equity_history) > window:
-                broker_state.equity_history = broker_state.equity_history[-window:]
-            broker_state.var_cvar = _var_cvar_from_history(broker_state.equity_history, confidence)
-
-    def _var_limit_reason(self, broker_name: str) -> str | None:
-        var_cfg = self.cfg.get("risk", {}).get("var", {}) or {}
-        if not var_cfg.get("enabled", False):
-            return None
-        max_var = float(var_cfg.get("max_var_pct", 0.0) or 0.0)
-        max_cvar = float(var_cfg.get("max_cvar_pct", 0.0) or 0.0)
-        if max_var and self._var_cvar.get("var_pct", 0.0) > max_var:
-            return "var_limit"
-        if max_cvar and self._var_cvar.get("cvar_pct", 0.0) > max_cvar:
-            return "cvar_limit"
-        broker_stats = self._broker_state(broker_name).var_cvar
-        if max_var and broker_stats.get("var_pct", 0.0) > max_var:
-            return "var_limit_broker"
-        if max_cvar and broker_stats.get("cvar_pct", 0.0) > max_cvar:
-            return "cvar_limit_broker"
-        return None
-
-    def _violates_exposure_caps(self, symbol: str, action: str, qty: int, last_price: float, portfolio: dict) -> bool:
-        caps_cfg = self.cfg.get("risk", {}).get("exposure_caps", {}) or {}
-        if not caps_cfg.get("enabled", False):
-            return False
-        if action not in ("buy", "sell"):
-            return False
-        delta = qty * last_price
-        positions = portfolio.get("positions", {})
-        current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
-        if action == "sell" and current_qty > 0:
-            delta = -min(delta, current_qty * last_price)
-        venue_caps = caps_cfg.get("venues", {}) or {}
-        sector_caps = caps_cfg.get("sectors", {}) or {}
-        equity = float(portfolio.get("equity", 0.0) or 0.0)
-        if equity <= 0:
-            return False
-        if venue_caps:
-            exposure = _group_exposure(portfolio, self._symbol_venue)
-            venue = self._symbol_venue(symbol)
-            if venue:
-                exposure[venue] = exposure.get(venue, 0.0) + abs(delta)
-            for venue_name, cap in venue_caps.items():
-                if exposure.get(venue_name, 0.0) / equity * 100.0 > float(cap):
-                    return True
-        if sector_caps:
-            exposure = _group_exposure(portfolio, self._symbol_sector)
-            sector = self._symbol_sector(symbol)
-            if sector:
-                exposure[sector] = exposure.get(sector, 0.0) + abs(delta)
-            for sector_name, cap in sector_caps.items():
-                if exposure.get(sector_name, 0.0) / equity * 100.0 > float(cap):
-                    return True
-        return False
-
-    def _symbol_venue(self, symbol: str) -> str | None:
-        venue = self._symbol_venues.get(symbol)
-        if venue:
-            return venue
-        market_cfg = self.cfg.get("market", {})
-        return market_cfg.get("default_symbol_venue") or market_cfg.get("venue")
-
-    def _symbol_sector(self, symbol: str) -> str | None:
-        market_cfg = self.cfg.get("market", {})
-        sector_map = market_cfg.get("symbol_sectors", {}) or {}
-        return sector_map.get(symbol)
+    # _violates_exposure_caps moved to RiskManager.check_exposure_caps
 
     def _apply_kill_switch_profile(self, market_state: dict) -> None:
         profile_cfg = self.cfg.get("risk", {}).get("kill_switch_profiles", {}) or {}
@@ -2168,6 +1857,7 @@ class TradingAgent:
             risk_cfg[key] = value
         self._active_kill_switch_profile = name
         logging.info("Kill switch profile set to %s", name)
+        _slog.event("info", "kill_switch_profile", profile=name)
 
     def _select_profile_name(self, profile_cfg: dict, market_state: dict) -> str | None:
         adaptive = profile_cfg.get("adaptive", {}) or {}
@@ -2216,237 +1906,24 @@ class TradingAgent:
                     POSITION_VALUE_BY_BROKER.labels(broker=broker_name, symbol=symbol).set(0)
                 self._position_symbols_by_broker[broker_name] = new_broker
 
-    def _prune_pending_entry_strategies(self, now: datetime, broker_name: str) -> None:
-        broker_state = self._broker_state(broker_name)
-        if not broker_state.pending_entry_strategy:
-            return
-        cutoff = now - timedelta(days=1)
-        stale = [
-            symbol
-            for symbol, data in broker_state.pending_entry_strategy.items()
-            if isinstance(data, dict) and data.get("ts") and data["ts"] < cutoff
-        ]
-        for symbol in stale:
-            broker_state.pending_entry_strategy.pop(symbol, None)
-
-    def _consume_pending_entry_strategy(self, symbol: str, broker_name: str) -> str | None:
-        broker_state = self._broker_state(broker_name)
-        data = broker_state.pending_entry_strategy.pop(symbol, None)
-        if not data:
-            return None
-        strategy = data.get("strategy")
-        if strategy and strategy in self._strategy_names:
-            return str(strategy)
-        return None
-
-    def _record_trade(
-        self, strategy: str | None, symbol: str, pnl_pct: float, ts: datetime, broker_name: str
-    ) -> None:
-        broker_state = self._broker_state(broker_name)
-        record = {"ts": ts, "pnl_pct": pnl_pct}
-        broker_state.symbol_trades.setdefault(symbol, []).append(record)
-        if strategy and strategy in self._strategy_names:
-            broker_state.strategy_trades.setdefault(strategy, []).append(record)
-            STRATEGY_TRADES_REALIZED.labels(strategy=strategy).inc()
-
-    def _prune_trade_records(self, records: list[dict], cutoff: datetime) -> list[dict]:
-        if not records:
-            return []
-        return [record for record in records if record.get("ts") and record["ts"] >= cutoff]
-
-    def _compute_trade_stats(self, records: list[dict]) -> dict:
-        if not records:
-            return {"trades": 0, "win_rate": 0.0, "avg_pnl_pct": 0.0, "drawdown_pct": 0.0}
-        ordered = sorted(records, key=lambda r: r.get("ts") or datetime.min)
-        total = len(ordered)
-        wins = sum(1 for r in ordered if float(r.get("pnl_pct", 0.0) or 0.0) > 0.0)
-        avg_pnl = sum(float(r.get("pnl_pct", 0.0) or 0.0) for r in ordered) / total
-        equity = 100.0
-        peak = 100.0
-        max_dd = 0.0
-        for record in ordered:
-            pnl_pct = float(record.get("pnl_pct", 0.0) or 0.0)
-            equity *= 1.0 + pnl_pct / 100.0
-            if equity > peak:
-                peak = equity
-            if peak > 0:
-                drawdown = (peak - equity) / peak * 100.0
-                if drawdown > max_dd:
-                    max_dd = drawdown
-        return {
-            "trades": total,
-            "win_rate": wins / total,
-            "avg_pnl_pct": avg_pnl,
-            "drawdown_pct": max_dd,
-        }
-
-    def _update_performance_from_positions(self, portfolio: dict, broker_name: str) -> None:
-        if not self._performance_enabled:
-            return
-        broker_state = self._broker_state(broker_name)
-        now = datetime.utcnow()
-        self._prune_pending_entry_strategies(now, broker_name)
-        positions = portfolio.get("positions", {}) or {}
-        symbols = set(positions.keys()) | set(broker_state.position_state.keys())
-        for symbol in symbols:
-            current = positions.get(symbol) or {}
-            curr_qty = float(current.get("qty", 0.0) or 0.0)
-            curr_avg_entry = current.get("avg_entry")
-            if curr_avg_entry is not None:
-                try:
-                    curr_avg_entry = float(curr_avg_entry)
-                except (TypeError, ValueError):
-                    curr_avg_entry = None
-            prev = broker_state.position_state.get(symbol)
-            if prev is None:
-                if curr_qty != 0:
-                    strategy = self._consume_pending_entry_strategy(symbol, broker_name)
-                    broker_state.position_state[symbol] = {
-                        "qty": curr_qty,
-                        "avg_entry": curr_avg_entry,
-                        "strategy": strategy,
-                        "opened_at": now,
-                        "peak_price": curr_avg_entry,
-                    }
-                continue
-            prev_qty = float(prev.get("qty", 0.0) or 0.0)
-            prev_avg = prev.get("avg_entry")
-            strategy = prev.get("strategy")
-            if curr_qty > prev_qty:
-                if strategy is None:
-                    strategy = self._consume_pending_entry_strategy(symbol, broker_name)
-                prev["qty"] = curr_qty
-                if curr_avg_entry is not None:
-                    prev["avg_entry"] = curr_avg_entry
-                if strategy is not None:
-                    prev["strategy"] = strategy
-                # Update peak price for trailing stop
-                _lp = broker_state.last_prices.get(symbol)
-                if _lp is not None:
-                    prev["peak_price"] = max(float(prev.get("peak_price") or 0), _lp)
-                continue
-            if curr_qty < prev_qty:
-                exit_price = broker_state.last_prices.get(symbol)
-                entry_price = prev_avg or curr_avg_entry
-                if entry_price and exit_price:
-                    direction = 1.0 if prev_qty > 0 else -1.0
-                    pnl_pct = (exit_price - entry_price) / entry_price * 100.0 * direction
-                    self._record_trade(strategy, symbol, pnl_pct, now, broker_name)
-                if curr_qty == 0:
-                    broker_state.position_state.pop(symbol, None)
-                else:
-                    prev["qty"] = curr_qty
-                    if curr_avg_entry is not None:
-                        prev["avg_entry"] = curr_avg_entry
-                continue
-            # qty unchanged — update peak price for trailing stop
-            _lp = broker_state.last_prices.get(symbol)
-            if _lp is not None:
-                prev["peak_price"] = max(float(prev.get("peak_price") or 0), _lp)
-
-    def _maybe_report_performance(self) -> None:
-        if not self._performance_enabled:
-            return
-        now = datetime.utcnow()
-        interval_seconds = self._performance_report_interval * 60
-        if self._performance_last_report_at and (now - self._performance_last_report_at).total_seconds() < interval_seconds:
-            return
-        cutoff = now - timedelta(days=self._performance_window_days)
-        strategy_report: dict[str, dict] = {}
-        symbol_report: dict[str, dict] = {}
-        brokers_report: dict[str, dict] = {}
-        aggregate_strategy_records: dict[str, list[dict]] = {name: [] for name in self._strategy_names}
-        aggregate_symbol_records: dict[str, list[dict]] = {}
-
-        for broker_name, broker_state in self._broker_states.items():
-            broker_strategy_report: dict[str, dict] = {}
-            broker_symbol_report: dict[str, dict] = {}
-            for name in self._strategy_names:
-                records = self._prune_trade_records(broker_state.strategy_trades.get(name, []), cutoff)
-                broker_state.strategy_trades[name] = records
-                stats = self._compute_trade_stats(records)
-                broker_strategy_report[name] = stats | {"disabled": name in broker_state.disabled_strategies}
-                aggregate_strategy_records[name].extend(records)
-                if (
-                    self._kill_switch_enabled
-                    and name not in broker_state.disabled_strategies
-                    and stats["trades"] >= self._performance_min_trades
-                    and (
-                        stats["win_rate"] < self._performance_min_win_rate
-                        or stats["drawdown_pct"] > self._performance_max_drawdown
-                    )
-                ):
-                    broker_state.disabled_strategies.add(name)
-                    logging.warning(
-                        "Strategy %s disabled by kill switch (broker=%s trades=%d win_rate=%.2f drawdown=%.2f)",
-                        name,
-                        broker_name,
-                        stats["trades"],
-                        stats["win_rate"],
-                        stats["drawdown_pct"],
-                    )
-            for symbol, records in list(broker_state.symbol_trades.items()):
-                trimmed = self._prune_trade_records(records, cutoff)
-                if trimmed:
-                    broker_state.symbol_trades[symbol] = trimmed
-                    broker_symbol_report[symbol] = self._compute_trade_stats(trimmed)
-                    aggregate_symbol_records.setdefault(symbol, []).extend(trimmed)
-                else:
-                    broker_state.symbol_trades.pop(symbol, None)
-            brokers_report[broker_name] = {
-                "strategies": broker_strategy_report,
-                "symbols": broker_symbol_report,
-                "disabled_strategies": sorted(broker_state.disabled_strategies),
-            }
-            broker_state.performance_last_report_at = now
-
-        for name in self._strategy_names:
-            records = aggregate_strategy_records.get(name, [])
-            stats = self._compute_trade_stats(records)
-            STRATEGY_WIN_RATE.labels(strategy=name).set(stats["win_rate"])
-            STRATEGY_AVG_PNL_PCT.labels(strategy=name).set(stats["avg_pnl_pct"])
-            STRATEGY_DRAWDOWN_PCT.labels(strategy=name).set(stats["drawdown_pct"])
-            STRATEGY_DISABLED.labels(strategy=name).set(1 if self._strategy_disabled_globally(name) else 0)
-            strategy_report[name] = stats | {"disabled": self._strategy_disabled_globally(name)}
-
-        for symbol, records in aggregate_symbol_records.items():
-            symbol_report[symbol] = self._compute_trade_stats(records)
-
-        report = {
-            "generated_at": now.isoformat(),
-            "window_days": self._performance_window_days,
-            "min_trades": self._performance_min_trades,
-            "min_win_rate": self._performance_min_win_rate,
-            "max_drawdown_pct": self._performance_max_drawdown,
-            "strategies": strategy_report,
-            "symbols": symbol_report,
-            "disabled_strategies": sorted(
-                [name for name in self._strategy_names if self._strategy_disabled_globally(name)]
-            ),
-            "brokers": brokers_report,
-        }
-        try:
-            report_path = Path(self._performance_report_path)
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text(json.dumps(report, indent=2))
-        except Exception as exc:
-            logging.warning("Performance report write failed: %s", exc)
-        self._performance_last_report_at = now
+    # Performance tracking methods moved to PerformanceTracker (app/agents/performance.py)
 
     def _run_reporting_loop(self):
         logging.info("Starting reporting loop thread.")
         while True:
             try:
                 # Update account metrics (includes PnL, Equity, Drift)
-                self._update_account_metrics()
+                self._account_metrics.update(self.broker, self._broker_states, self._broker_name)
                 market_open = is_market_open(self.cfg)
-                self._update_market_open_metrics(market_open)
+                self._last_market_open = self._account_metrics.update_market_open_metrics(
+                    self.cfg, self._broker_names or [self._broker_name], market_open, self._last_market_open
+                )
             except Exception as exc:
                 logging.warning("Reporting loop error: %s", exc)
             time.sleep(15)
 
     def loop(self, symbol: str | list[str], market_data_provider, interval_seconds: int = 60):
-        self._symbols = symbol if isinstance(symbol, list) else [symbol]
+        self._symbol_mgr.symbols = symbol if isinstance(symbol, list) else [symbol]
         
         # Start decoupled reporting thread
         reporting_thread = threading.Thread(target=self._run_reporting_loop, daemon=True)
@@ -2464,7 +1941,7 @@ class TradingAgent:
                     BROKER_MARKET_OPEN.labels(broker=broker_name).set(0)
                 time.sleep(interval_seconds)
                 continue
-            symbols = self._resolve_active_symbols()
+            symbols = self._symbol_mgr.resolve_active_symbols()
             symbols = self._run_cycle_maintenance(symbols, portfolio)
             self._update_open_order_queues()
             self._flush_order_responses()
@@ -2481,30 +1958,6 @@ class TradingAgent:
             for _, broker_override, batch in symbol_batches:
                 self._run_symbol_batch(batch, portfolio, market_data_provider, broker_override)
             time.sleep(interval_seconds)
-
-    def _merge_symbols_with_positions(self, symbols: list[str], portfolio: dict) -> list[str]:
-        positions = portfolio.get("positions", {})
-        if not positions:
-            logging.debug("_merge_symbols_with_positions: no positions in portfolio")
-            return symbols
-        held_symbols = [s for s, p in positions.items() if float(p.get("qty", 0) or 0) != 0]
-        if held_symbols:
-            logging.debug("_merge_symbols_with_positions: adding held positions %s", held_symbols[:10])
-        merged = set(symbols)
-        for symbol, position in positions.items():
-            qty = float(position.get("qty", 0.0) or 0.0)
-            if qty != 0:
-                merged.add(symbol)
-        return list(merged)
-
-    def _is_symbol_market_open(self, symbol: str) -> bool:
-        market_cfg = self.cfg.get("market", {})
-        venue_map = market_cfg.get("symbol_venues", {}) or {}
-        default_venue = str(market_cfg.get("default_symbol_venue", "")).strip()
-        venue = str(venue_map.get(symbol) or self._symbol_venues.get(symbol) or default_venue).strip()
-        if not venue:
-            return is_market_open(self.cfg)
-        return is_venue_open(self.cfg, venue)
 
     def _ops_state_blocks_run(self) -> bool:
         ms_cfg = self.cfg.get("healthwatch", {}).get("market_shutdown", {}) or {}
@@ -2523,59 +1976,10 @@ class TradingAgent:
             return
         self._broker_missing_last_log = now
         if self._broker_missing_at is None:
-            self._broker_missing_at = datetime.utcnow()
+            self._broker_missing_at = datetime.now(timezone.utc)
         brokers = ", ".join(self._broker_names or [self._broker_name])
         reason = self._broker_missing_reason or "broker not initialized"
         logging.warning("Broker unavailable; trading loop idle. brokers=%s reason=%s", brokers, reason)
-
-    def _refresh_symbol_venues(self) -> None:
-        market_cfg = self.cfg.get("market", {})
-        auto_cfg = market_cfg.get("symbol_venues_auto", {})
-        if not auto_cfg.get("enabled", False):
-            return
-        now = datetime.utcnow()
-        interval = int(auto_cfg.get("refresh_minutes", 60))
-        if self._symbol_venues_at and (now - self._symbol_venues_at).total_seconds() < interval * 60:
-            return
-        alpaca_cfg = get_alpaca_account_cfg(self.cfg)
-        api_key = alpaca_cfg.get("api_key", "")
-        api_secret = alpaca_cfg.get("api_secret", "")
-        if not api_key or not api_secret:
-            return
-        exchange_map = auto_cfg.get("exchange_venue_map", {}) or {}
-        if not exchange_map:
-            return
-        max_symbols = int(auto_cfg.get("max_symbols", 50000))
-        try:
-            venues = load_symbol_venues(api_key, api_secret, max_symbols, exchange_map)
-        except Exception as exc:
-            logging.warning("Symbol venue refresh failed: %s", exc)
-            return
-        if venues:
-            self._symbol_venues = venues
-            self._symbol_venues_at = now
-
-    def _log_ai_filter_heartbeat(self) -> None:
-        dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})
-        ai_cfg = dyn_cfg.get("ai_filter", {})
-        if not ai_cfg.get("enabled", False) or score_symbols is None:
-            return
-        now = datetime.utcnow()
-        if self._ai_filter_last_run_at is None:
-            return
-        last_log = self._ai_filter_last_log_at
-        if last_log and (now - last_log).total_seconds() < 30:
-            return
-        refresh_minutes = int(dyn_cfg.get("refresh_minutes", 15))
-        if (now - self._ai_filter_last_run_at).total_seconds() > refresh_minutes * 60:
-            return
-        age_sec = int((now - self._ai_filter_last_run_at).total_seconds())
-        logging.info(
-            "AI filter heartbeat ok; last_run_sec=%d symbols=%d",
-            age_sec,
-            self._ai_filter_last_count,
-        )
-        self._ai_filter_last_log_at = now
 
     def _maybe_checkpoint(self) -> None:
         broker_states_payload: dict[str, dict[str, object]] = {}
@@ -2588,17 +1992,17 @@ class TradingAgent:
             }
         default_state = self._broker_states.get(self._broker_name)
         payload = {
-            "dynamic_symbols": self._dynamic_symbols,
-            "dynamic_symbols_at": _dt_to_str(self._dynamic_symbols_at),
-            "symbols": self._symbols,
-            "symbols_by_strategy": self._symbols_by_strategy,
-            "symbol_venues": self._symbol_venues,
-            "symbol_venues_at": _dt_to_str(self._symbol_venues_at),
+            "dynamic_symbols": self._symbol_mgr.dynamic_symbols,
+            "dynamic_symbols_at": _dt_to_str(self._symbol_mgr.dynamic_symbols_at),
+            "symbols": self._symbol_mgr.symbols,
+            "symbols_by_strategy": self._symbol_mgr.symbols_by_strategy,
+            "symbol_venues": self._symbol_mgr.symbol_venues,
+            "symbol_venues_at": _dt_to_str(self._symbol_mgr.symbol_venues_at),
             "news_cache": self._news_cache,
             "news_cache_at": _dt_to_str(self._news_cache_at),
             "last_trade_at": _dt_to_str(default_state.last_trade_at) if default_state else None,
-            "equity_start": self._equity_start,
-            "equity_peak": self._equity_peak,
+            "equity_start": self._account_metrics.equity_start,
+            "equity_peak": self._account_metrics.equity_peak,
             "broker_states": broker_states_payload,
         }
         self._checkpoint_at = maybe_save_checkpoint("trader", payload, self.cfg, self._checkpoint_at)
@@ -2608,18 +2012,18 @@ class TradingAgent:
         if not data:
             return
         payload = data.get("payload", {}) or {}
-        self._dynamic_symbols = list(payload.get("dynamic_symbols", []))
-        self._dynamic_symbols_at = _dt_from_str(payload.get("dynamic_symbols_at"))
-        self._symbols = list(payload.get("symbols", []))
-        self._symbols_by_strategy = dict(payload.get("symbols_by_strategy", {}) or {})
-        if not self._symbols and self._dynamic_symbols:
-            self._symbols = list(self._dynamic_symbols)
-        self._symbol_venues = dict(payload.get("symbol_venues", {}) or {})
-        self._symbol_venues_at = _dt_from_str(payload.get("symbol_venues_at"))
+        self._symbol_mgr.dynamic_symbols = list(payload.get("dynamic_symbols", []))
+        self._symbol_mgr.dynamic_symbols_at = _dt_from_str(payload.get("dynamic_symbols_at"))
+        self._symbol_mgr.symbols = list(payload.get("symbols", []))
+        self._symbol_mgr.symbols_by_strategy = dict(payload.get("symbols_by_strategy", {}) or {})
+        if not self._symbol_mgr.symbols and self._symbol_mgr.dynamic_symbols:
+            self._symbol_mgr.symbols = list(self._symbol_mgr.dynamic_symbols)
+        self._symbol_mgr.symbol_venues = dict(payload.get("symbol_venues", {}) or {})
+        self._symbol_mgr.symbol_venues_at = _dt_from_str(payload.get("symbol_venues_at"))
         self._news_cache = dict(payload.get("news_cache", {}) or {})
         self._news_cache_at = _dt_from_str(payload.get("news_cache_at"))
-        self._equity_start = payload.get("equity_start")
-        self._equity_peak = payload.get("equity_peak")
+        self._account_metrics.equity_start = payload.get("equity_start")
+        self._account_metrics.equity_peak = payload.get("equity_peak")
         broker_payload = payload.get("broker_states", {}) or {}
         if isinstance(broker_payload, dict):
             for name, state in broker_payload.items():
@@ -2699,7 +2103,7 @@ class TradingAgent:
             self._news_cache = {}
             self._news_cache_at = None
             return
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         ttl_minutes = int(news_cfg.get("cache_minutes", 15))
         if self._news_cache_at and (now - self._news_cache_at).total_seconds() < ttl_minutes * 60:
             return
@@ -2738,506 +2142,6 @@ class TradingAgent:
         count = len(self._news_cache)
         logging.info("News catalyst cache updated; symbols=%d", count)
 
-    def _refresh_dynamic_symbols(self, portfolio: dict, now: datetime | None = None) -> None:
-        dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})
-        if not dyn_cfg.get("enabled", False):
-            return
-        now = now or datetime.utcnow()
-        refresh_minutes = int(dyn_cfg.get("refresh_minutes", 15))
-        if self._dynamic_symbols_at and (now - self._dynamic_symbols_at).total_seconds() < refresh_minutes * 60:
-            return
-
-        provider = dyn_cfg.get("provider", "alpaca")
-        if provider != "alpaca":
-            return
-        alpaca_cfg = get_alpaca_account_cfg(self.cfg)
-        api_key = alpaca_cfg.get("api_key", "")
-        api_secret = alpaca_cfg.get("api_secret", "")
-
-        universe_cfg = dyn_cfg.get("universe", self._symbols)
-        max_universe = int(dyn_cfg.get("max_universe", 500))
-        universe = self._resolve_universe(universe_cfg, api_key, api_secret, max_universe, portfolio, dyn_cfg)
-        if not universe:
-            return
-        max_symbols = self._resolve_max_symbols(dyn_cfg, universe, portfolio)
-
-        self._symbols_by_strategy = {}
-        self._symbols_by_broker = {}
-        ai_cfg = dyn_cfg.get("ai_filter", {})
-        if (
-            ai_cfg.get("enabled", False)
-            and self._market_cache_cfg.enabled
-            and self._market_cache_cfg.filtered_symbols_enabled
-            and ai_cfg.get("use_cached_symbols", False)
-            and self._market_cache is not None
-        ):
-            cache_interval = str(ai_cfg.get("interval", self.cfg.get("data", {}).get("interval", "1m")))
-            max_age = interval_to_seconds(cache_interval)
-            cached_symbols = self._market_cache.get_filtered_symbols(cache_interval, max_age_seconds=max_age)
-            if cached_symbols:
-                ordered = self._merge_with_positions(cached_symbols, portfolio, max_symbols)
-                self._symbols_by_broker = self._build_symbols_by_broker(ordered, portfolio, dyn_cfg)
-                self._symbols_by_strategy["__global__"] = ordered
-                for name in self._strategy_names:
-                    self._symbols_by_strategy[name] = ordered
-                self._symbols = ordered
-                self._dynamic_symbols = list(ordered)
-                self._dynamic_symbols_at = now
-                return
-        if ai_cfg.get("enabled", False) and score_symbols is not None:
-            ai_cfg_payload = dict(ai_cfg)
-            ai_cfg_payload["market_cache"] = self.cfg.get("market_cache", {})
-            with self._ai_filter_future_lock:
-                if self._ai_filter_future is None:
-                    logging.info("AI filter run starting; universe=%d", len(universe))
-                    self._ai_filter_future = self._ai_filter_executor.submit(
-                        score_symbols,
-                        universe,
-                        api_key,
-                        api_secret,
-                        ai_cfg_payload,
-                        self.cfg.get("brokers", {}),
-                    )
-                    self._ai_filter_inflight_at = now
-                    return
-                if not self._ai_filter_future.done():
-                    if self._ai_filter_inflight_at is not None:
-                        elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
-                        last_log = self._ai_filter_inflight_log_at
-                        if last_log is None or (now - last_log).total_seconds() >= 60:
-                            logging.info("AI filter still running; elapsed_sec=%d", elapsed)
-                            self._ai_filter_inflight_log_at = now
-                    return
-                try:
-                    result = self._ai_filter_future.result()
-                    if isinstance(result, tuple) and len(result) == 3:
-                        ordered, scores, signal_map = result
-                    else:
-                        ordered, scores = result
-                        signal_map = {}
-                except Exception as exc:
-                    elapsed = None
-                    if self._ai_filter_inflight_at is not None:
-                        elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
-                    logging.warning("AI filter run failed; elapsed_sec=%s err=%s", elapsed, exc)
-                    ordered = []
-                    scores = {}
-                    signal_map = {}
-                inflight_at = self._ai_filter_inflight_at
-                self._ai_filter_future = None
-                self._ai_filter_inflight_at = None
-                self._ai_filter_inflight_log_at = None
-            elapsed = None
-            if inflight_at is not None:
-                elapsed = int((now - inflight_at).total_seconds())
-            logging.info(
-                "AI filter scored %d symbols (enabled); elapsed_sec=%s top=%s",
-                len(ordered),
-                elapsed,
-                ",".join(ordered[:5]),
-            )
-            self._ai_filter_last_run_at = now
-            self._ai_filter_last_count = len(ordered)
-            self._ai_filter_last_signals = dict(signal_map)
-            if signal_map:
-                for sym, vals in signal_map.items():
-                    if vals:
-                        self._update_signal_metrics_from_values(sym, vals)
-            if not ordered:
-                ordered = list(universe)
-            if ai_cfg.get("coverage_filter", False) and signal_map:
-                covered = {sym for sym, vals in signal_map.items() if vals}
-                if covered:
-                    before = len(ordered)
-                    ordered = [sym for sym in ordered if sym in covered]
-                    removed = before - len(ordered)
-                    if removed > 0:
-                        logging.info("AI filter coverage removed %d symbols without bars.", removed)
-            ordered = self._merge_with_positions(ordered, portfolio, max_symbols)
-            self._symbols_by_broker = self._build_symbols_by_broker(ordered, portfolio, dyn_cfg)
-            self._symbols_by_strategy["__global__"] = ordered
-            for name in self._strategy_names:
-                self._symbols_by_strategy[name] = ordered
-            self._symbols = ordered
-            self._dynamic_symbols = list(ordered)
-            self._dynamic_symbols_at = now
-            if self._market_cache_cfg.enabled and self._market_cache_cfg.filtered_symbols_enabled:
-                cache_interval = str(ai_cfg.get("interval", self.cfg.get("data", {}).get("interval", "1m")))
-                ttl_seconds = interval_to_seconds(cache_interval)
-                if self._market_cache is not None:
-                    self._market_cache.set_filtered_symbols(ordered, cache_interval, ttl_seconds=ttl_seconds)
-            return
-        if ai_cfg.get("enabled", False) and score_symbols is None:
-            logging.warning("AI filter enabled but module unavailable; falling back to scanner filters.")
-        filters_cfg_default = dyn_cfg.get("filters", {})
-        global_candidates = self._scan_with_filters(
-            portfolio,
-            filters_cfg_default,
-            dyn_cfg,
-            api_key,
-            api_secret,
-            universe,
-            max_symbols=max_symbols,
-        )
-        if global_candidates:
-            self._symbols_by_strategy["__global__"] = global_candidates
-        for name in self._strategy_names:
-            if name == "pattern_trading":
-                filters_cfg = self.cfg.get("pattern_trading", {}).get("selection", {})
-            else:
-                filters_cfg = filters_cfg_default
-            candidates = self._scan_with_filters(
-                portfolio,
-                filters_cfg,
-                dyn_cfg,
-                api_key,
-                api_secret,
-                universe,
-                max_symbols=max_symbols,
-            )
-            if candidates:
-                self._symbols_by_strategy[name] = candidates
-        if self._symbols_by_strategy:
-            self._symbols = self._symbols_by_strategy.get("__global__", self._symbols)
-            self._dynamic_symbols = list(self._symbols)
-            if self._symbols:
-                self._symbols_by_broker = self._build_symbols_by_broker(self._symbols, portfolio, dyn_cfg)
-        self._dynamic_symbols_at = now
-        return
-
-    def _resolve_max_symbols(self, dyn_cfg: dict, universe: list[str], portfolio: dict) -> int:
-        try:
-            max_symbols = int(dyn_cfg.get("max_symbols", 50))
-        except (TypeError, ValueError):
-            max_symbols = 50
-        if universe:
-            max_symbols = min(max_symbols, len(universe)) if max_symbols > 0 else len(universe)
-        extras = set()
-        for symbol in portfolio.get("positions", {}).keys():
-            if symbol:
-                extras.add(symbol)
-        for order in self._open_orders_cache:
-            symbol = order.get("symbol")
-            if symbol:
-                extras.add(symbol)
-        if extras:
-            max_symbols = max(max_symbols, len(extras))
-        return max_symbols
-
-    def _resolve_max_symbols_for_broker(
-        self,
-        dyn_cfg: dict,
-        universe: list[str],
-        portfolio: dict,
-        broker_name: str,
-    ) -> int:
-        try:
-            max_symbols = int(dyn_cfg.get("max_symbols", 50))
-        except (TypeError, ValueError):
-            max_symbols = 50
-        if universe:
-            max_symbols = min(max_symbols, len(universe)) if max_symbols > 0 else len(universe)
-        extras = set()
-        for symbol in portfolio.get("positions", {}).keys():
-            if symbol:
-                extras.add(symbol)
-        for symbol in self._open_order_symbols_for_broker(broker_name):
-            if symbol:
-                extras.add(symbol)
-        if extras:
-            max_symbols = max(max_symbols, len(extras))
-        max_symbols = self._cap_symbols_by_cash(max_symbols, portfolio, dyn_cfg)
-        if extras:
-            max_symbols = max(max_symbols, len(extras))
-        return max_symbols
-
-    def _cap_symbols_by_cash(self, max_symbols: int, portfolio: dict, dyn_cfg: dict) -> int:
-        if not dyn_cfg.get("cash_aware", True):
-            return max_symbols
-        filters_cfg = dyn_cfg.get("filters", {}) or {}
-        price_min = filters_cfg.get("price_min", self.cfg.get("trading_limits", {}).get("min_price"))
-        try:
-            price_min = float(price_min or 0.0)
-        except (TypeError, ValueError):
-            return max_symbols
-        if price_min <= 0:
-            return max_symbols
-        cap = self._apply_cash_cap(price_min, float("inf"), portfolio, dyn_cfg)
-        if cap <= 0:
-            return 0
-        affordable = int(cap // price_min)
-        if affordable <= 0:
-            return 0
-        return min(max_symbols, affordable)
-
-    def _open_order_symbols_for_broker(self, broker_name: str) -> list[str]:
-        symbols: list[str] = []
-        single_broker = len(self._broker_map) <= 1
-        for order in self._open_orders_cache:
-            symbol = order.get("symbol")
-            if not symbol:
-                continue
-            order_broker = order.get("broker")
-            if not order_broker and single_broker:
-                order_broker = self._broker_name
-            if order_broker == broker_name:
-                symbols.append(symbol)
-        return symbols
-
-    def _merge_with_positions_for_broker(
-        self,
-        candidates: list[str],
-        portfolio: dict,
-        broker_name: str,
-        max_symbols: int,
-    ) -> list[str]:
-        held = [s for s in portfolio.get("positions", {}).keys() if s]
-        open_order_symbols = self._open_order_symbols_for_broker(broker_name)
-        if not held and not open_order_symbols and not candidates:
-            return []
-        ordered: list[str] = []
-        seen = set()
-        for symbol in held + open_order_symbols + candidates:
-            if symbol in seen:
-                continue
-            ordered.append(symbol)
-            seen.add(symbol)
-            if len(ordered) >= max_symbols:
-                break
-        return ordered
-
-    def _portfolio_snapshot_for_broker_symbols(self, portfolio: dict, broker_name: str) -> dict:
-        brokers = portfolio.get("brokers")
-        if isinstance(brokers, dict) and broker_name in brokers:
-            data = dict(brokers[broker_name])
-            data.setdefault("broker", broker_name)
-            data.setdefault("positions", {})
-            data.setdefault("gross_exposure", 0.0)
-            data.setdefault("short_exposure", 0.0)
-            return data
-        return portfolio
-
-    def _build_symbols_by_broker(self, ordered: list[str], portfolio: dict, dyn_cfg: dict) -> dict[str, list[str]]:
-        exec_cfg = self.cfg.get("execution", {}).get("brokers", {}) or {}
-        multi_enabled = bool(exec_cfg.get("enabled", False)) and len(self._broker_map) > 1
-        if not multi_enabled:
-            return {}
-        symbols_by_broker: dict[str, list[str]] = {}
-        for broker_name in self._broker_map.keys():
-            broker_portfolio = self._portfolio_snapshot_for_broker_symbols(portfolio, broker_name)
-            max_symbols = self._resolve_max_symbols_for_broker(
-                dyn_cfg,
-                ordered,
-                broker_portfolio,
-                broker_name,
-            )
-            symbols_by_broker[broker_name] = self._merge_with_positions_for_broker(
-                ordered,
-                broker_portfolio,
-                broker_name,
-                max_symbols,
-            )
-        return symbols_by_broker
-
-    def _resolve_universe(
-        self,
-        universe_cfg: object,
-        api_key: str,
-        api_secret: str,
-        max_universe: int,
-        portfolio: dict,
-        dyn_cfg: dict | None = None,
-    ) -> list[str]:
-        if str(universe_cfg) == "brokers_active":
-            alpaca_enabled = self.cfg.get("brokers", {}).get("alpaca", {}).get("enabled", True)
-            base_cfg = "alpaca_active" if alpaca_enabled else []
-            universe = load_universe(api_key, api_secret, base_cfg, max_universe=max_universe)
-        else:
-            universe = load_universe(api_key, api_secret, universe_cfg, max_universe=max_universe)
-        if dyn_cfg and dyn_cfg.get("universe_price_filter", False):
-            filters_cfg = dyn_cfg.get("filters", {}) or {}
-            price_min = float(filters_cfg.get("price_min", 0.0))
-            price_max = self._apply_cash_cap(price_min, float("inf"), portfolio, dyn_cfg)
-            filtered = filter_universe_by_price(
-                universe,
-                api_key=api_key,
-                api_secret=api_secret,
-                feed=str(dyn_cfg.get("feed", "iex")),
-                price_min=price_min,
-                price_max=price_max,
-                timeout_seconds=int(dyn_cfg.get("timeout_seconds", 10)),
-                retries=int(dyn_cfg.get("retries", 2)),
-            )
-            if filtered:
-                universe = filtered
-            else:
-                if price_max < price_min or price_max <= 0:
-                    universe = []
-                else:
-                    logging.warning("Universe price filter returned no symbols; keeping base universe.")
-        exec_cfg = self.cfg.get("execution", {}).get("brokers", {})
-        multi_enabled = bool(exec_cfg.get("enabled", False)) and len(self._broker_map) > 1
-        if not multi_enabled and str(universe_cfg) != "brokers_active":
-            return universe
-        extras = set()
-        for symbol in portfolio.get("positions", {}).keys():
-            extras.add(symbol)
-        for order in self._open_orders_cache:
-            symbol = order.get("symbol")
-            if symbol:
-                extras.add(symbol)
-        for symbol in self.cfg.get("data", {}).get("symbols", []):
-            extras.add(symbol)
-        extras_ordered = sorted(extras)
-        if len(extras_ordered) >= max_universe:
-            return extras_ordered
-        ordered: list[str] = []
-        seen = set()
-        for symbol in extras_ordered + universe:
-            if symbol in seen:
-                continue
-            ordered.append(symbol)
-            seen.add(symbol)
-            if len(ordered) >= max_universe:
-                break
-        return ordered
-
-    def _apply_cash_cap(self, price_min: float, price_max: float, portfolio: dict, dyn_cfg: dict) -> float:
-        if not dyn_cfg.get("cash_aware", True):
-            return price_max
-        try:
-            cash = float(portfolio.get("cash", 0.0) or 0.0)
-            buying_power = float(portfolio.get("buying_power", 0.0) or 0.0)
-            equity = float(portfolio.get("equity", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            return price_max
-        funds = buying_power if buying_power > 0 else cash
-        if funds <= 0:
-            return 0.0
-        cash_mode = str(dyn_cfg.get("cash_cap_mode", "cash")).lower()
-        cash_max_pct = float(dyn_cfg.get("cash_max_pct", 100.0))
-        cash_cap = funds * max(cash_max_pct, 0.0) / 100.0
-        if cash_mode == "risk" and equity > 0:
-            max_pos_pct = float(self.cfg.get("risk", {}).get("max_position_size_pct", 0.0))
-            target_value = equity * (max_pos_pct / 100.0)
-            cash_cap = min(cash_cap, target_value)
-        buffer_pct = float(dyn_cfg.get("cash_buffer_pct", 95.0))
-        cap = cash_cap * max(buffer_pct, 0.0) / 100.0
-        if cap <= 0:
-            return 0.0
-        capped = min(price_max, cap)
-        if capped < price_min:
-            logging.info("Dynamic symbols funds cap %.2f below price_min %.2f; enforcing cap.", cap, price_min)
-            return capped
-        return capped
-
-    def _resolve_active_symbols(self) -> list[str]:
-        if not self._symbols_by_strategy:
-            if self._symbols_by_broker:
-                merged = set()
-                for symbols in self._symbols_by_broker.values():
-                    merged.update(symbols)
-                return list(merged) if merged else self._symbols
-            return self._symbols
-        merged = set()
-        for symbols in self._symbols_by_strategy.values():
-            merged.update(symbols)
-        return list(merged) if merged else self._symbols
-
-    def _scan_with_filters(
-        self,
-        portfolio: dict,
-        filters_cfg: dict,
-        dyn_cfg: dict,
-        api_key: str,
-        api_secret: str,
-        universe: list[str],
-        max_symbols: int | None = None,
-    ) -> list[str]:
-        price_min = float(filters_cfg.get("price_min", 1.0))
-        price_max = self._apply_cash_cap(price_min, float("inf"), portfolio, dyn_cfg)
-        filters = ScanFilters(
-            price_min=price_min,
-            price_max=price_max,
-            relative_volume_min=float(filters_cfg.get("relative_volume_min", 2.0)),
-            premarket_gain_min_pct=float(filters_cfg.get("premarket_gain_min_pct", 5.0)),
-            min_shares_traded=float(filters_cfg.get("min_shares_traded", 1_000_000)),
-            max_spread_pct=float(filters_cfg.get("max_spread_pct", 1.0)),
-            require_catalyst=bool(filters_cfg.get("require_catalyst", False)),
-            strict_spread=bool(filters_cfg.get("strict_spread", False)),
-        )
-        max_symbols = int(max_symbols) if max_symbols is not None else int(dyn_cfg.get("max_symbols", 50))
-        feed = dyn_cfg.get("feed", "iex")
-        timeout_seconds = int(dyn_cfg.get("timeout_seconds", 10))
-        retries = int(dyn_cfg.get("retries", 2))
-        catalyst_map = {}
-        if filters.require_catalyst:
-            catalyst_map = fetch_catalyst_symbols_for_config(
-                universe,
-                self.cfg.get("news", {}),
-                self.cfg.get("brokers", {}),
-            )
-        candidates = scan_symbols(
-            universe,
-            api_key=api_key,
-            api_secret=api_secret,
-            feed=feed,
-            filters=filters,
-            catalyst_map=catalyst_map,
-            max_symbols=max_symbols,
-            timeout_seconds=timeout_seconds,
-            retries=retries,
-        )
-        if candidates:
-            return self._merge_with_positions(candidates, portfolio, max_symbols)
-        fallback_cfg = dyn_cfg.get("fallback", {})
-        if not fallback_cfg.get("enabled", False):
-            return self._merge_with_positions([], portfolio, max_symbols)
-        logging.info("Dynamic symbols fallback enabled; relaxing filters.")
-        fallback_filters = ScanFilters(
-            price_min=float(fallback_cfg.get("price_min", price_min)),
-            price_max=float(fallback_cfg.get("price_max", price_max)),
-            relative_volume_min=float(fallback_cfg.get("relative_volume_min", 0.5)),
-            premarket_gain_min_pct=float(fallback_cfg.get("premarket_gain_min_pct", 0.0)),
-            min_shares_traded=float(fallback_cfg.get("min_shares_traded", 100_000)),
-            max_spread_pct=float(fallback_cfg.get("max_spread_pct", 2.0)),
-            require_catalyst=bool(fallback_cfg.get("require_catalyst", False)),
-            strict_spread=bool(fallback_cfg.get("strict_spread", False)),
-        )
-        fallback_catalysts = self._news_cache if fallback_filters.require_catalyst else {}
-        candidates = scan_symbols(
-            universe,
-            api_key=api_key,
-            api_secret=api_secret,
-            feed=feed,
-            filters=fallback_filters,
-            catalyst_map=fallback_catalysts,
-            max_symbols=max_symbols,
-            timeout_seconds=timeout_seconds,
-            retries=retries,
-        )
-        if candidates:
-            logging.info("Dynamic symbols fallback found %d candidates.", len(candidates))
-        return self._merge_with_positions(candidates, portfolio, max_symbols)
-
-    def _merge_with_positions(self, candidates: list[str], portfolio: dict, max_symbols: int) -> list[str]:
-        held = [s for s in portfolio.get("positions", {}).keys() if s]
-        open_order_symbols = [
-            order.get("symbol") for order in self._open_orders_cache if order.get("symbol")
-        ]
-        if not held and not open_order_symbols and not candidates:
-            return []
-        ordered: list[str] = []
-        seen = set()
-        for symbol in held + open_order_symbols + candidates:
-            if symbol in seen:
-                continue
-            ordered.append(symbol)
-            seen.add(symbol)
-            if len(ordered) >= max_symbols:
-                break
-        return ordered
-
     def _enrich_market_state(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         equity = float(portfolio.get("equity", 0.0) or 0.0)
         positions = portfolio.get("positions", {})
@@ -3263,9 +2167,9 @@ class TradingAgent:
             "trade_suspended_by_user": _flag_value("trade_suspended_by_user"),
         }
         market_state["catalyst"] = self._news_cache.get(symbol, False)
-        market_state["open_orders"] = self._open_orders_cache
+        market_state["open_orders"] = self._open_order_mgr.cache
         market_state["symbol"] = symbol
-        venue = self._symbol_venue(symbol)
+        venue = self._symbol_mgr.symbol_venue(symbol)
         if venue:
             market_state["market_venue"] = venue
             market_state["market_extended"] = is_venue_extended(self.cfg, venue)
@@ -3399,42 +2303,6 @@ class TradingAgent:
             "brokers": brokers,
         }
 
-    def _refresh_open_orders_cache(self, symbols: list[str]) -> None:
-        exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
-        if not exec_cfg.get("enabled", True):
-            self._open_orders_cache = []
-            self._open_orders_at = None
-            self._reset_open_orders_metrics(symbols)
-            return
-        now = datetime.utcnow()
-        interval_seconds = int(exec_cfg.get("interval_seconds", 30))
-        if self._open_orders_at and (now - self._open_orders_at).total_seconds() < interval_seconds:
-            return
-        orders: list[dict] = []
-        if len(self._broker_map) > 1:
-            for name, broker in self._broker_map.items():
-                try:
-                    broker_orders = broker.get_open_orders()
-                except Exception as exc:
-                    logging.warning("Open orders snapshot failed for %s: %s", name, exc)
-                    continue
-                for order in broker_orders:
-                    item = dict(order)
-                    item["broker"] = name
-                    orders.append(item)
-        else:
-            try:
-                orders = self.broker.get_open_orders()
-            except Exception as exc:
-                logging.warning("Open orders snapshot failed: %s", exc)
-                orders = []
-            broker_name = self._broker_name
-            for order in orders:
-                order.setdefault("broker", broker_name)
-        self._open_orders_cache = orders
-        self._open_orders_at = now
-        self._update_open_orders_metrics(symbols)
-
     def _kill_switch_armed(self) -> bool:
         ks_cfg = self.cfg.get("kill_switch", {}) or {}
         if not ks_cfg.get("armed", False):
@@ -3457,7 +2325,7 @@ class TradingAgent:
             return
         if self._kill_switch_liquidated:
             return
-        open_orders = list(self._open_orders_cache)
+        open_orders = list(self._open_order_mgr.cache)
         if not open_orders:
             try:
                 open_orders = self.broker.get_open_orders()
@@ -3519,69 +2387,11 @@ class TradingAgent:
             closed,
             canceled,
         )
-
-    def _update_open_orders_metrics(self, symbols: list[str]) -> None:
-        previous_labels = set(self._open_orders_labels)
-        previous_broker_labels = set(self._open_orders_labels_by_broker)
-        counts: dict[tuple[str, str], int] = {}
-        broker_counts: dict[tuple[str, str, str], int] = {}
-        for order in self._open_orders_cache:
-            symbol = order.get("symbol")
-            side = (order.get("side") or "").lower()
-            if not symbol or side not in {"buy", "sell"}:
-                continue
-            key = (symbol, side)
-            counts[key] = counts.get(key, 0) + 1
-            broker = order.get("broker") or self._broker_name
-            broker_key = (str(broker), symbol, side)
-            broker_counts[broker_key] = broker_counts.get(broker_key, 0) + 1
-        new_labels = set(counts.keys())
-        new_broker_labels = set(broker_counts.keys())
-        for symbol, side in previous_labels - new_labels:
-            try:
-                OPEN_ORDERS.remove(symbol, side)
-            except ValueError:
-                pass
-        for broker, symbol, side in previous_broker_labels - new_broker_labels:
-            try:
-                OPEN_ORDERS_BY_BROKER.remove(broker, symbol, side)
-            except ValueError:
-                pass
-        for (symbol, side), count in counts.items():
-            OPEN_ORDERS.labels(symbol=symbol, side=side).set(count)
-        for (broker, symbol, side), count in broker_counts.items():
-            OPEN_ORDERS_BY_BROKER.labels(broker=broker, symbol=symbol, side=side).set(count)
-        self._open_orders_labels = new_labels
-        self._open_orders_labels_by_broker = new_broker_labels
-
-    def _reset_open_orders_metrics(self, symbols: list[str]) -> None:
-        for symbol, side in self._open_orders_labels:
-            try:
-                OPEN_ORDERS.remove(symbol, side)
-            except ValueError:
-                pass
-        self._open_orders_labels.clear()
-        for broker, symbol, side in self._open_orders_labels_by_broker:
-            try:
-                OPEN_ORDERS_BY_BROKER.remove(broker, symbol, side)
-            except ValueError:
-                pass
-        self._open_orders_labels_by_broker.clear()
-
-    def _has_pending_order(self, symbol: str, broker: str | None = None) -> bool:
-        exec_cfg = self.cfg.get("execution", {}).get("open_orders", {})
-        if not exec_cfg.get("skip_if_pending", True):
-            return False
-        for order in self._open_orders_cache:
-            if order.get("symbol") == symbol:
-                if broker and order.get("broker") != broker:
-                    continue
-                return True
-        return False
+        _slog.event("warning", "kill_switch_liquidation", positions_closed=closed, orders_canceled=canceled)
 
     def _reserved_cash(self, symbol: str, last_price: float, broker: str | None = None) -> float:
         reserved = 0.0
-        for order in self._open_orders_cache:
+        for order in self._open_order_mgr.cache:
             if order.get("symbol") != symbol:
                 continue
             if broker and order.get("broker") != broker:
@@ -3611,54 +2421,10 @@ def _dt_from_str(value: str | None) -> datetime | None:
         return None
 
 
-def _var_cvar_from_history(history: list[float], confidence: float) -> dict[str, float]:
-    if len(history) < 2:
-        return {"var_pct": 0.0, "cvar_pct": 0.0}
-    returns = []
-    for idx in range(1, len(history)):
-        prev = history[idx - 1]
-        curr = history[idx]
-        if not prev:
-            continue
-        returns.append((curr - prev) / prev * 100.0)
-    if not returns:
-        return {"var_pct": 0.0, "cvar_pct": 0.0}
-    returns = sorted(returns)
-    cutoff = max(int((1.0 - confidence) * len(returns)) - 1, 0)
-    var_val = returns[cutoff]
-    tail = [r for r in returns if r <= var_val]
-    cvar_val = sum(tail) / len(tail) if tail else var_val
-    return {"var_pct": abs(var_val), "cvar_pct": abs(cvar_val)}
-
-
-def _group_exposure(portfolio: dict, mapper) -> dict[str, float]:
-    positions = portfolio.get("positions", {})
-    exposure: dict[str, float] = {}
-    for symbol, pos in positions.items():
-        group = mapper(symbol)
-        if not group:
-            continue
-        value = abs(float(pos.get("value", 0.0) or 0.0))
-        exposure[group] = exposure.get(group, 0.0) + value
-    return exposure
-
 
 def _realized_volatility_pct(market_state: dict) -> float:
     prices = market_state.get("prices", []) or []
-    if len(prices) < 3:
-        return 0.0
-    returns = []
-    for idx in range(1, len(prices)):
-        prev = prices[idx - 1]
-        curr = prices[idx]
-        if not prev:
-            continue
-        returns.append((curr - prev) / prev)
-    if not returns:
-        return 0.0
-    mean = sum(returns) / len(returns)
-    var = sum((r - mean) ** 2 for r in returns) / max(len(returns) - 1, 1)
-    return (var**0.5) * 100.0
+    return realized_volatility_pct(prices)
 
 
 def _active_model_ref(active: dict | None) -> str | None:

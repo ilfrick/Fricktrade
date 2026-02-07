@@ -25,7 +25,7 @@
 - Filtered symbol cache is written per symbol (Redis + file) when enabled.
 
 ## Concurrency & Thread Safety
-- **Parallel Execution:** `TradingAgent` processes symbols in parallel using a `ThreadPoolExecutor` (default 12 workers) to maximize throughput during data fetching and AI inference.
+- **Parallel Execution:** `TradingAgent` processes symbols in parallel using a `ThreadPoolExecutor` (default 12 workers) to maximize throughput during data fetching and AI inference. Each thread receives a `copy.deepcopy` of `market_state` to prevent cross-thread mutation.
 - **Thread Safety:**
   - `OrderQueue` (`app/execution/order_queue.py`) is thread-safe via internal locks. Uses `heapq` for O(log n) priority insertion.
   - `RiskManager` (`app/risk/manager.py`) protects all state mutations with locks. Includes auto-reset of daily loss at market open.
@@ -43,11 +43,24 @@
 - Subsystems: `docs/` index in `docs/README.md`.
 
 ## Subsystem Structure (paths)
-- Agents: `app/agents/trader.py` (loop) and `app/agents/orchestrator.py` (strategy selection).
+- Agents:
+  - `app/agents/trader.py` — main trading loop (orchestrates all modules below).
+  - `app/agents/orchestrator.py` — RL strategy selection.
+  - `app/agents/symbol_manager.py` — symbol selection, AI filter, venue/sector mapping, universe resolution.
+  - `app/agents/market_state.py` — typed `MarketState` dataclass.
+  - `app/agents/performance.py` — `PerformanceTracker` (trade recording, stats, kill switch).
+  - `app/agents/open_orders.py` — `OpenOrderManager` (order cache, pending checks, metrics).
+  - `app/agents/account_metrics.py` — `AccountMetricsUpdater` (equity, drawdown, VaR/CVaR).
 - Strategies: `app/strategies/` (rule-based + RL) wired in `strategy.params.*`.
-- Risk: `app/risk/manager.py`, `app/risk/haircut.py` (caps, VaR/CVaR, haircuts, kill switches).
+- Risk:
+  - `app/risk/manager.py` — core limits, cooldown, exposure caps, order limits.
+  - `app/risk/config.py` — `RiskConfig` dataclass (typed config with `from_dict`/`to_dict`).
+  - `app/risk/haircut.py` — stress/liquidity haircuts.
 - Data: `app/data/` (scanner, AI symbol filter, news, Ollama for LLM gate) and `app/utils/market.py` (market hours).
+- Utilities:
+  - `app/utils/structured_log.py` — `StructuredLogger` (JSON trade/risk event logs).
+  - `app/utils/volatility.py` — shared realized volatility calculation.
+  - `app/utils/gpu_state.py` — GPU fallback (disables GPU until restart on CUDA errors).
 - Execution: `app/execution/` (order sizing/algos/queues, multi-broker routing).
 - Learning: `app/learning/` (env, features, training, drift, registry).
 - Monitoring/API: `app/api/`, `app/monitoring/metrics.py`, `docs/monitoring.md`.
-- GPU fallback: `app/utils/gpu_state.py` disables GPU until restart when CUDA errors occur.

@@ -5,7 +5,9 @@ import pytest
 
 pytest.importorskip("prometheus_client")
 
-from app.agents.trader import _group_exposure, _realized_volatility_pct, _var_cvar_from_history
+from app.agents.account_metrics import _var_cvar_from_history
+from app.agents.trader import _realized_volatility_pct
+from app.risk.manager import _group_exposure
 
 
 def test_var_cvar_from_history_returns_defaults():

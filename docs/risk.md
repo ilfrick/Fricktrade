@@ -7,9 +7,10 @@
 Enforce exposure, leverage, and safety limits before execution.
 
 ## Implementation
-- `app/risk/manager.py` enforces max exposure, leverage, and daily loss.
-- `app/agents/trader.py` enforces `trading_limits` and account flags.
-- `app/agents/trader.py` enforces VaR/CVaR limits, exposure caps, and kill switch profiles.
+- `app/risk/manager.py` — core limits (exposure, leverage, daily loss), cooldown checks, order limit validation, and exposure cap enforcement (venue/sector).
+- `app/risk/config.py` — `RiskConfig` dataclass with typed fields and `from_dict`/`to_dict` for all risk settings.
+- `app/agents/account_metrics.py` — VaR/CVaR computation and equity/drawdown tracking.
+- `app/agents/trader.py` — enforces `trading_limits`, account flags, kill switch profiles, and coordinates risk checks via `RiskManager`.
 - `risk.enabled: false` bypasses risk checks, but broker account flags and trading limits still block orders.
 
 ## Configuration

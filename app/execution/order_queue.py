@@ -6,7 +6,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import total_ordering
 
 from app.brokers.base import Broker
@@ -28,8 +28,8 @@ class OrderRequest:
     order_type: str = "market"
     limit_price: float | None = None
     extended_hours: bool = False
-    earliest_at: datetime = field(default_factory=datetime.utcnow)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    earliest_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     order_id: str | None = None
     attempts: int = 0
     notional: float | None = None
@@ -53,7 +53,7 @@ class OrderResponse:
     qty: float | None = None
     filled_qty: float | None = None
     filled_avg_price: float | None = None
-    received_at: datetime = field(default_factory=datetime.utcnow)
+    received_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class OrderQueue:
@@ -102,7 +102,7 @@ class OrderQueue:
             order_type=order_type,
             limit_price=limit_price,
             extended_hours=extended_hours,
-            earliest_at=earliest_at or datetime.utcnow(),
+            earliest_at=earliest_at or datetime.now(timezone.utc),
             notional=notional,
         )
         result_order_id = None
@@ -127,7 +127,7 @@ class OrderQueue:
                 self._cancel_requested.add(order_id)
 
     def update(self, open_orders: list[dict]) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         open_by_id = {str(o.get("order_id")): o for o in open_orders if o.get("order_id")}
         open_ids = set(open_by_id.keys())
         with self._lock:
@@ -178,7 +178,7 @@ class OrderQueue:
         """Start processing the next order in queue. Must be called with lock held."""
         if not self._queue:
             return
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         # Peek at the top of the heap
         request = self._queue[0]
         if request.earliest_at > now:
@@ -303,7 +303,7 @@ class OrderQueue:
         """Re-enqueue a request for retry with exponential backoff."""
         request.attempts += 1
         backoff = int(self._retry_cfg.get("backoff_seconds", 5))
-        request.earliest_at = datetime.utcnow() + timedelta(seconds=backoff * request.attempts)
+        request.earliest_at = datetime.now(timezone.utc) + timedelta(seconds=backoff * request.attempts)
         notional = float(request.notional or 0.0)
         if notional > 0:
             self._retry_notional_used += notional
