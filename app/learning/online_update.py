@@ -8,7 +8,7 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import tensorflow as tf # Added tensorflow import
@@ -37,7 +37,7 @@ def _read_lock(path: Path) -> dict:
 
 
 def _write_lock(path: Path, owner: str) -> None:
-    payload = {"owner": owner, "updated_at": datetime.utcnow().isoformat()}
+    payload = {"owner": owner, "updated_at": datetime.now(timezone.utc).isoformat()}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload))
 
@@ -48,9 +48,11 @@ def _lock_is_fresh(lock: dict, max_age_minutes: int = 10) -> bool:
         return False
     try:
         updated = datetime.fromisoformat(ts)
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
     except Exception:
         return False
-    return datetime.utcnow() - updated <= timedelta(minutes=max_age_minutes)
+    return datetime.now(timezone.utc) - updated <= timedelta(minutes=max_age_minutes)
 
 
 def _ensure_exclusive(cfg: dict) -> tuple[bool, str]:
@@ -135,7 +137,7 @@ def run_online_updates(cfg: dict) -> None:
     checkpoint_state = {"at": None}
     initial_delay = _initial_delay_seconds(cfg, interval_minutes)
 
-    started_at = datetime.utcnow()
+    started_at = datetime.now(timezone.utc)
     while True:
         if initial_delay > 0:
             ok, owner = _ensure_exclusive(cfg)
@@ -221,7 +223,7 @@ def _checkpoint_learner(
         "owner": owner,
         "timesteps": timesteps,
         "eval_split": eval_split,
-        "last_update_at": datetime.utcnow().isoformat(),
+        "last_update_at": datetime.now(timezone.utc).isoformat(),
     }
     return maybe_save_checkpoint("learner", payload, cfg, last_saved_at)
 
@@ -236,10 +238,12 @@ def _initial_delay_seconds(cfg: dict, interval_minutes: int) -> int:
         return 0
     try:
         last_dt = datetime.fromisoformat(last_update)
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=timezone.utc)
     except Exception:
         return 0
     next_dt = last_dt + timedelta(minutes=interval_minutes)
-    delta = next_dt - datetime.utcnow()
+    delta = next_dt - datetime.now(timezone.utc)
     if delta.total_seconds() <= 0:
         return 0
     return int(delta.total_seconds())

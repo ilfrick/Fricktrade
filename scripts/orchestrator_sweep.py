@@ -8,7 +8,7 @@ import copy
 import json
 import random
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -261,7 +261,7 @@ def main() -> None:
         )
 
     payload = {
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
         "data_range": {"start": str(data_start), "end": str(data_end)},
         "window_days": args.window_days,
         "windows": args.windows,

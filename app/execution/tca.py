@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -225,7 +225,7 @@ class TCAAnalyzer:
             Complete TCA report
         """
         if not fills:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             return TCAReport(
                 period_start=now,
                 period_end=now,

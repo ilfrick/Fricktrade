@@ -7,6 +7,7 @@ import argparse
 import http.server
 import json
 import logging
+import os
 import socketserver
 import threading
 import time
@@ -240,7 +241,8 @@ def _run_market_scheduler(cfg: dict) -> None:
     stop_list = ms_cfg.get("stop_services")
     state_path = Path(ms_cfg.get("state_path", "/data/system_state.json"))
     write_state = bool(ms_cfg.get("write_state", True))
-    client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+    docker_host = os.environ.get("DOCKER_HOST", "unix://var/run/docker.sock")
+    client = docker.DockerClient(base_url=docker_host)
 
     last_state: str | None = None
     last_heartbeat: datetime | None = None

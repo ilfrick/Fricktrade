@@ -7,7 +7,7 @@ import argparse
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.brokers.config_utils import get_alpaca_account_cfg
@@ -71,7 +71,7 @@ def main() -> None:
     last_run: dict[str, datetime] = {}
     while True:
         # Clean up temporary_failed_symbols: re-add symbols that are past their retry_after time
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         symbols_to_retry = [
             s for s, timestamp in temporary_failed_symbols.items() 
             if (now - timestamp).total_seconds() > retry_after_seconds
@@ -100,7 +100,7 @@ def main() -> None:
             continue
             
         for interval in intervals:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             interval_seconds = interval_to_seconds(interval)
             max_age_seconds = cache_max_age_seconds(interval, max_age_multiplier)
             last_at = last_run.get(interval)

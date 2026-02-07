@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ def register_model(
     artifact_prefix: str = "model",
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
         "model_path": model_path,
         "model_sha256": _hash_file(model_path),
         "model_bytes": _file_size(model_path),
@@ -63,7 +63,7 @@ def load_latest_feature_stats(registry_path: str) -> dict[str, Any] | None:
 def set_active_model(active_path: str, record: dict[str, Any], reason: str) -> None:
     path = Path(active_path)
     payload = {
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
         "reason": reason,
         "model_path": record.get("model_path"),
         "model_sha256": record.get("model_sha256"),
@@ -80,7 +80,7 @@ def set_active_model(active_path: str, record: dict[str, Any], reason: str) -> N
 
 def build_active_record(model_path: str, best_model_path: str | None = None) -> dict[str, Any]:
     record: dict[str, Any] = {
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
         "model_path": model_path,
         "model_sha256": _hash_file(model_path),
         "model_bytes": _file_size(model_path),
@@ -142,7 +142,7 @@ def _copy_artifact(model_path: str, artifact_dir: str, prefix: str) -> str | Non
     source = Path(model_path)
     if not source.exists():
         return None
-    version_id = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    version_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     target_dir = Path(artifact_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{prefix}_{version_id}{source.suffix or '.zip'}"

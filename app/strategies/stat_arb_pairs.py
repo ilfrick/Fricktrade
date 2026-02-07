@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -74,7 +74,7 @@ class StatArbPairsStrategy(Strategy):
             del cache[: len(cache) - self.params.lookback * 2]
 
     def _refresh_pairs_if_needed(self) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if self._last_refresh and now - self._last_refresh < timedelta(minutes=self.params.refresh_minutes):
             return
         symbols = list(self._price_cache.keys())

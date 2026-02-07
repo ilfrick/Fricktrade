@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from app.brokers.base import Broker
+from app.utils.account import extract_equity_cash
 
 
 class BrokerRouter(Broker):
@@ -33,7 +34,7 @@ class BrokerRouter(Broker):
             {},
         )
         for name, account in accounts.items():
-            equity, cash, buying_power = _extract_equity_cash(account)
+            equity, cash, buying_power = extract_equity_cash(account)
             total_equity += equity
             total_cash += cash
             total_buying_power += buying_power
@@ -158,14 +159,3 @@ class BrokerRouter(Broker):
         return results
 
 
-def _extract_equity_cash(account: dict) -> tuple[float, float, float]:
-    equity = cash = buying_power = 0.0
-    if "equity" in account:
-        equity = float(account.get("equity") or 0.0)
-        cash = float(account.get("cash") or 0.0)
-        buying_power = float(account.get("buying_power") or 0.0)
-    elif "NetLiquidation" in account:
-        equity = float(account.get("NetLiquidation") or 0.0)
-        cash = float(account.get("TotalCashValue") or 0.0)
-        buying_power = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
-    return equity, cash, buying_power

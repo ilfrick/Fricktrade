@@ -154,10 +154,13 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    depends_on:
+      - docker-socket-proxy
+    environment:
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
     volumes:
       - ./config:/app/config
       - ./data:/data
-      - /var/run/docker.sock:/var/run/docker.sock
     command: ["python", "-m", "app.monitoring.healthwatch", "--config", "/app/config/config.yaml"]
     expose:
       - "9105"
@@ -210,7 +213,7 @@ services:
     image: grafana/grafana-oss:11.1.4
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
     ports:
@@ -260,10 +263,21 @@ services:
 
   autoheal:
     image: willfarrell/autoheal
+    depends_on:
+      - docker-socket-proxy
     environment:
       - AUTOHEAL_CONTAINER_LABEL=all
       - AUTOHEAL_INTERVAL=30
       - AUTOHEAL_START_PERIOD=60
+      - DOCKER_SOCK=tcp://docker-socket-proxy:2375
+    restart: unless-stopped
+
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    environment:
+      - CONTAINERS=1
+      - POST=1
+      - LOG_LEVEL=warning
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped

@@ -85,7 +85,7 @@ def ingest_from_config(cfg: dict) -> list[Path]:
     quality_cfg = data_cfg.get("quality", {}) or {}
     adjustments_cfg = data_cfg.get("adjustments", {}) or {}
     quality_report: dict[str, object] = {
-        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "symbols": {},
     }
 

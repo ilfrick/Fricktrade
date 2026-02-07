@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 
@@ -18,7 +18,7 @@ def twap_slices(total_qty: int, duration_seconds: int, slice_count: int) -> list
     if total_qty <= 0 or slice_count <= 0:
         return []
     slice_count = min(slice_count, total_qty)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     qty_per = total_qty // slice_count
     remainder = total_qty % slice_count
     slices: list[AlgoSlice] = []
@@ -35,7 +35,7 @@ def pov_slices(total_qty: int, max_participation: float, est_volume: float) -> l
     allowed = max(1, int(est_volume * max_participation))
     slices = []
     remaining = total_qty
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     while remaining > 0:
         qty = min(allowed, remaining)
         slices.append(AlgoSlice(qty=qty, earliest_at=now))
@@ -60,7 +60,7 @@ def vwap_slices(total_qty: int, volume_profile: Iterable[float], duration_second
                 break
             quantities[idx] += 1
             remainder -= 1
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     slices: list[AlgoSlice] = []
     for idx, qty in enumerate(quantities):
         if qty <= 0:

@@ -2,6 +2,8 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from app.risk.manager import RiskManager
 from app.risk.config import RiskConfig
@@ -199,3 +201,26 @@ class TestRiskConfig:
         cfg2 = RiskConfig.from_dict(d)
         assert cfg2.max_daily_loss_pct == 3.0
         assert cfg2.cooldown_seconds == 60
+
+
+class TestDailyResetTimezone:
+    def test_reset_uses_configured_timezone(self):
+        """Daily loss resets at midnight ET, not midnight UTC."""
+        et = ZoneInfo("US/Eastern")
+        manager = RiskManager({"max_daily_loss_pct": 5.0}, tz=et)
+        manager.record_pnl(-3.0)
+        assert manager.daily_loss == -3.0
+
+        # Simulate time just past midnight ET but still same day in UTC
+        # e.g. 2025-06-15 00:05 ET = 2025-06-15 04:05 UTC
+        fake_et_next_day = datetime(2025, 6, 15, 0, 5, tzinfo=et)
+        with patch("app.risk.manager.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_et_next_day
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            manager.reset_daily()
+
+        assert manager.daily_loss == 0.0
+
+    def test_default_timezone_is_utc(self):
+        manager = RiskManager({})
+        assert manager._tz == timezone.utc

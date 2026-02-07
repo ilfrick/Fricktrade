@@ -47,7 +47,7 @@ SKIPPED_ORDERS_BY_BROKER = Counter(
 ORDER_REJECTS = Counter(
     "order_rejects_total",
     "Orders rejected by broker",
-    ["broker", "symbol", "side", "code", "reason"],
+    ["broker", "side", "reason"],
 )
 PDT_BLOCKS = Counter(
     "pdt_blocks_total",

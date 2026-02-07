@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 GPU_STATE_FILE = Path(os.environ.get("FRICKTRADE_GPU_STATE_FILE", "/data/gpu_state.json"))
 
@@ -30,7 +30,7 @@ def is_gpu_disabled() -> bool:
 
 def disable_gpu_until_restart() -> None:
     logging.warning("Disabling GPU until next restart due to error.")
-    _save_gpu_state({"gpu_disabled": True, "disabled_at": datetime.utcnow().isoformat()})
+    _save_gpu_state({"gpu_disabled": True, "disabled_at": datetime.now(timezone.utc).isoformat()})
 
 def enable_gpu() -> None:
     logging.info("Enabling GPU.")

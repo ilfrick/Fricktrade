@@ -8,11 +8,14 @@ import logging
 import os
 import time
 import threading
+
+import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, wait
 
+from app.utils.account import extract_equity_cash
 from app.execution.executor import ExecutionEngine
 from app.execution.order_queue import OrderQueue
 from app.execution.algos import pov_slices, twap_slices, vwap_slices
@@ -83,7 +86,6 @@ from app.execution.config import ExecutionConfig
 from app.agents.orchestrator import RLStrategyOrchestrator
 from app.agents.performance import PerformanceTracker
 from app.agents.symbol_manager import SymbolManager
-from app.agents.pipeline import DecisionPipeline
 from app.learning.regime_hmm import RegimeHMM, RegimeState
 from app.portfolio import PortfolioOptimizer, RiskModel
 
@@ -157,12 +159,19 @@ class TradingAgent:
         for name in self._broker_map.keys():
             acct_cfg = self._account_cfgs.get(name, {})
             broker_risk_cfg = merge_cfg(cfg["risk"], acct_cfg.get("risk", {}))
-            self._broker_states[name] = BrokerState(risk=RiskManager(broker_risk_cfg))
+            risk_tz_name = cfg.get("risk", {}).get("timezone", "US/Eastern")
+            try:
+                from zoneinfo import ZoneInfo
+                risk_tz = ZoneInfo(risk_tz_name)
+            except Exception:
+                risk_tz = timezone.utc
+            self._broker_states[name] = BrokerState(risk=RiskManager(broker_risk_cfg, tz=risk_tz))
         self._last_market_open = None
         self._started_at = datetime.now(timezone.utc)
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
         self._news_executor = ThreadPoolExecutor(max_workers=1)
+        self._symbol_executor = ThreadPoolExecutor(max_workers=4)
         self._news_future = None
         self._news_future_lock = threading.Lock()
         self._news_inflight_at: datetime | None = None
@@ -201,7 +210,6 @@ class TradingAgent:
         self._market_cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
         self._market_cache = build_market_cache(cfg.get("market_cache", {}))
         self._symbol_mgr = SymbolManager(cfg, self._broker_map, self._broker_name, self._open_order_mgr, self._market_cache_cfg, self._market_cache)
-        self._pipeline = DecisionPipeline(self)
         self._broker_missing_at: datetime | None = None
         self._broker_missing_last_log = 0.0
         self._broker_missing_reason: str | None = None
@@ -310,96 +318,59 @@ class TradingAgent:
     def _risk_disabled(self) -> bool:
         return not bool(self.cfg.get("risk", {}).get("enabled", True))
 
+    def _build_rl_strategy(self, strategy_cls, name: str, extra_kwargs: dict | None = None):
+        """Build an RL strategy with device-fallback loop and OOM handling."""
+        if not self.learning_cfg.get("enabled"):
+            logging.debug("RL %s not enabled or failed to build.", name)
+            return None
+        model_path = self._select_model_path()
+        window_size = int(self.learning_cfg.get("window_size", 50))
+        device = self.learning_cfg.get("device", "auto")
+        feature_config = self.learning_cfg.get("features", {})
+        try_devices = [device]
+        if device != "cpu":
+            try_devices.append("cpu")
+        base_kwargs = dict(
+            window_size=window_size,
+            feature_config=feature_config,
+            drift_monitor=self._drift_monitor,
+            include_features=self._include_feature_snapshots,
+            risk_cfg=self.cfg.get("risk", {}),
+        )
+        if extra_kwargs:
+            base_kwargs.update(extra_kwargs)
+        for current_device in try_devices:
+            try:
+                return strategy_cls(model_path, device=current_device, **base_kwargs)
+            except (FileNotFoundError, ValueError) as exc:
+                logging.warning("RL model unavailable, skipping %s: %s", name, exc)
+                break
+            except _OOM_ERRORS as exc:
+                if current_device != "cpu":
+                    logging.warning("CUDA OOM during %s build: %s. Falling back to CPU.", name, exc)
+                    disable_gpu_until_restart()
+                    self.learning_cfg["device"] = "cpu"
+                    continue
+                else:
+                    logging.error("RL %s failed on CPU after GPU error: %s", name, exc)
+                    break
+            except Exception as exc:
+                logging.warning("Unknown error during %s build: %s", name, exc)
+                break
+        logging.debug("RL %s not enabled or failed to build.", name)
+        return None
+
     def _build_strategy(self, name: str, params: dict):
         if name == "rl_policy":
-            if self.learning_cfg.get("enabled"):
-                model_path = self._select_model_path()
-                window_size = int(self.learning_cfg.get("window_size", 50))
-                device = self.learning_cfg.get("device", "auto")
-                feature_config = self.learning_cfg.get("features", {})
-                
-                # Attempt to build with current device setting
-                try_devices = [device]
-                if device != "cpu":
-                    try_devices.append("cpu")
-
-                for current_device in try_devices:
-                    try:
-                        return RLPolicyStrategy(
-                            model_path,
-                            window_size=window_size,
-                            device=current_device, # Use the current device in the loop
-                            feature_config=feature_config,
-                            drift_monitor=self._drift_monitor,
-                            include_features=self._include_feature_snapshots,
-                            risk_cfg=self.cfg.get("risk", {}),
-                        )
-                    except (FileNotFoundError, ValueError) as exc:
-                        logging.warning("RL model unavailable, skipping rl_policy: %s", exc)
-                        break # Model not found/invalid, no point in retrying with CPU
-                    except _OOM_ERRORS as exc:
-                        if current_device != "cpu":
-                            logging.warning(
-                                "CUDA out of memory during rl_policy build: %s. Falling back to CPU.", exc
-                            )
-                            disable_gpu_until_restart()
-                            self.learning_cfg["device"] = "cpu" # Update config for current run
-                            continue # Retry with CPU
-                        else:
-                            logging.error("RL policy failed on CPU after GPU error: %s", exc)
-                            break
-                    except Exception as exc:
-                        logging.warning("Unknown error during rl_policy build: %s", exc)
-                        break
-            logging.debug("RL policy not enabled or failed to build.")
-            return None
+            return self._build_rl_strategy(RLPolicyStrategy, "rl_policy")
         if name == "rl_policy_fees":
-            if self.learning_cfg.get("enabled"):
-                model_path = self._select_model_path()
-                window_size = int(self.learning_cfg.get("window_size", 50))
-                device = self.learning_cfg.get("device", "auto")
-                feature_config = self.learning_cfg.get("features", {})
-                broker_fees = self.cfg.get("brokers", {}).get(self._broker_name, {}).get("fees", {})
-                fee_guard = self._strategy_cfg.fee_aware
-                risk_cfg = self.cfg.get("risk", {})
-                
-                # Attempt to build with current device setting
-                try_devices = [device]
-                if device != "cpu":
-                    try_devices.append("cpu")
-
-                for current_device in try_devices:
-                    try:
-                        return FeeAwareRLPolicyStrategy(
-                            model_path,
-                            window_size=window_size,
-                            device=current_device, # Use the current device in the loop
-                            feature_config=feature_config,
-                            drift_monitor=self._drift_monitor,
-                            include_features=self._include_feature_snapshots,
-                            broker_fees=broker_fees,
-                            fee_guard=fee_guard,
-                            risk_cfg=risk_cfg,
-                        )
-                    except (FileNotFoundError, ValueError) as exc:
-                        logging.warning("RL model unavailable, skipping rl_policy_fees: %s", exc)
-                        break # Model not found/invalid, no point in retrying with CPU
-                    except _OOM_ERRORS as exc:
-                        if current_device != "cpu":
-                            logging.warning(
-                                "CUDA out of memory during rl_policy_fees build: %s. Falling back to CPU.", exc
-                            )
-                            disable_gpu_until_restart()
-                            self.learning_cfg["device"] = "cpu" # Update config for current run
-                            continue # Retry with CPU
-                        else:
-                            logging.error("RL policy fees failed on CPU after GPU error: %s", exc)
-                            break
-                    except Exception as exc:
-                        logging.warning("Unknown error during rl_policy_fees build: %s", exc)
-                        break
-            logging.debug("RL policy fees not enabled or failed to build.")
-            return None
+            return self._build_rl_strategy(
+                FeeAwareRLPolicyStrategy, "rl_policy_fees",
+                extra_kwargs={
+                    "broker_fees": self.cfg.get("brokers", {}).get(self._broker_name, {}).get("fees", {}),
+                    "fee_guard": self._strategy_cfg.fee_aware,
+                },
+            )
         if name == "pattern_trading":
             return PatternTradingStrategy(self.cfg.get("pattern_trading", {}))
         if name == "trend_following":
@@ -688,7 +659,6 @@ class TradingAgent:
         # Need minimum samples for regime detection
         if len(self._regime_returns_buffer) < 20:
             return None
-        import numpy as np
         returns = np.array(self._regime_returns_buffer)
         try:
             self._regime_state = self._regime_hmm.get_state(returns)
@@ -865,17 +835,17 @@ class TradingAgent:
         with self._lock:
             self._update_orchestrator(symbol, market_state, strategy_broker)
 
-        # UNLOCKED: Regime detection (before orchestrator)
-        if self._regime_enabled and self._regime_hmm is not None:
-            regime_state = self._detect_regime(market_state)
-            if regime_state is not None:
-                market_state["regime"] = regime_state.regime
-                market_state["regime_name"] = regime_state.regime_name
-                market_state["regime_probability"] = regime_state.probability
-                market_state["regime_probs"] = regime_state.regime_probs
-                if trace:
-                    trace["regime"] = regime_state.regime
-                    trace["regime_name"] = regime_state.regime_name
+            # Regime detection under lock — mutates _regime_returns_buffer and _regime_state
+            if self._regime_enabled and self._regime_hmm is not None:
+                regime_state = self._detect_regime(market_state)
+                if regime_state is not None:
+                    market_state["regime"] = regime_state.regime
+                    market_state["regime_name"] = regime_state.regime_name
+                    market_state["regime_probability"] = regime_state.probability
+                    market_state["regime_probs"] = regime_state.regime_probs
+                    if trace:
+                        trace["regime"] = regime_state.regime
+                        trace["regime_name"] = regime_state.regime_name
 
         # UNLOCKED: Orchestrator inference (CPU heavy)
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
@@ -1259,7 +1229,7 @@ class TradingAgent:
             for response in responses:
                 try:
                     self._orchestrator.on_order_update(response.__dict__)
-                except Exception as exc:
+                except (AttributeError, TypeError, ValueError, KeyError) as exc:
                     logging.warning("Orchestrator order feedback failed: %s", exc)
                 if self._live_reward_tracker is not None:
                     try:
@@ -1267,9 +1237,9 @@ class TradingAgent:
                         if reward_event and isinstance(self._orchestrator, RLStrategyOrchestrator):
                             try:
                                 self._orchestrator.on_trade_reward(reward_event)
-                            except Exception as exc:
+                            except (AttributeError, TypeError, ValueError, KeyError) as exc:
                                 logging.warning("Orchestrator reward update failed: %s", exc)
-                    except Exception as exc:
+                    except (AttributeError, TypeError, ValueError, KeyError) as exc:
                         logging.warning("Live reward update failed: %s", exc)
 
     def _size_order(
@@ -1410,7 +1380,7 @@ class TradingAgent:
             return 1.0
         except (ValueError, TypeError, KeyError) as exc:
             logging.debug("Portfolio position scale failed: %s", exc)
-            return 1.0
+            return 0.0
 
     def _limits_enabled(self) -> bool:
         return bool(self.cfg.get("trading_limits", {}).get("enabled", False))
@@ -1632,6 +1602,8 @@ class TradingAgent:
         market_data_provider,
         broker_override: str | None,
         skip_unchanged: bool,
+        news_snapshot: dict | None = None,
+        orders_snapshot: list | None = None,
     ) -> None:
         if not self._symbol_mgr.is_symbol_market_open(sym):
             return
@@ -1644,6 +1616,16 @@ class TradingAgent:
             with self._lock:
                 self._record_skip(sym, "hold", "symbol_error", broker_name)
             logging.warning("Skipping %s: data fetch error: %s", sym, exc)
+            return
+
+        # Validate market data
+        last_price = market_state.get("last_price")
+        prices = market_state.get("prices", [])
+        if last_price is None and not prices:
+            logging.warning("Skipping %s: no price data available", sym)
+            return
+        if last_price is not None and last_price <= 0:
+            logging.warning("Skipping %s: invalid last_price=%s", sym, last_price)
             return
 
         # Process Logic (Locking handled inside run_once and critical sections)
@@ -1663,7 +1645,9 @@ class TradingAgent:
                 # Check risk outcome (read safe-ish, but keeping lock for consistency)
                 market_state["risk_outcome"] = broker_state.risk_outcomes.get(sym, {})
 
-            self._enrich_market_state(market_state, portfolio, sym)
+            self._enrich_market_state(market_state, portfolio, sym,
+                                     news_snapshot=news_snapshot,
+                                     orders_snapshot=orders_snapshot)
 
             if broker_override:
                 market_state["broker_override"] = broker_override
@@ -1679,7 +1663,7 @@ class TradingAgent:
 
             # Deep-copy market_state to prevent threads from mutating each other's data
             ms_copy = copy.deepcopy(market_state)
-            self._pipeline.run(sym, ms_copy)
+            self.run_once(sym, ms_copy)
             
             DECISION_LATENCY.labels(symbol=sym).observe(time.perf_counter() - decision_start)
         except Exception as exc:
@@ -1704,27 +1688,32 @@ class TradingAgent:
         broker_override: str | None,
     ) -> None:
         skip_unchanged = bool(self.cfg.get("data", {}).get("process_on_new_bar_only", False))
-        
+
         # Determine effective portfolio for batch
         batch_portfolio = portfolio
         if broker_override:
             batch_portfolio = self._portfolio_for_broker(portfolio, broker_override)
-            
-        # Use ThreadPoolExecutor for parallel processing
-        # Limit max_workers to avoid API rate limits (e.g. 8-16)
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [
-                executor.submit(
-                    self._process_single_symbol,
-                    sym,
-                    batch_portfolio,
-                    market_data_provider,
-                    broker_override,
-                    skip_unchanged,
-                )
-                for sym in symbols
-            ]
-            wait(futures)
+
+        # Snapshot shared state under lock before dispatching to threads
+        with self._lock:
+            news_snap = dict(self._news_cache)
+            orders_snap = list(self._open_order_mgr.cache)
+
+        # Use persistent ThreadPoolExecutor for parallel processing
+        futures = [
+            self._symbol_executor.submit(
+                self._process_single_symbol,
+                sym,
+                batch_portfolio,
+                market_data_provider,
+                broker_override,
+                skip_unchanged,
+                news_snap,
+                orders_snap,
+            )
+            for sym in symbols
+        ]
+        wait(futures)
 
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
@@ -2139,7 +2128,9 @@ class TradingAgent:
         count = len(self._news_cache)
         logging.info("News catalyst cache updated; symbols=%d", count)
 
-    def _enrich_market_state(self, market_state: dict, portfolio: dict, symbol: str) -> None:
+    @staticmethod
+    def _calc_exposure_metrics(market_state: dict, portfolio: dict, symbol: str) -> None:
+        """Calculate and set exposure_pct, short_exposure_pct, leverage on market_state."""
         equity = float(portfolio.get("equity", 0.0) or 0.0)
         positions = portfolio.get("positions", {})
         last_price = market_state.get("last_price")
@@ -2153,6 +2144,11 @@ class TradingAgent:
         market_state["exposure_pct"] = (abs(current_value) / equity * 100.0) if equity else 0.0
         market_state["short_exposure_pct"] = (short_exposure / equity * 100.0) if equity else 0.0
         market_state["leverage"] = (gross_exposure / equity) if equity else 1.0
+
+    def _enrich_market_state(self, market_state: dict, portfolio: dict, symbol: str,
+                              *, news_snapshot: dict | None = None,
+                              orders_snapshot: list | None = None) -> None:
+        self._calc_exposure_metrics(market_state, portfolio, symbol)
         market_state["portfolio"] = portfolio
         account = self._account_for_broker(portfolio.get("broker"))
         def _flag_value(key: str) -> bool:
@@ -2163,8 +2159,8 @@ class TradingAgent:
             "trading_blocked": _flag_value("trading_blocked"),
             "trade_suspended_by_user": _flag_value("trade_suspended_by_user"),
         }
-        market_state["catalyst"] = self._news_cache.get(symbol, False)
-        market_state["open_orders"] = self._open_order_mgr.cache
+        market_state["catalyst"] = (news_snapshot or self._news_cache).get(symbol, False)
+        market_state["open_orders"] = orders_snapshot if orders_snapshot is not None else self._open_order_mgr.cache
         market_state["symbol"] = symbol
         venue = self._symbol_mgr.symbol_venue(symbol)
         if venue:
@@ -2174,19 +2170,7 @@ class TradingAgent:
             market_state["market_extended"] = False
 
     def _recalculate_exposure(self, market_state: dict, portfolio: dict, symbol: str) -> None:
-        equity = float(portfolio.get("equity", 0.0) or 0.0)
-        positions = portfolio.get("positions", {})
-        last_price = market_state.get("last_price")
-        if last_price is None:
-            prices = market_state.get("prices", [])
-            last_price = prices[-1] if prices else None
-        current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
-        current_value = current_qty * last_price if last_price else 0.0
-        short_exposure = float(portfolio.get("short_exposure", 0.0) or 0.0)
-        gross_exposure = float(portfolio.get("gross_exposure", 0.0) or 0.0)
-        market_state["exposure_pct"] = (abs(current_value) / equity * 100.0) if equity else 0.0
-        market_state["short_exposure_pct"] = (short_exposure / equity * 100.0) if equity else 0.0
-        market_state["leverage"] = (gross_exposure / equity) if equity else 1.0
+        self._calc_exposure_metrics(market_state, portfolio, symbol)
 
     def _get_portfolio_snapshot(self) -> dict | None:
         if self.broker is None:
@@ -2208,10 +2192,11 @@ class TradingAgent:
         if isinstance(account, dict):
             if "brokers" in account and isinstance(account["brokers"], dict):
                 for name, data in account["brokers"].items():
+                    b_eq, b_cash, b_bp = extract_equity_cash(data)
                     brokers[name] = {
-                        "equity": float(data.get("equity") or 0.0),
-                        "cash": float(data.get("cash") or 0.0),
-                        "buying_power": float(data.get("buying_power") or 0.0),
+                        "equity": b_eq,
+                        "cash": b_cash,
+                        "buying_power": b_bp,
                         "positions": {},
                         "gross_exposure": 0.0,
                         "short_exposure": 0.0,
@@ -2221,14 +2206,8 @@ class TradingAgent:
                 buying_power_val = float(
                     account.get("buying_power") or sum(v["buying_power"] for v in brokers.values())
                 )
-            elif "equity" in account:
-                equity_val = float(account.get("equity") or 0.0)
-                cash_val = float(account.get("cash") or 0.0)
-                buying_power_val = float(account.get("buying_power") or 0.0)
-            elif "NetLiquidation" in account:
-                equity_val = float(account.get("NetLiquidation") or 0.0)
-                cash_val = float(account.get("TotalCashValue") or 0.0)
-                buying_power_val = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
+            else:
+                equity_val, cash_val, buying_power_val = extract_equity_cash(account)
 
         positions: dict[str, dict] = {}
         gross_exposure = 0.0

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
 import logging
@@ -12,7 +12,7 @@ from typing import Any
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _floor_time(dt: datetime, interval_minutes: float) -> datetime:
@@ -29,11 +29,15 @@ def _parse_ts(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(str(value))
-    except Exception:
-        return None
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value))
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _reward_paths(cfg: dict) -> tuple[Path, Path]:
@@ -146,7 +150,7 @@ class LiveRewardTracker:
         realized_pnl = 0.0
         entry_price = pos.avg_entry
         entry_qty = 0.0
-        ts = _parse_ts(response.get("received_at")) or datetime.utcnow()
+        ts = _parse_ts(response.get("received_at")) or datetime.now(timezone.utc)
 
         if side == "buy":
             if pos.qty >= 0:
@@ -225,7 +229,7 @@ def load_live_reward_overrides(cfg: dict, interval_minutes: float) -> dict[str, 
     if not rewards_path.exists():
         return {}
     max_days = int(lr_cfg.get("max_days", 7))
-    cutoff = datetime.utcnow() - timedelta(days=max_days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_days)
     overrides: dict[str, dict[str, float]] = {}
     try:
         lines = rewards_path.read_text(encoding="utf-8").splitlines()

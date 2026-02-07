@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.execution.impact import estimate_market_impact, ImpactEstimate
@@ -160,7 +160,7 @@ class SmartOrderRouter:
 
         if algo == "market":
             # Single immediate slice
-            return [AlgoSlice(qty=ctx.qty, earliest_at=datetime.utcnow())]
+            return [AlgoSlice(qty=ctx.qty, earliest_at=datetime.now(timezone.utc))]
 
         elif algo == "twap":
             duration = int(self.default_duration_seconds * (1 - ctx.urgency))

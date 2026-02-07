@@ -7,7 +7,7 @@ import argparse
 import copy
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import random
 
@@ -360,7 +360,7 @@ def _write_pdf(report_path: Path, plots: list[Path]) -> None:
         ax.text(
             0.02,
             0.93,
-            f"Generated at: {datetime.utcnow().isoformat()}",
+            f"Generated at: {datetime.now(timezone.utc).isoformat()}",
             fontsize=10,
             va="top",
         )
@@ -489,7 +489,7 @@ def main() -> None:
     for item in results:
         item.summary["regime_summary"] = _regime_summary(item.runs)
     payload = {
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "scenarios": [
             {
                 "name": item.name,

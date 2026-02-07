@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 from typing import Any
@@ -548,7 +548,7 @@ async def update_config(payload: dict[str, Any]):
 
 @app.post("/restart", dependencies=[Depends(_require_auth)])
 async def request_restart():
-    restart_flag_path().write_text(datetime.utcnow().isoformat(), encoding="utf-8")
+    restart_flag_path().write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
     return {"status": "ok"}
 
 

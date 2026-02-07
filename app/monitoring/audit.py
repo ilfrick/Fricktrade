@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -35,7 +35,7 @@ class AuditLogger:
 
     def write(self, payload: dict) -> None:
         try:
-            date_str = datetime.utcnow().date().isoformat()
+            date_str = datetime.now(timezone.utc).date().isoformat()
             self._maybe_prune(date_str)
             path = Path(self._output_dir) / f"{date_str}.jsonl"
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,7 +91,7 @@ class ComplianceLogger:
         self._signing_enabled = bool(signing_enabled)
 
     def write(self, payload: dict) -> None:
-        date_str = datetime.utcnow().date().isoformat()
+        date_str = datetime.now(timezone.utc).date().isoformat()
         self._maybe_prune(date_str)
         payload = _normalize_reason(payload, self._enforce_reason_codes, self._reason_codes)
         for fmt in self._formats:
@@ -222,12 +222,12 @@ def _save_hash_state(path: Path, state: dict[str, str]) -> None:
 
 
 def _prune_old_files(output_dir: Path, retention_days: int) -> None:
-    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     for path in output_dir.glob("*"):
         if not path.is_file():
             continue
         try:
-            if datetime.utcfromtimestamp(path.stat().st_mtime) < cutoff:
+            if datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc) < cutoff:
                 path.unlink()
         except Exception:
             continue

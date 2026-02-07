@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -51,7 +51,7 @@ def maybe_save_checkpoint(name: str, payload: dict, cfg: dict, last_saved_at: da
     cfg_obj = read_checkpoint_config(cfg)
     if not cfg_obj.enabled:
         return last_saved_at
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if last_saved_at and (now - last_saved_at).total_seconds() < cfg_obj.interval_seconds:
         return last_saved_at
     base = Path(cfg_obj.dir_path)
@@ -79,10 +79,10 @@ def _prune_history(base: Path, name: str, cfg: CheckpointConfig) -> None:
         for path in history[cfg.max_files :]:
             path.unlink(missing_ok=True)
     if cfg.max_age_hours > 0:
-        cutoff = datetime.utcnow() - timedelta(hours=cfg.max_age_hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=cfg.max_age_hours)
         for path in history:
             try:
-                if datetime.utcfromtimestamp(path.stat().st_mtime) < cutoff:
+                if datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc) < cutoff:
                     path.unlink(missing_ok=True)
             except Exception:
                 continue

@@ -2,11 +2,12 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 import heapq
+import itertools
 import json
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import total_ordering
 
 from app.brokers.base import Broker
@@ -33,14 +34,15 @@ class OrderRequest:
     order_id: str | None = None
     attempts: int = 0
     notional: float | None = None
+    _seq: int = 0
 
     def __lt__(self, other: "OrderRequest") -> bool:
-        return self.earliest_at < other.earliest_at
+        return (self.earliest_at, self._seq) < (other.earliest_at, other._seq)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, OrderRequest):
             return NotImplemented
-        return self.earliest_at == other.earliest_at
+        return (self.earliest_at, self._seq) == (other.earliest_at, other._seq)
 
 
 @dataclass
@@ -80,6 +82,8 @@ class OrderQueue:
         self._cancel_requested: set[str] = set()
         self._responses: list[OrderResponse] = []
         self._retry_notional_used = 0.0
+        self._retry_reset_date: date | None = None
+        self._seq_counter = itertools.count()
         self._completion_grace_seconds = max(int(completion_grace_seconds), 0)
         self._missing_since: datetime | None = None
         self._lock = threading.Lock()
@@ -109,6 +113,7 @@ class OrderQueue:
         started_immediately = False
 
         with self._lock:
+            request._seq = next(self._seq_counter)
             heapq.heappush(self._queue, request)
             if self._active is None:
                 self._start_next()
@@ -218,9 +223,7 @@ class OrderQueue:
                 return
             ORDER_REJECTS.labels(
                 broker=self._broker_name,
-                symbol=request.symbol,
                 side=request.side,
-                code=code,
                 reason=reason,
             ).inc()
             if reason == "pdt_protection":
@@ -281,7 +284,15 @@ class OrderQueue:
             "filled_avg_price": snapshot.get("filled_avg_price"),
         }
 
+    def _maybe_reset_retry_budget(self) -> None:
+        """Reset retry notional budget at the start of each new day."""
+        today = datetime.now(timezone.utc).date()
+        if self._retry_reset_date != today:
+            self._retry_notional_used = 0.0
+            self._retry_reset_date = today
+
     def _should_retry(self, request: OrderRequest, reason: str) -> bool:
+        self._maybe_reset_retry_budget()
         if not self._retry_cfg.get("enabled", False):
             return False
         max_attempts = int(self._retry_cfg.get("max_attempts", 0))
@@ -304,6 +315,7 @@ class OrderQueue:
         request.attempts += 1
         backoff = int(self._retry_cfg.get("backoff_seconds", 5))
         request.earliest_at = datetime.now(timezone.utc) + timedelta(seconds=backoff * request.attempts)
+        request._seq = next(self._seq_counter)
         notional = float(request.notional or 0.0)
         if notional > 0:
             self._retry_notional_used += notional

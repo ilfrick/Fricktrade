@@ -4,6 +4,7 @@
 import logging
 from datetime import datetime, date, timezone
 
+from app.utils.account import extract_equity_cash
 from app.monitoring.metrics import (
     PNL,
     DRAWDOWN,
@@ -115,9 +116,7 @@ class AccountMetricsUpdater:
                 cash_val = float(account.get("cash") or 0.0)
                 buying_power_val = float(account.get("buying_power") or 0.0)
                 for name, details in account["brokers"].items():
-                    equity = float(details.get("equity") or 0.0)
-                    cash = float(details.get("cash") or 0.0)
-                    buying_power = float(details.get("buying_power") or 0.0)
+                    equity, cash, buying_power = extract_equity_cash(details)
                     broker_last_equity = None
                     if details.get("last_equity") is not None:
                         try:
@@ -133,14 +132,8 @@ class AccountMetricsUpdater:
                     if bstate:
                         self.update_broker_equity(str(name), bstate, equity, last_equity=broker_last_equity)
                         bstate.buying_power = buying_power
-            elif "equity" in account:
-                total_val = float(account.get("equity") or 0.0)
-                cash_val = float(account.get("cash") or 0.0)
-                buying_power_val = float(account.get("buying_power") or 0.0)
-            elif "NetLiquidation" in account:
-                total_val = float(account.get("NetLiquidation") or 0.0)
-                cash_val = float(account.get("TotalCashValue") or 0.0)
-                buying_power_val = float(account.get("BuyingPower") or account.get("AvailableFunds") or 0.0)
+            else:
+                total_val, cash_val, buying_power_val = extract_equity_cash(account)
         if total_val is None or cash_val is None:
             return account
         if not broker_equities:

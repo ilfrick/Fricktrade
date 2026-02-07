@@ -2,7 +2,7 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 
 class RiskManager:
@@ -20,8 +20,9 @@ class RiskManager:
         - circuit_breaker_drawdown_pct: float - Drawdown % that triggers circuit breaker
     """
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, tz: timezone | None = None):
         self.cfg = cfg
+        self._tz = tz or timezone.utc
         self._daily_loss = 0.0
         self._last_reset_date: date | None = None
         self._lock = threading.Lock()
@@ -84,11 +85,11 @@ class RiskManager:
         """Manually reset daily loss tracking to zero."""
         with self._lock:
             self._daily_loss = 0.0
-            self._last_reset_date = date.today()
+            self._last_reset_date = datetime.now(self._tz).date()
 
     def _maybe_reset_daily(self) -> None:
         """Auto-reset daily loss at start of new trading day. Must be called with lock held."""
-        today = date.today()
+        today = datetime.now(self._tz).date()
         if self._last_reset_date != today:
             self._daily_loss = 0.0
             self._last_reset_date = today

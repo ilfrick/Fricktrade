@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import numpy as np
@@ -97,7 +97,7 @@ class RebalanceEngine:
         """
         # Check minimum interval
         if self.last_rebalance:
-            elapsed = datetime.utcnow() - self.last_rebalance
+            elapsed = datetime.now(timezone.utc) - self.last_rebalance
             if elapsed < timedelta(minutes=self.min_interval_minutes):
                 return RebalanceDecision(
                     should_rebalance=False,
@@ -143,7 +143,7 @@ class RebalanceEngine:
     def execute_rebalance(self, decision: RebalanceDecision) -> None:
         """Mark rebalance as executed (update last_rebalance timestamp)."""
         if decision.should_rebalance:
-            self.last_rebalance = datetime.utcnow()
+            self.last_rebalance = datetime.now(timezone.utc)
             logger.info(
                 "Rebalance executed: %d trades, drift=%.2f%%, cost=$%.2f",
                 len(decision.trades),

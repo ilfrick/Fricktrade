@@ -8,7 +8,7 @@ import logging
 import math
 import tensorflow as tf # Added tensorflow import
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -423,7 +423,9 @@ def _load_linear_model(model_path: Path, retrain_hours: int, device: str):
     trained_at = payload.get("trained_at")
     if trained_at:
         trained_dt = datetime.fromisoformat(trained_at)
-        if datetime.utcnow() - trained_dt > timedelta(hours=retrain_hours):
+        if trained_dt.tzinfo is None:
+            trained_dt = trained_dt.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - trained_dt > timedelta(hours=retrain_hours):
             return None, None
     model = torch.nn.Linear(payload["input_dim"], 1)
     model.load_state_dict(payload["state_dict"])
@@ -445,7 +447,7 @@ def _save_linear_model(model_path: Path, model, stats: dict):
         "mean": stats.get("mean"),
         "std": stats.get("std"),
         "objective": stats.get("objective"),
-        "trained_at": datetime.utcnow().isoformat(),
+        "trained_at": datetime.now(timezone.utc).isoformat(),
     }
     model_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(payload, model_path)
@@ -593,7 +595,9 @@ def _load_ppo_model(model_path: Path, retrain_hours: int, device: str):
     trained_at = meta.get("trained_at")
     if trained_at:
         trained_dt = datetime.fromisoformat(trained_at)
-        if datetime.utcnow() - trained_dt > timedelta(hours=retrain_hours):
+        if trained_dt.tzinfo is None:
+            trained_dt = trained_dt.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - trained_dt > timedelta(hours=retrain_hours):
             return None, None
     logging.info("AI filter load device: %s", device)
     try:
@@ -611,7 +615,7 @@ def _save_ppo_model(model_path: Path, model: PPO, stats: dict):
         "mean": stats.get("mean"),
         "std": stats.get("std"),
         "objective": stats.get("objective"),
-        "trained_at": datetime.utcnow().isoformat(),
+        "trained_at": datetime.now(timezone.utc).isoformat(),
         "model_type": "ppo",
     }
     _meta_path(model_path).write_text(json.dumps(meta, indent=2, sort_keys=True))
@@ -715,7 +719,7 @@ def _fetch_bars(
         return _fetch_bars_yfinance(symbols, cfg, limit_symbols)
     client = StockHistoricalDataClient(api_key, api_secret)
     symbols = symbols[:limit_symbols] if limit_symbols else symbols
-    end = datetime.utcnow()
+    end = datetime.now(timezone.utc)
     start = end - timedelta(days=cfg.lookback_days)
     bars_by_symbol: dict[str, pd.DataFrame] = {}
     for chunk in _chunked(symbols, 200):

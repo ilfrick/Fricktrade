@@ -2,7 +2,7 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.monitoring.audit import AuditLogger, ComplianceLogger
 
@@ -19,7 +19,7 @@ def test_audit_logger_writes_jsonl(tmp_path):
     )
     payload = {"ts": "2025-01-01T00:00:00Z", "symbol": "AAPL", "decision": "hold", "reason": "missing"}
     logger.write(payload)
-    date_str = datetime.utcnow().date().isoformat()
+    date_str = datetime.now(timezone.utc).date().isoformat()
     log_path = tmp_path / f"{date_str}.jsonl"
     assert log_path.exists()
     raw = log_path.read_text(encoding="utf-8").strip().splitlines()[0]
@@ -35,7 +35,7 @@ def test_compliance_logger_writes_jsonl_and_csv(tmp_path):
     logger = ComplianceLogger(str(tmp_path), formats=["jsonl", "csv"], signing_enabled=True, signing_secret="secret")
     payload = {"ts": "2025-01-01T00:00:00Z", "symbol": "AAPL", "decision": "hold", "stage": "signal"}
     logger.write(payload)
-    date_str = datetime.utcnow().date().isoformat()
+    date_str = datetime.now(timezone.utc).date().isoformat()
     jsonl_path = tmp_path / f"{date_str}.jsonl"
     csv_path = tmp_path / f"{date_str}.csv"
     assert jsonl_path.exists()
