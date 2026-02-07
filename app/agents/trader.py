@@ -568,6 +568,44 @@ class TradingAgent:
                 return "hold"
         return action
 
+    def _check_position_exit(
+        self, symbol: str, last_price: float, broker_state
+    ) -> tuple[bool, str]:
+        """Check if a held long position should be exited based on risk rules.
+
+        Returns (should_exit, reason) where reason is one of:
+            hard_stop, trailing_stop, time_exit, or empty string.
+        """
+        pos = broker_state.position_state.get(symbol)
+        if not pos or float(pos.get("qty", 0)) <= 0:
+            return False, ""
+        avg_entry = pos.get("avg_entry")
+        if not avg_entry or float(avg_entry) <= 0:
+            return False, ""
+        avg_entry = float(avg_entry)
+        risk_cfg = self.cfg.get("risk", {})
+
+        # Hard stop: price dropped X% from entry
+        hard_stop = float(risk_cfg.get("hard_stop_pct", 0) or 0)
+        if hard_stop > 0 and last_price <= avg_entry * (1 - hard_stop / 100.0):
+            return True, "hard_stop"
+
+        # Trailing stop: price dropped X% from peak since entry
+        trailing_stop = float(risk_cfg.get("trailing_stop_pct", 0) or 0)
+        peak = float(pos.get("peak_price") or avg_entry)
+        if trailing_stop > 0 and peak > avg_entry:
+            if last_price <= peak * (1 - trailing_stop / 100.0):
+                return True, "trailing_stop"
+
+        # Time-based exit: held longer than position_horizon_minutes
+        horizon = float(self._strategy_params.get("position_horizon_minutes", 0) or 0)
+        opened_at = pos.get("opened_at")
+        if horizon > 0 and opened_at is not None:
+            if (datetime.utcnow() - opened_at).total_seconds() > horizon * 60:
+                return True, "time_exit"
+
+        return False, ""
+
     def _select_order_meta(self, signals: list[dict], order: list[str]) -> dict:
         for name in order:
             for signal in signals:
@@ -965,7 +1003,34 @@ class TradingAgent:
                 trace["action"] = action
                 trace["action_strategy"] = action_strategy
                 trace["broker"] = broker_name
-            
+
+            # Position-aware exit: override hold/buy to sell_to_close for held positions
+            if action in ("hold", "buy"):
+                _positions = market_state.get("portfolio", {}).get("positions", {})
+                _cqty = float(_positions.get(symbol, {}).get("qty", 0) or 0)
+                if _cqty > 0:
+                    _lp = market_state.get("last_price")
+                    if _lp is None:
+                        _pp = market_state.get("prices", [])
+                        _lp = _pp[-1] if _pp else None
+                    if _lp is not None:
+                        _should_exit, _exit_reason = self._check_position_exit(
+                            symbol, float(_lp), broker_state
+                        )
+                        if _should_exit:
+                            action = "sell_to_close"
+                            action_strategy = "position_exit"
+                            logging.info(
+                                "Position exit for %s: %s", symbol, _exit_reason
+                            )
+                            if trace:
+                                trace.update(
+                                    action="sell_to_close",
+                                    action_strategy="position_exit",
+                                    position_exit=True,
+                                    position_exit_reason=_exit_reason,
+                                )
+
             # Guardrail check (might need lock if it has state, but typically stateless config)
             # We'll keep it locked for safety as it might access broker_state via _get_guardrail
             guardrail = self._get_guardrail(broker_name, symbol)
@@ -988,6 +1053,13 @@ class TradingAgent:
                 self.broker.close_position(symbol, broker=broker_name)
                 self._emit_decision_trace(trace, "exit", "strategy_exit", "signal")
                 return None
+
+            # Normalize sell_to_close to sell for the execution path
+            if action == "sell_to_close":
+                action = "sell"
+                if trace:
+                    trace["action"] = "sell"
+                    trace["sell_to_close"] = True
 
             if self._has_pending_order(symbol, broker=broker_name):
                 if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
@@ -1092,7 +1164,12 @@ class TradingAgent:
                 logging.info("Skipping %s for %s: cooldown", action, symbol)
                 self._emit_decision_trace(trace, "skip", "cooldown", "cooldown")
                 return None
-            if not risk_disabled:
+            # Sell-to-close (reducing position) should bypass can_open_trade
+            _is_closing_position = False
+            if action == "sell":
+                _pqty = float(portfolio.get("positions", {}).get(symbol, {}).get("qty", 0) or 0)
+                _is_closing_position = _pqty > 0
+            if not risk_disabled and not _is_closing_position:
                 if not broker_state.risk.can_open_trade(
                     exposure_pct=market_state.get("exposure_pct", 0.0),
                     short_exposure_pct=market_state.get("short_exposure_pct", 0.0),
@@ -2228,6 +2305,8 @@ class TradingAgent:
                         "qty": curr_qty,
                         "avg_entry": curr_avg_entry,
                         "strategy": strategy,
+                        "opened_at": now,
+                        "peak_price": curr_avg_entry,
                     }
                 continue
             prev_qty = float(prev.get("qty", 0.0) or 0.0)
@@ -2241,6 +2320,10 @@ class TradingAgent:
                     prev["avg_entry"] = curr_avg_entry
                 if strategy is not None:
                     prev["strategy"] = strategy
+                # Update peak price for trailing stop
+                _lp = broker_state.last_prices.get(symbol)
+                if _lp is not None:
+                    prev["peak_price"] = max(float(prev.get("peak_price") or 0), _lp)
                 continue
             if curr_qty < prev_qty:
                 exit_price = broker_state.last_prices.get(symbol)
@@ -2256,6 +2339,10 @@ class TradingAgent:
                     if curr_avg_entry is not None:
                         prev["avg_entry"] = curr_avg_entry
                 continue
+            # qty unchanged — update peak price for trailing stop
+            _lp = broker_state.last_prices.get(symbol)
+            if _lp is not None:
+                prev["peak_price"] = max(float(prev.get("peak_price") or 0), _lp)
 
     def _maybe_report_performance(self) -> None:
         if not self._performance_enabled:
