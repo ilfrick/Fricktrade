@@ -3,6 +3,11 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+echo "Generating per-account Grafana dashboards..."
+python3 "${repo_root}/scripts/generate_grafana_dashboards.py" \
+  --env-file "${repo_root}/.env" \
+  --output-dir "${repo_root}/grafana/provisioning/dashboards"
+
 use_gpu=false
 
 if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then

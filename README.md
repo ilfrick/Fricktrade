@@ -16,7 +16,7 @@ Fricktrade is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Bo
 - `app/`: core trading agent code
 - `config/config.yaml`: all runtime configuration
 - `docker/`: Dockerfiles (CPU + GPU)
-- `grafana/`: Grafana provisioning + dashboard
+- `grafana/`: Grafana provisioning + dashboards (per-account dashboards auto-generated from `.env`)
 - `prometheus/`: Prometheus scrape + alerting config
 - `scripts/`: helper scripts
 - `docs/`: subsystem documentation
@@ -321,6 +321,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- Added dynamic Grafana dashboard generation: per-account dashboards are auto-generated from `.env` by `scripts/generate_grafana_dashboards.py` (run automatically by `compose_up.sh`). Static per-account JSONs replaced by a template + generator; orphan dashboards are cleaned up on account removal.
 - **v3.0 code review**: 19 issues resolved — concurrency safety (regime detection under lock, enrich snapshots), exception narrowing in financial paths, full `datetime.utcnow()` migration, RiskManager timezone-aware daily reset, persistent ThreadPoolExecutor, OrderQueue FIFO stability + retry budget reset, code deduplication (`_calc_exposure_metrics`, `_build_rl_strategy`, `extract_equity_cash`), dead code removal (pipeline.py, market_state.py), Docker socket proxy for healthwatch/autoheal, Prometheus cardinality fix.
 - Switched trading loop to parallel execution (ThreadPoolExecutor) with fine-grained locking and decoupled metric reporting for better responsiveness.
 - Switched live market data and AI filter bars to batched yfinance with coverage filtering.

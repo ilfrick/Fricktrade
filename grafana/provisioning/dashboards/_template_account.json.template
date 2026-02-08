@@ -1,7 +1,7 @@
 {
   "id": null,
-  "uid": "autotrader-realistic",
-  "title": "Fricktrade Overview - Realistic",
+  "uid": "autotrader-{{UID_SUFFIX}}",
+  "title": "Fricktrade Overview - {{ACCOUNT_NAME}}",
   "schemaVersion": 38,
   "version": 3,
   "refresh": "10s",
@@ -77,7 +77,7 @@
       },
       "targets": [
         {
-          "expr": "account_total_by_broker{broker=\"alpaca:Realistic\"}",
+          "expr": "account_total_by_broker{broker=\"{{BROKER_LABEL}}\"}",
           "refId": "A"
         }
       ],
@@ -105,7 +105,7 @@
       },
       "targets": [
         {
-          "expr": "account_buying_power_by_broker{broker=\"alpaca:Realistic\"}",
+          "expr": "account_buying_power_by_broker{broker=\"{{BROKER_LABEL}}\"}",
           "legendFormat": "{{broker}}",
           "refId": "A"
         }
@@ -134,7 +134,7 @@
       },
       "targets": [
         {
-          "expr": "account_cash_by_broker{broker=\"alpaca:Realistic\"}",
+          "expr": "account_cash_by_broker{broker=\"{{BROKER_LABEL}}\"}",
           "legendFormat": "{{broker}}",
           "refId": "A"
         }
@@ -163,7 +163,7 @@
       },
       "targets": [
         {
-          "expr": "account_invested_by_broker{broker=\"alpaca:Realistic\"}",
+          "expr": "account_invested_by_broker{broker=\"{{BROKER_LABEL}}\"}",
           "refId": "A"
         }
       ],
@@ -191,7 +191,7 @@
       },
       "targets": [
         {
-          "expr": "count(symbol_active_by_broker{broker=\"alpaca:Realistic\"} == 1)",
+          "expr": "count(symbol_active_by_broker{broker=\"{{BROKER_LABEL}}\"} == 1)",
           "refId": "A"
         }
       ],
@@ -383,7 +383,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (reason) (rate(orders_skipped_by_broker_total{broker=\"alpaca:Realistic\"}[5m]))",
+          "expr": "sum by (reason) (rate(orders_skipped_by_broker_total{broker=\"{{BROKER_LABEL}}\"}[5m]))",
           "refId": "A"
         }
       ],
@@ -408,7 +408,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (symbol, side) (open_orders_by_broker{broker=\"alpaca:Realistic\"})",
+          "expr": "sum by (symbol, side) (open_orders_by_broker{broker=\"{{BROKER_LABEL}}\"})",
           "refId": "A",
           "instant": true,
           "format": "table"
@@ -443,7 +443,7 @@
       },
       "targets": [
         {
-          "expr": "broker_active{broker=\"alpaca:Realistic\"}",
+          "expr": "broker_active{broker=\"{{BROKER_LABEL}}\"}",
           "refId": "A"
         }
       ],
@@ -497,13 +497,13 @@
       },
       "targets": [
         {
-          "expr": "position_qty_by_broker{broker=\"alpaca:Realistic\"}",
+          "expr": "position_qty_by_broker{broker=\"{{BROKER_LABEL}}\"}",
           "refId": "A",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "position_value_by_broker{broker=\"alpaca:Realistic\"}",
+          "expr": "position_value_by_broker{broker=\"{{BROKER_LABEL}}\"}",
           "refId": "B",
           "instant": true,
           "format": "table"
@@ -547,7 +547,7 @@
       },
       "targets": [
         {
-          "expr": "open_orders_by_broker{broker=\"alpaca:Realistic\"}",
+          "expr": "open_orders_by_broker{broker=\"{{BROKER_LABEL}}\"}",
           "refId": "A",
           "instant": true,
           "format": "table"

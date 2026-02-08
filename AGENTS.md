@@ -203,6 +203,7 @@ docker compose run --rm api
 - Agent-aligned backtest loads per-symbol CSVs from `backtest.data_dir` (legacy SMA engine uses the first matching CSV).
 - API `/config` masks Alpaca keys before returning; `/config/update` accepts YAML updates and `/restart` triggers a graceful container restart.
 - Grafana auto-provisions the "Fricktrade Overview" dashboard with trade counts/rates, PnL, and drawdown.
+- Per-account dashboards are dynamically generated from `.env` by `scripts/generate_grafana_dashboards.py` (called by `compose_up.sh` before stack start). Template: `grafana/provisioning/dashboards/_template_account.json.template`.
 - Dashboard also shows active symbols, active broker, and account equity/cash/invested from broker account data. Skipped orders are available via `orders_skipped_total` metrics.
 
 ## Extending the Codebase
@@ -664,4 +665,15 @@ Implemented comprehensive reward system improvements for RL agents to increase p
 - Loss streaks: -20% reduction via escalating penalties
 - Capital efficiency: +10% from global idle tracking
 - Trade quality: Higher consistency via Sharpe-like bonuses
+
+### Session 2026-02-08: Dynamic Grafana Dashboard Generation
+
+**Changes:**
+- Created `scripts/generate_grafana_dashboards.py` — reads `ALPACA_ACCOUNT_NAMES` (and future `IBKR_ACCOUNT_NAMES`) from `.env`, generates one Grafana dashboard JSON per account from a template, and removes orphan dashboards for deleted accounts.
+- Created `grafana/provisioning/dashboards/_template_account.json.template` — dashboard template with `{{BROKER_LABEL}}`, `{{ACCOUNT_NAME}}`, `{{UID_SUFFIX}}` placeholders.
+- Edited `scripts/compose_up.sh` to run the generator before `docker compose up`.
+- Added `grafana/provisioning/dashboards/account_*.json` to `.gitignore` (generated files).
+- Deleted static per-account dashboards: `fricktrade_realistic.json`, `fricktrade_higher.json`, `fricktrade_third.json`.
+
+**Bug fix during review:** Renamed template from `.json` to `.json.template` to prevent Grafana from provisioning the raw template as a dashboard.
 

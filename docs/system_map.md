@@ -150,7 +150,7 @@ flowchart LR
 - `app/monitoring/metrics.py`: Prometheus metrics.
 - `app/monitoring/healthwatch.py`: health scheduler + ops state file.
 - `app/monitoring/audit.py`: audit/compliance logging.
-- Grafana dashboards: `grafana/provisioning/dashboards/*.json`.
+- Grafana dashboards: `grafana/provisioning/dashboards/*.json` (per-account dashboards auto-generated from `.env` by `scripts/generate_grafana_dashboards.py`).
 - Prometheus config: `prometheus/prometheus.yml` + `prometheus/alerts.yml`.
 
 ## API and UI

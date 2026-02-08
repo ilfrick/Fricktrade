@@ -11,6 +11,7 @@ Expose Prometheus metrics and Grafana dashboards.
 - Prometheus config: `prometheus/prometheus.yml`.
 - Alertmanager config: `prometheus/alerts.yml` and `alertmanager/alertmanager.yml`.
 - Grafana dashboards: `grafana/provisioning/dashboards/*.json`.
+- Per-account dashboards: auto-generated from `.env` by `scripts/generate_grafana_dashboards.py` (template: `_template_account.json.template`).
 - Latency dashboard: `grafana/provisioning/dashboards/fricktrade_latency.json`.
 - Audit/compliance exports: `app/monitoring/audit.py`.
 

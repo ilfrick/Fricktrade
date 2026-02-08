@@ -13,6 +13,7 @@ tmplogs.txt
 ollama/
 testenv/
 alertmanager/alertmanager.generated.yml
+grafana/provisioning/dashboards/account_*.json
 scripts/.fuse_hidden*
 
 .venv/
