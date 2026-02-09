@@ -212,7 +212,7 @@ _DESCRIPTIONS = {
     "healthwatch.market_shutdown.heartbeat_minutes": "Heartbeat log interval for market scheduler.",
     "healthwatch.market_shutdown.write_state": "Write ops state file for other services to consume.",
     "healthwatch.market_shutdown.state_path": "Path to the ops state file written by healthwatch.",
-    "healthwatch.market_shutdown.keep_services": "Services that stay up when market is closed.",
+    "healthwatch.market_shutdown.keep_services": "Services that stay up when market is closed (must include docker-socket-proxy).",
     "healthwatch.market_shutdown.stop_services": "Explicit services to stop (overrides keep list).",
     "kill_switch.armed": "Arm the kill switch interlock.",
     "kill_switch.confirm_code": "Confirmation code for kill switch actions.",

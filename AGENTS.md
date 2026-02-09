@@ -430,7 +430,7 @@ Highest positive impact (testing/live trading):
 
 ## Session update 2026-01-19 18:16:55 CET
 - Investigated trader down state: healthwatch market_shutdown is enabled and the system is in "stopped" state; `data/system_state.json` shows next_open 2026-01-20T09:00:00+01:00.
-- Only keep_services are running (healthwatch, autoheal, daily-report, prometheus, tests-when-closed), matching the shutdown behavior.
+- Only keep_services are running (healthwatch, autoheal, docker-socket-proxy, daily-report, prometheus, tests-when-closed), matching the shutdown behavior.
 
 ## Session update 2026-01-19 18:45:53 CET
 - Saved context/session after confirming trader stopped due to healthwatch market_shutdown (holiday) and pushed updates.
@@ -613,7 +613,7 @@ Highest positive impact (testing/live trading):
 - GPU check: torch in trader reports CUDA available (GTX 1060 6GB); ollama logs show CUDA GPU detected.
 - Logs in last 10m show no errors beyond compose version warning.
 ## Session update 2026-01-24 04:36:19 CET
-- Post-restart health check: only keep_services containers running (autoheal, daily-report, healthwatch, prometheus, tests-when-closed).
+- Post-restart health check: only keep_services containers running (autoheal, docker-socket-proxy, daily-report, healthwatch, prometheus, tests-when-closed).
 - data/system_state.json reports state=stopped with next_open 2026-01-26T09:00:00+01:00 (healthwatch market shutdown).
 
 
@@ -676,4 +676,17 @@ Implemented comprehensive reward system improvements for RL agents to increase p
 - Deleted static per-account dashboards: `fricktrade_realistic.json`, `fricktrade_higher.json`, `fricktrade_third.json`.
 
 **Bug fix during review:** Renamed template from `.json` to `.json.template` to prevent Grafana from provisioning the raw template as a dashboard.
+
+### Session 2026-02-09: Fix docker-socket-proxy market shutdown
+
+**Problem:** Healthwatch market scheduler was stopping `docker-socket-proxy` during market shutdown because it was not in `keep_services`. This cut off Docker API access for healthwatch and autoheal, causing:
+- Autoheal crash-looped (354 restarts) unable to reach Docker API
+- Healthwatch could not restart services when markets reopened (ConnectionRefused to proxy)
+- All stopped containers stayed dead until manual intervention
+
+**Changes:**
+- Added `docker-socket-proxy` to `keep_services` in `config/config.yaml`
+- Added `docker-socket-proxy` to the hardcoded default fallback in `app/monitoring/healthwatch.py`
+- Updated `docs/operations.md` and `docs/configuration.md` with guidance that `docker-socket-proxy` must be in `keep_services`
+- Updated AGENTS.md keep_services references to include `docker-socket-proxy`
 

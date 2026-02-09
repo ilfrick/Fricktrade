@@ -659,6 +659,7 @@ healthwatch:
     keep_services:
     - healthwatch
     - autoheal
+    - docker-socket-proxy
     - daily-report
     - prometheus
     - tests-when-closed

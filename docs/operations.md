@@ -20,6 +20,7 @@
 - Alerts fire if services are down or flapping.
 - Autoheal restarts containers that fail health checks.
 - `healthwatch.market_shutdown.keep_services` controls which services stay up when markets are closed.
+- `docker-socket-proxy` must be in `keep_services` so healthwatch and autoheal retain Docker API access during shutdown and can restart services when markets reopen.
 - `tests-when-closed` is kept running during market shutdown to execute its closed-market suite.
 - Healthwatch writes the ops state file (`healthwatch.market_shutdown.state_path`) for other services to consume.
 - Alertmanager SMTP and recipient settings are sourced from `.env` and must not be committed.

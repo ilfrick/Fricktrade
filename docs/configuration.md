@@ -103,6 +103,7 @@ Centralize runtime settings for all subsystems.
 - Benchmarks: `benchmarking.*` (walk-forward + stress scenarios, bootstrap CI, MC stress, output/plot/PDF paths).
 - Market-based stack sleep/wake: `healthwatch.market_shutdown.*` (stops services when markets are closed).
 - `healthwatch.market_shutdown.keep_services` should include `tests-when-closed` so closed-market tests can run.
+- `healthwatch.market_shutdown.keep_services` must include `docker-socket-proxy` so healthwatch and autoheal retain Docker API access during shutdown.
 - Ops state file: `healthwatch.market_shutdown.write_state` and `healthwatch.market_shutdown.state_path`.
 - Manual kill switches: `kill_switch.*` (force sleep or force liquidation with interlock).
 - Daily top movers report: `reports.daily_top_movers.*` (daily winners, email, training data export; includes `feed`).

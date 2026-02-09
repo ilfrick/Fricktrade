@@ -94,6 +94,7 @@ can reload context quickly. Keep it updated when the setup changes.
 - Added active model pointer publishing and ops-state gating for trader/learner/tests.
 - Added ops state file output and aligned learner/tests with healthwatch scheduler state.
 - Kept tests-when-closed running during market shutdown via healthwatch keep_services.
+- Fixed docker-socket-proxy being stopped during market shutdown, which broke autoheal and prevented healthwatch from restarting services.
 - Phase 6: added decision audit logs, compliance exports, and latency dashboard metrics.
 - Phase 5: added model registry metadata, feature drift detection, and auto-rollback for RL policies.
 - Phase 4: added VaR/CVaR gating, exposure caps, and volatility-aware kill switch profiles.

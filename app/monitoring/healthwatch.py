@@ -237,7 +237,7 @@ def _run_market_scheduler(cfg: dict) -> None:
     interval = int(ms_cfg.get("check_interval_seconds", 60))
     start_before = int(ms_cfg.get("start_before_minutes", 15))
     heartbeat_minutes = int(ms_cfg.get("heartbeat_minutes", 15))
-    keep = set(ms_cfg.get("keep_services", ["healthwatch", "autoheal"]))
+    keep = set(ms_cfg.get("keep_services", ["healthwatch", "autoheal", "docker-socket-proxy"]))
     stop_list = ms_cfg.get("stop_services")
     state_path = Path(ms_cfg.get("state_path", "/data/system_state.json"))
     write_state = bool(ms_cfg.get("write_state", True))
