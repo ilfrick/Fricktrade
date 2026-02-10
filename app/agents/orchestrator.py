@@ -449,6 +449,7 @@ class RLStrategyOrchestrator:
         self._best_score: float | None = None
         self._reward_ema: float | None = None
         self._last_selection: dict[tuple[str, str], str] = {}
+        self._last_diagnostics: dict = {}
         self._order_feedback: dict[tuple[str, str], dict[str, float]] = {}
         self._lock = threading.RLock()
         self._policy_reward_cfg: RewardConfig | None = None
@@ -595,17 +596,24 @@ class RLStrategyOrchestrator:
     ) -> tuple[list[str], dict[str, float]]:
         with self._lock:
             if not self.cfg.enabled or not strategy_names:
+                self._last_diagnostics = {}
                 return strategy_names, {name: 1.0 for name in strategy_names}
             self._ensure_model(strategy_names)
             key = self._key(symbol, broker_name)
             features = self._state_features(symbol, market_state, signals, broker_name)
             sequence = self._update_sequence(key, features)
             probs = self._predict(sequence)
+            self._last_diagnostics = {
+                "strategy_probs": dict(probs),
+                "input_feature_dim": len(features),
+                "epsilon_explore": False,
+            }
             if random.random() < self.cfg.epsilon:
                 shuffled = strategy_names[:]
                 random.shuffle(shuffled)
                 selected = shuffled[: max(1, min(len(shuffled), self._top_k))]
                 self._last_selection[key] = selected[0]
+                self._last_diagnostics["epsilon_explore"] = True
                 return selected, {name: 1.0 for name in selected}
 
             ranked = sorted(strategy_names, key=lambda n: probs.get(n, 0.0), reverse=True)

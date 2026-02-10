@@ -131,6 +131,9 @@ def _analyze(
     sell_traces = []
     hold_with_position = []
     rl_value_timeline: list[dict] = []  # value estimates over time
+    orchestrator_decisions: list[dict] = []  # orchestrator strategy selection log
+    orchestrator_strategy_picks: Counter = Counter()  # how often each strategy is picked
+    orchestrator_epsilon_count = 0
 
     for t in window_traces:
         outcome = t.get("outcome", "unknown")
@@ -153,6 +156,30 @@ def _analyze(
                     "action_probs": s.get("action_probs"),
                     "broker": t.get("broker_hint"),
                 })
+
+        # Collect orchestrator decisions
+        orch_probs = t.get("orchestrator_strategy_probs")
+        orch_selected = t.get("orchestrator_selected", [])
+        orch_epsilon = t.get("orchestrator_epsilon_explore", False)
+        if orch_epsilon:
+            orchestrator_epsilon_count += 1
+        for name in orch_selected:
+            orchestrator_strategy_picks[name] += 1
+        if orch_probs:
+            # record per-strategy signal actions alongside orchestrator probs
+            sig_by_name = {s.get("name"): s.get("action") for s in signals}
+            orchestrator_decisions.append({
+                "symbol": t.get("symbol"),
+                "ts": t.get("ts"),
+                "strategy_probs": orch_probs,
+                "selected": orch_selected,
+                "epsilon_explore": orch_epsilon,
+                "strategy_signals": sig_by_name,
+                "final_action": t.get("action"),
+                "action_strategy": t.get("action_strategy"),
+                "broker": t.get("broker_hint"),
+                "regime": t.get("regime_name"),
+            })
 
         # Collect sell/exit outcomes
         action_field = None
@@ -254,6 +281,10 @@ def _analyze(
         "rl_buy_prob_stats": _stats(rl_buy_probs),
         "rl_value_timeline_sample": rl_value_timeline[:100],
         "rl_value_timeline_count": len(rl_value_timeline),
+        "orchestrator_strategy_picks": dict(orchestrator_strategy_picks.most_common()),
+        "orchestrator_epsilon_explore_count": orchestrator_epsilon_count,
+        "orchestrator_decisions_sample": orchestrator_decisions[:100],
+        "orchestrator_decisions_count": len(orchestrator_decisions),
     }
 
 

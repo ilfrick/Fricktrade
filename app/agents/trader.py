@@ -909,6 +909,11 @@ class TradingAgent:
             if trace:
                 trace["orchestrator_selected"] = list(names)
                 trace["orchestrator_weights"] = list(weights) if isinstance(weights, (list, tuple)) else weights
+                if isinstance(self._orchestrator, RLStrategyOrchestrator):
+                    diag = getattr(self._orchestrator, "_last_diagnostics", {})
+                    if diag:
+                        trace["orchestrator_strategy_probs"] = diag.get("strategy_probs")
+                        trace["orchestrator_epsilon_explore"] = diag.get("epsilon_explore", False)
             for name in self._strategy_names:
                 ORCHESTRATOR_STRATEGY_ACTIVE.labels(symbol=symbol, strategy=name).set(1 if name in names else 0)
             for name in set(names):
