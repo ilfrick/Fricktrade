@@ -130,6 +130,7 @@ def _analyze(
     outcome_actions: Counter = Counter()
     sell_traces = []
     hold_with_position = []
+    rl_value_timeline: list[dict] = []  # value estimates over time
 
     for t in window_traces:
         outcome = t.get("outcome", "unknown")
@@ -139,6 +140,19 @@ def _analyze(
         for s in signals:
             sig_action = s.get("action", "unknown")
             signal_actions[sig_action] += 1
+
+        # Collect RL value estimates and action probabilities
+        for s in signals:
+            if s.get("value_estimate") is not None or s.get("action_probs"):
+                rl_value_timeline.append({
+                    "symbol": t.get("symbol"),
+                    "ts": t.get("ts"),
+                    "strategy": s.get("name"),
+                    "action": s.get("action"),
+                    "value_estimate": s.get("value_estimate"),
+                    "action_probs": s.get("action_probs"),
+                    "broker": t.get("broker_hint"),
+                })
 
         # Collect sell/exit outcomes
         action_field = None
@@ -155,7 +169,7 @@ def _analyze(
                 "stage": t.get("stage"),
                 "broker": t.get("broker_hint"),
                 "signals": [
-                    {"name": s.get("name"), "action": s.get("action")}
+                    {k: v for k, v in s.items() if k != "features"}
                     for s in signals
                 ],
             })
@@ -171,7 +185,7 @@ def _analyze(
                     "ts": t.get("ts"),
                     "qty": positions[sym].get("qty"),
                     "signals": [
-                        {"name": s.get("name"), "action": s.get("action")}
+                        {k: v for k, v in s.items() if k != "features"}
                         for s in signals
                     ],
                     "outcome": outcome,
@@ -195,6 +209,32 @@ def _analyze(
             key = f"{e.get('action', '?')}:{e.get('reason', '?')}"
             risk_reasons[key] += 1
 
+    # RL value estimate statistics
+    rl_values = [r["value_estimate"] for r in rl_value_timeline if r.get("value_estimate") is not None]
+    rl_sell_probs = [
+        r["action_probs"]["sell"] for r in rl_value_timeline
+        if r.get("action_probs") and "sell" in r["action_probs"]
+    ]
+    rl_buy_probs = [
+        r["action_probs"]["buy"] for r in rl_value_timeline
+        if r.get("action_probs") and "buy" in r["action_probs"]
+    ]
+
+    def _stats(vals: list[float]) -> dict:
+        if not vals:
+            return {}
+        vals_sorted = sorted(vals)
+        n = len(vals_sorted)
+        return {
+            "count": n,
+            "min": vals_sorted[0],
+            "max": vals_sorted[-1],
+            "mean": sum(vals_sorted) / n,
+            "median": vals_sorted[n // 2],
+            "p10": vals_sorted[max(0, n // 10)],
+            "p90": vals_sorted[min(n - 1, n * 9 // 10)],
+        }
+
     return {
         "window_start": start_utc.isoformat(),
         "window_end": _now_utc().isoformat(),
@@ -209,6 +249,11 @@ def _analyze(
         "buy_skip_reasons": dict(buy_skip_reasons.most_common()),
         "structured_event_types": dict(event_types.most_common()),
         "risk_block_reasons": dict(risk_reasons.most_common(20)),
+        "rl_value_estimate_stats": _stats(rl_values),
+        "rl_sell_prob_stats": _stats(rl_sell_probs),
+        "rl_buy_prob_stats": _stats(rl_buy_probs),
+        "rl_value_timeline_sample": rl_value_timeline[:100],
+        "rl_value_timeline_count": len(rl_value_timeline),
     }
 
 

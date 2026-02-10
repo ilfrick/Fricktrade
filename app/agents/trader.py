@@ -593,7 +593,7 @@ class TradingAgent:
 
     def _signal_summary(self, signal: dict, include_features: bool = False) -> dict:
         summary = {"name": signal.get("name"), "action": signal.get("action")}
-        for key in ("score", "confidence", "strength", "reason", "weight", "signal_bias", "signal_bias_block"):
+        for key in ("score", "confidence", "strength", "reason", "weight", "signal_bias", "signal_bias_block", "value_estimate", "action_probs"):
             if key in signal:
                 summary[key] = signal.get(key)
         if include_features and "features" in signal:

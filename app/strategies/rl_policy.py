@@ -127,6 +127,24 @@ class RLPolicyStrategy(Strategy):
         elif action == 2:
             self.position = -1.0
             signal["action"] = "sell"
+
+        # Extract value estimate and action probabilities for monitoring
+        try:
+            import torch as _th
+            obs_t = _th.as_tensor(obs).float().unsqueeze(0).to(self.model.device)
+            with _th.no_grad():
+                value = self.model.policy.predict_values(obs_t)
+                dist = self.model.policy.get_distribution(obs_t)
+                probs = dist.distribution.probs[0]
+            signal["value_estimate"] = float(value.item())
+            signal["action_probs"] = {
+                "hold": float(probs[0]),
+                "buy": float(probs[1]),
+                "sell": float(probs[2]),
+            }
+        except Exception:
+            pass
+
         if self._include_features:
             signal["features"] = obs.tolist()
         return signal
