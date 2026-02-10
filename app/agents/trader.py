@@ -997,7 +997,7 @@ class TradingAgent:
                 self._emit_decision_trace(trace, "skip", "no_price", "pricing")
                 return None
             min_price = self.cfg.get("trading_limits", {}).get("min_price")
-            if min_price is not None and last_price < float(min_price):
+            if min_price is not None and action == "buy" and last_price < float(min_price):
                 self._record_skip(symbol, action, "min_price", broker_name)
                 logging.info("Skipping %s for %s: price below min_price", action, symbol)
                 self._emit_decision_trace(trace, "skip", "min_price", "limits")
