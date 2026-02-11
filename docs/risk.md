@@ -7,11 +7,19 @@
 Enforce exposure, leverage, and safety limits before execution.
 
 ## Implementation
-- `app/risk/manager.py` — core limits (exposure, leverage, daily loss), cooldown checks, order limit validation, and exposure cap enforcement (venue/sector).
+- `app/risk/manager.py` — core limits (exposure, leverage, daily loss), cooldown checks, order limit validation, exposure cap enforcement (venue/sector), and `risk_preflight()` which consolidates order limits + cooldown + risk limits into one call.
 - `app/risk/config.py` — `RiskConfig` dataclass with typed fields and `from_dict`/`to_dict` for all risk settings.
 - `app/agents/account_metrics.py` — VaR/CVaR computation and equity/drawdown tracking.
 - `app/agents/trader.py` — enforces `trading_limits`, account flags, kill switch profiles, and coordinates risk checks via `RiskManager`.
 - `risk.enabled: false` bypasses risk checks, but broker account flags and trading limits still block orders.
+
+## Guard Chain
+
+The `run_once()` execution path applies guards in two tiers:
+- **Universal guards** apply to all actions: kill switch, circuit breaker, account blocked, shorting disabled, action blocked, sizing, limit price, order queue.
+- **Entry-only guards** apply only to new positions (skipped for sell-to-close): VaR limit, exposure caps, order limits, cooldown, and `can_open_trade` risk limits.
+
+Position closes (selling existing holdings) bypass entry-only guards because they reduce risk rather than create new exposure.
 
 ## Configuration
 `config/config.yaml`:

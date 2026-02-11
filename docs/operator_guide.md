@@ -78,7 +78,7 @@ to take effect. Online training will also adapt over subsequent sessions.
 | `mode` | `weight` (default) uses `strategy_weights` to blend signals. `direct` picks single winner. |
 | `strategy_weights` | Per-strategy weight map. Higher weight = more influence on combined action. |
 | `rl.enabled` | Enable RL orchestrator (default: false). When disabled, uses static weight mode. |
-| `rl.time_penalty_per_bar` | Per-bar penalty in RL reward (only when RL enabled). |
+| `rl.time_penalty_per_bar` | Per-bar penalty in RL reward. Derived from `RewardConfig` when set to 0: `time_penalty_weight * bar_interval_minutes / time_normalizer`. |
 | `rl.global_time_penalty.*` | Account-level idle penalty (only when RL enabled). |
 
 ### Take-Profit (`risk`)

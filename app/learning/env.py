@@ -14,6 +14,15 @@ from app.learning.features import build_observation, observation_size
 
 @dataclass
 class RewardConfig:
+    """Single source of truth for reward parameters.
+
+    Configured at ``learning.reward`` in config.yaml.  Per-account overrides
+    (in ``brokers.alpaca.accounts[].reward``) are deep-merged onto these
+    defaults at startup.  The orchestrator's ``time_penalty_per_bar`` is
+    derived from this config when not explicitly set:
+        time_penalty_per_bar = time_penalty_weight * bar_interval_minutes / time_normalizer
+    """
+
     nav_weight: float = 1.0            # w1 - differential NAV
     time_penalty_weight: float = 0.5   # w2 - position holding penalty
     profit_bonus_weight: float = 2.0   # w3 - realized profit bonus

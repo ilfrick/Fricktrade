@@ -33,6 +33,8 @@ execution, and metrics updates.
 - Multi-broker routing uses `execution.brokers.routing` to choose the broker per symbol and supports optional fallback when a broker is down.
 - Saves periodic checkpoints of in-memory state for reboot resilience.
 - `risk.enabled: false` bypasses risk checks, but broker account flags and trading limits still block orders.
+- Entry-only guards (VaR, exposure caps, order limits, cooldown, risk limits) are skipped for sell-to-close orders that reduce existing positions.
+- `RiskManager.risk_preflight()` consolidates order limits + cooldown + risk limits into a single check for entry orders.
 
 ## Key Components
 - Strategy selection: `strategy.name` or `strategy.names`.

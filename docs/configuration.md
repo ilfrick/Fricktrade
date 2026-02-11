@@ -297,7 +297,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `learning.use_best_model`: Prefer best model if available.
 - `learning.device`: `auto`, `cpu`, or `cuda`.
 - `learning.window_size`: Observation window size (bars).
-- `learning.reward.*`: Dense per-step reward configuration (replaces sparse reward shaping).
+- `learning.reward.*`: Single source of truth for all reward parameters (`RewardConfig`). The orchestrator's `time_penalty_per_bar` is derived from this config when not explicitly set. Per-account overrides in `brokers.alpaca.accounts[].reward` are deep-merged onto these defaults.
 - `learning.reward.nav_weight` (float, default 1.0): Weight for differential NAV change component.
 - `learning.reward.time_penalty_weight` (float, default 0.5): Weight for position holding time penalty.
 - `learning.reward.profit_bonus_weight` (float, default 2.0): Bonus weight for realized profitable trades.

@@ -156,6 +156,32 @@ class RiskManager:
             return True, "order_limit"
         return False, None
 
+    def risk_preflight(
+        self,
+        qty: int,
+        last_price: float,
+        limits_cfg: dict,
+        last_trade_at: datetime | None,
+        now: datetime,
+        exposure_pct: float = 0.0,
+        short_exposure_pct: float = 0.0,
+        leverage: float = 1.0,
+    ) -> tuple[bool, str | None]:
+        """Combined entry risk check: order limits + cooldown + can_open_trade.
+
+        Returns:
+            (blocked, reason) — reason string if blocked, else None.
+        """
+        violates, reason = self.check_order_limits(qty, last_price, limits_cfg)
+        if violates:
+            return True, "order_limit"
+        blocked, _ = self.check_cooldown(last_trade_at, now)
+        if blocked:
+            return True, "cooldown"
+        if not self.can_open_trade(exposure_pct, short_exposure_pct, leverage):
+            return True, "risk_block"
+        return False, None
+
     @staticmethod
     def check_exposure_caps(
         symbol: str,

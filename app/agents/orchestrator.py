@@ -485,6 +485,13 @@ class RLStrategyOrchestrator:
         if self.cfg.reward_mode.lower() == "policy":
             self._policy_reward_cfg = self._build_policy_reward_config(cfg)
 
+        # Derive time_penalty_per_bar from RewardConfig (source of truth)
+        # when not explicitly set in orchestrator config
+        if self.cfg.time_penalty_per_bar == 0.0:
+            rc = self._policy_reward_cfg or self._build_policy_reward_config(cfg)
+            derived = rc.time_penalty_weight * rc.bar_interval_minutes / max(rc.time_normalizer, 1e-6)
+            self.cfg.time_penalty_per_bar = derived
+
     def is_enabled(self) -> bool:
         return self.cfg.enabled
 

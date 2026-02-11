@@ -224,3 +224,62 @@ class TestDailyResetTimezone:
     def test_default_timezone_is_utc(self):
         manager = RiskManager({})
         assert manager._tz == timezone.utc
+
+
+class TestRiskPreflight:
+    def test_passes_when_all_clear(self):
+        manager = RiskManager({"max_position_size_pct": 50.0})
+        now = datetime.now(timezone.utc)
+        blocked, reason = manager.risk_preflight(
+            qty=10, last_price=100.0, limits_cfg={},
+            last_trade_at=None, now=now,
+            exposure_pct=5.0, short_exposure_pct=0.0, leverage=1.0,
+        )
+        assert not blocked
+        assert reason is None
+
+    def test_blocks_on_order_limit(self):
+        manager = RiskManager({})
+        now = datetime.now(timezone.utc)
+        blocked, reason = manager.risk_preflight(
+            qty=100, last_price=100.0,
+            limits_cfg={"enabled": True, "max_order_notional": 500},
+            last_trade_at=None, now=now,
+        )
+        assert blocked
+        assert reason == "order_limit"
+
+    def test_blocks_on_cooldown(self):
+        manager = RiskManager({"cooldown_seconds": 60})
+        now = datetime.now(timezone.utc)
+        blocked, reason = manager.risk_preflight(
+            qty=1, last_price=10.0, limits_cfg={},
+            last_trade_at=now - timedelta(seconds=10), now=now,
+        )
+        assert blocked
+        assert reason == "cooldown"
+
+    def test_blocks_on_risk_limits(self):
+        manager = RiskManager({"max_position_size_pct": 5.0})
+        now = datetime.now(timezone.utc)
+        blocked, reason = manager.risk_preflight(
+            qty=1, last_price=10.0, limits_cfg={},
+            last_trade_at=None, now=now,
+            exposure_pct=10.0, short_exposure_pct=0.0, leverage=1.0,
+        )
+        assert blocked
+        assert reason == "risk_block"
+
+    def test_checks_priority_order(self):
+        """Order limits checked before cooldown before risk limits."""
+        manager = RiskManager({"cooldown_seconds": 60, "max_position_size_pct": 5.0})
+        now = datetime.now(timezone.utc)
+        # All three would block — order_limit should win
+        blocked, reason = manager.risk_preflight(
+            qty=100, last_price=100.0,
+            limits_cfg={"enabled": True, "max_order_notional": 500},
+            last_trade_at=now - timedelta(seconds=10), now=now,
+            exposure_pct=10.0, short_exposure_pct=0.0, leverage=1.0,
+        )
+        assert blocked
+        assert reason == "order_limit"
