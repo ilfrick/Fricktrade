@@ -156,6 +156,9 @@ risk:
   hard_stop_pct: 0.8
   trailing_stop_pct: 0.35
   circuit_breaker_drawdown_pct: 3.0
+  take_profit_pct: 1.5
+  partial_take_profit_pct: 1.0
+  partial_take_profit_ratio: 0.5
   vol_targeting:
     enabled: true
     target_vol_pct: 2.0
@@ -205,16 +208,13 @@ trading_limits:
   blocked_actions: []
   min_price: 2.0
 strategy:
-  name: rl_policy
+  name: trend_following
   names:
-  - rl_policy
-  - rl_policy_fees
   - trend_following
   - factor_model
-  - stat_arb_pairs
-  - market_maker
   - pattern_trading
   combine: vote
+  min_conviction: 0.3
   fee_aware:
     min_edge_pct: 0.005
     edge_multiplier: 0.5
@@ -261,11 +261,15 @@ strategy:
       skew_pct: 0.15
       min_qty: 1
 orchestrator:
-  mode: direct
-  top_k: 2
+  mode: weight
+  top_k: 3
   min_score: 0.0
+  strategy_weights:
+    trend_following: 0.4
+    factor_model: 0.3
+    pattern_trading: 0.3
   rl:
-    enabled: true
+    enabled: false
     model_type: lstm
     device: auto
     hidden_dim: 32

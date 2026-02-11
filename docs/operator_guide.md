@@ -44,7 +44,7 @@
 - Trading PPO policy: `/app/models/ppo_policy.zip` (or `learning.registry.active_path`).
 - Model registry: `/app/models/model_registry.json` and `/app/models/registry/*`.
 - AI symbol filter PPO: `/data/ai_symbol_filter.zip` with `.meta.json`.
-- Orchestrator model: `/data/orchestrator_model.pt`.
+- Orchestrator model: `/data/orchestrator_model.pt` (unused when `orchestrator.rl.enabled: false`).
 
 ## Advanced Components
 - **RegimeHMM** (`learning.regime.enabled`): Detects market volatility regime (low/med/high). Adds `regime`, `regime_name` to market_state.
@@ -71,15 +71,23 @@ to take effect. Online training will also adapt over subsequent sessions.
 | `profit_bonus_weight` | Bonus on profitable trade close. Higher = more incentive to take profits quickly rather than hold for bigger gains. Formula: `profit_bonus_weight * realized_pnl / nav_normalizer`. |
 | `bar_interval_minutes` | Minutes per bar step. Must match actual data interval. Affects how fast time penalty accumulates per step. |
 
-### Orchestrator (`orchestrator.rl`)
+### Orchestrator (`orchestrator`)
 
 | Parameter | Effect |
 |-----------|--------|
-| `time_penalty_per_bar` | Per-bar penalty in orchestrator reward for strategy selection. Higher = prefer strategies that close faster. |
-| `global_time_penalty.enabled` | When true, penalizes account-wide inactivity. |
-| `global_time_penalty.max_idle_minutes` | Minutes of no-trade before penalty kicks in. |
-| `global_time_penalty.penalty_scale` | Magnitude of the idle penalty. |
-| `global_time_penalty.penalty_type` | `exponential` or `linear`. |
+| `mode` | `weight` (default) uses `strategy_weights` to blend signals. `direct` picks single winner. |
+| `strategy_weights` | Per-strategy weight map. Higher weight = more influence on combined action. |
+| `rl.enabled` | Enable RL orchestrator (default: false). When disabled, uses static weight mode. |
+| `rl.time_penalty_per_bar` | Per-bar penalty in RL reward (only when RL enabled). |
+| `rl.global_time_penalty.*` | Account-level idle penalty (only when RL enabled). |
+
+### Take-Profit (`risk`)
+
+| Parameter | Effect |
+|-----------|--------|
+| `take_profit_pct` | Full exit at this % gain from entry. Applies to all strategies. |
+| `partial_take_profit_pct` | Sell a fraction at this % gain. Fires once per position. |
+| `partial_take_profit_ratio` | Fraction to sell at partial TP (0.5 = half). |
 
 ### Strategy Parameters (`strategy.params`)
 

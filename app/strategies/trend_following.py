@@ -39,8 +39,9 @@ class TrendFollowingStrategy(Strategy):
         if slow <= 0:
             return {"action": "hold"}
         trend_strength = (fast - slow) / slow * 100.0
+        confidence = float(min(abs(trend_strength) / max(self.params.breakout_pct * 3.0, 0.01), 1.0))
         if trend_strength >= self.params.breakout_pct and last >= fast:
-            return {"action": "buy"}
+            return {"action": "buy", "confidence": confidence, "trend_strength": trend_strength}
         if trend_strength <= -self.params.exit_pct and last <= fast:
-            return {"action": "sell"}
-        return {"action": "hold"}
+            return {"action": "sell", "confidence": confidence, "trend_strength": trend_strength}
+        return {"action": "hold", "confidence": 0.0, "trend_strength": trend_strength}

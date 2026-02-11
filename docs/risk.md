@@ -22,6 +22,9 @@ Enforce exposure, leverage, and safety limits before execution.
 - `risk.max_portfolio_leverage`
 - `risk.cooldown_seconds`
 - `risk.circuit_breaker_drawdown_pct`
+- `risk.take_profit_pct` — full exit when price >= entry * (1 + pct/100). Default: 1.5.
+- `risk.partial_take_profit_pct` — sell a fraction at first target. Default: 1.0.
+- `risk.partial_take_profit_ratio` — fraction to sell at partial TP (0.1-0.9). Default: 0.5.
 - `risk.vol_targeting.enabled`
 - `risk.vol_targeting.target_vol_pct`
 - `risk.vol_targeting.min_scale`
@@ -57,9 +60,23 @@ Enforce exposure, leverage, and safety limits before execution.
 - `trading_limits.min_order_notional`
 - `trading_limits.enforce_account_flags`
 
+## Take-Profit
+
+The agent-level take-profit applies to all positions regardless of which strategy opened them:
+
+1. **Partial take-profit** (`partial_take_profit_pct`): when price rises this % above entry, sell `partial_take_profit_ratio` of the position. Fires once per position (`took_partial` flag in `position_state`).
+2. **Full take-profit** (`take_profit_pct`): when price rises this % above entry, close the entire remaining position.
+3. Checked inside `_check_position_exit()` after hard stop and trailing stop, before time exit.
+4. Prometheus metric: `take_profit_exits_total{symbol, reason}` — tracks take-profit and partial exits.
+
+## Portfolio Position Scaling
+
+`_portfolio_position_scale()` adjusts order size based on portfolio allocation constraints. On error, it falls back to 1.0 (full allocation) and increments `portfolio_scale_fallback_total{symbol}`.
+
 ## Tuning Notes
 - Lower `max_position_size_pct` for more diversified risk.
 - Tighten `hard_stop_pct` and `trailing_stop_pct` for faster exits.
+- Set `take_profit_pct` and `partial_take_profit_pct` to lock in gains. Pattern trading has its own TP; the agent-level TP applies universally.
 - Use `trading_limits.allow_shorts: false` to block shorts.
 - Use `risk.var.*` to block new entries when tail risk grows.
 - Configure `risk.exposure_caps.*` to limit per-venue or per-sector concentration.

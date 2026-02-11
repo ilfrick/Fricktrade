@@ -31,14 +31,16 @@ flowchart TD
     Q --> A
 ```
 
-## Orchestrator Decision Path (Direct)
+## Orchestrator Decision Path (Weight)
 
 ```mermaid
 flowchart TD
-    A[Signals from All Active Strategies] --> B[RL Orchestrator Scores]
-    B --> C{Mode=direct}
-    C --> D[Pick Top Strategy]
-    D --> E[Use Single Strategy Action]
+    A[Signals from Active Strategies] --> B[Apply strategy_weights]
+    B --> C[Multiply by signal confidence]
+    C --> D[Sum buy_score / sell_score]
+    D --> E{Score >= min_conviction?}
+    E -- Yes --> F[Execute winning action]
+    E -- No --> G[Hold]
 ```
 
 ## Execution Path (Market/Limit + Algos)

@@ -155,6 +155,16 @@ MARKET_CACHE_STALE_FILTERED = Counter(
     "Stale market cache filtered symbols used",
     ["interval", "source"],
 )
+PORTFOLIO_SCALE_FALLBACK = Counter(
+    "portfolio_scale_fallback_total",
+    "Portfolio position scale fallback to 1.0 on error",
+    ["symbol"],
+)
+TAKE_PROFIT_EXITS = Counter(
+    "take_profit_exits_total",
+    "Take-profit exit events",
+    ["symbol", "reason"],
+)
 
 
 def start_metrics_server(port: int):

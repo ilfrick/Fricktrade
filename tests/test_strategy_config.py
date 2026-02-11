@@ -13,6 +13,7 @@ def test_defaults():
     assert cfg.fee_aware == {}
     assert cfg.signal_bias_guard == {}
     assert cfg.performance == {}
+    assert cfg.min_conviction == 0.0
 
 
 def test_from_dict_roundtrip():
@@ -24,12 +25,14 @@ def test_from_dict_roundtrip():
         "fee_aware": {"enabled": True},
         "signal_bias_guard": {"threshold": 0.3},
         "performance": {"track": True},
+        "min_conviction": 0.3,
     }
     cfg = StrategyConfig.from_dict(d)
     assert cfg.name == "trend_following"
     assert cfg.names == ["trend_following", "factor_model"]
     assert cfg.combine == "vote"
     assert cfg.params == {"lookback_minutes": 30}
+    assert cfg.min_conviction == 0.3
     assert cfg.to_dict() == d
 
 

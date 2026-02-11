@@ -45,6 +45,8 @@ from app.monitoring.metrics import (
     ORDER_LATENCY,
     SKIPPED_ORDERS_BY_BROKER,
     TRADES_BY_BROKER,
+    PORTFOLIO_SCALE_FALLBACK,
+    TAKE_PROFIT_EXITS,
 )
 from app.monitoring.audit import AuditLogger, ComplianceLogger
 from app.risk.manager import RiskManager
@@ -491,7 +493,8 @@ class TradingAgent:
         """Check if a held long position should be exited based on risk rules.
 
         Returns (should_exit, reason) where reason is one of:
-            hard_stop, trailing_stop, time_exit, or empty string.
+            hard_stop, trailing_stop, time_exit, take_profit,
+            partial_take_profit, or empty string.
         """
         pos = broker_state.position_state.get(symbol)
         if not pos or float(pos.get("qty", 0)) <= 0:
@@ -513,6 +516,20 @@ class TradingAgent:
         if trailing_stop > 0 and peak > avg_entry:
             if last_price <= peak * (1 - trailing_stop / 100.0):
                 return True, "trailing_stop"
+
+        # Take-profit: full exit when price >= entry * (1 + take_profit_pct/100)
+        take_profit_pct = float(risk_cfg.get("take_profit_pct", 0) or 0)
+        if take_profit_pct > 0 and last_price >= avg_entry * (1 + take_profit_pct / 100.0):
+            TAKE_PROFIT_EXITS.labels(symbol=symbol, reason="take_profit").inc()
+            return True, "take_profit"
+
+        # Partial take-profit: sell a fraction when first target hit, let rest run
+        partial_tp_pct = float(risk_cfg.get("partial_take_profit_pct", 0) or 0)
+        if partial_tp_pct > 0 and not pos.get("took_partial"):
+            if last_price >= avg_entry * (1 + partial_tp_pct / 100.0):
+                pos["took_partial"] = True
+                TAKE_PROFIT_EXITS.labels(symbol=symbol, reason="partial_take_profit").inc()
+                return True, "partial_take_profit"
 
         # Time-based exit: held longer than position_horizon_minutes
         horizon = float(self._strategy_params.get("position_horizon_minutes", 0) or 0)
@@ -941,16 +958,24 @@ class TradingAgent:
                         if _should_exit:
                             action = "sell_to_close"
                             action_strategy = "position_exit"
+                            if _exit_reason == "partial_take_profit":
+                                _partial_ratio = float(
+                                    broker_state.risk.cfg.get("partial_take_profit_ratio", 0.5) or 0.5
+                                )
+                                reduce_pct = max(0.1, min(_partial_ratio, 0.9))
+                            else:
+                                reduce_pct = 1.0
                             logging.info(
-                                "Position exit for %s: %s", symbol, _exit_reason
+                                "Position exit for %s: %s (reduce_pct=%.2f)", symbol, _exit_reason, reduce_pct
                             )
-                            _slog.event("info", "position_exit", symbol=symbol, reason=_exit_reason, broker=broker_name)
+                            _slog.event("info", "position_exit", symbol=symbol, reason=_exit_reason, broker=broker_name, reduce_pct=reduce_pct)
                             if trace:
                                 trace.update(
                                     action="sell_to_close",
                                     action_strategy="position_exit",
                                     position_exit=True,
                                     position_exit_reason=_exit_reason,
+                                    position_exit_reduce_pct=reduce_pct,
                                 )
 
             # Guardrail check (might need lock if it has state, but typically stateless config)
@@ -1384,8 +1409,9 @@ class TradingAgent:
                 return 0.7
             return 1.0
         except (ValueError, TypeError, KeyError) as exc:
-            logging.debug("Portfolio position scale failed: %s", exc)
-            return 0.0
+            logging.warning("Portfolio position scale failed for %s: %s", symbol, exc)
+            PORTFOLIO_SCALE_FALLBACK.labels(symbol=symbol).inc()
+            return 1.0
 
     def _limits_enabled(self) -> bool:
         return bool(self.cfg.get("trading_limits", {}).get("enabled", False))
@@ -1761,6 +1787,7 @@ class TradingAgent:
                         return action, reduce_pct, name
             return "hold", 1.0, None
         weights = weights or {}
+        min_conviction = self._strategy_cfg.min_conviction
         buy_score = 0.0
         sell_score = 0.0
         sells = []
@@ -1773,22 +1800,27 @@ class TradingAgent:
         for signal in signals:
             action = signal.get("action")
             name = signal.get("name")
-            weight = float(weights.get(name, 1.0))
-            if top_weight is None or weight > top_weight:
-                top_weight = weight
+            confidence = float(signal.get("confidence", 1.0))
+            strategy_weight = float(weights.get(name, 1.0))
+            effective_weight = confidence * strategy_weight
+            if top_weight is None or effective_weight > top_weight:
+                top_weight = effective_weight
                 top_signal = signal
             if action == "buy":
-                buy_score += weight
-                if top_buy_weight is None or weight > top_buy_weight:
-                    top_buy_weight = weight
+                buy_score += effective_weight
+                if top_buy_weight is None or effective_weight > top_buy_weight:
+                    top_buy_weight = effective_weight
                     top_buy = signal
             elif action == "sell":
-                sell_score += weight
+                sell_score += effective_weight
                 sells.append(signal)
-                if top_sell_weight is None or weight > top_sell_weight:
-                    top_sell_weight = weight
+                if top_sell_weight is None or effective_weight > top_sell_weight:
+                    top_sell_weight = effective_weight
                     top_sell = signal
         if buy_score == sell_score:
+            return "hold", 1.0, top_signal.get("name") if top_signal else None
+        winning_score = max(buy_score, sell_score)
+        if min_conviction > 0 and winning_score < min_conviction:
             return "hold", 1.0, top_signal.get("name") if top_signal else None
         if buy_score > sell_score:
             chosen = top_buy or top_signal

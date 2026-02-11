@@ -182,6 +182,9 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `risk.hard_stop_pct`: Hard stop loss threshold (%).
 - `risk.trailing_stop_pct`: Trailing stop threshold (%).
 - `risk.circuit_breaker_drawdown_pct`: Drawdown that halts trading (%).
+- `risk.take_profit_pct`: Full exit when price rises this % from entry (default: 1.5).
+- `risk.partial_take_profit_pct`: Partial exit at this % gain from entry (default: 1.0).
+- `risk.partial_take_profit_ratio`: Fraction of position to sell at partial TP (default: 0.5).
 - `risk.vol_targeting.enabled`: Enable volatility targeting.
 - `risk.vol_targeting.target_vol_pct`: Target volatility (%).
 - `risk.vol_targeting.min_scale/max_scale`: Clamp scaling factor.
@@ -219,6 +222,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `strategy.name`: Single strategy name (legacy).
 - `strategy.names`: Multi-strategy list.
 - `strategy.combine`: `priority` or `vote` when combining signals.
+- `strategy.min_conviction`: Minimum weighted score to act (default: 0.0). Signals below this threshold result in hold.
 - `strategy.fee_aware.*`: Fee-aware bias adjustments.
 - `strategy.fee_aware.min_edge_pct`: Minimum expected edge to trade.
 - `strategy.fee_aware.edge_multiplier`: Scale factor for edge.
@@ -244,10 +248,11 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `strategy.params.market_maker.*`: Market maker parameters.
 
 ### orchestrator
-- `orchestrator.mode`: Strategy selection mode (`direct`, `weight`, `select`).
+- `orchestrator.mode`: Strategy selection mode (`weight` default, `direct`, `select`).
 - `orchestrator.top_k`: Max strategies to keep.
 - `orchestrator.min_score`: Minimum score to be selected.
-- `orchestrator.rl.enabled`: Enable RL orchestrator.
+- `orchestrator.strategy_weights`: Per-strategy weight map (e.g., `{trend_following: 0.4, factor_model: 0.3, pattern_trading: 0.3}`).
+- `orchestrator.rl.enabled`: Enable RL orchestrator (default: false).
 - `orchestrator.rl.model_type`: `lstm` or `mlp`.
 - `orchestrator.rl.device`: `auto`, `cpu`, or `cuda`.
 - `orchestrator.rl.hidden_dim/num_layers/dropout/seq_len`: Model architecture.

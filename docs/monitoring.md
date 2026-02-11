@@ -28,6 +28,8 @@ Expose Prometheus metrics and Grafana dashboards.
 - `order_enqueue_latency_seconds`
 - `signal_return_30m_pct`, `signal_return_60m_pct`, `signal_early_volume_pct`
 - `signal_runup_pct`, `signal_drawdown_pct`, `signal_abs_move`, `signal_runup_abs`, `signal_drawdown_abs`
+- `portfolio_scale_fallback_total` — portfolio position scale fell back to 1.0 on error (labels: `symbol`)
+- `take_profit_exits_total` — take-profit exit events (labels: `symbol`, `reason`: `take_profit` or `partial_take_profit`)
 - `broker_requests_total`: Total number of API calls made to brokers, labeled by `broker`, `method`, and `status` (e.g., `success`, `error`).
 - `broker_last_success_timestamp_seconds`: Unix timestamp of the last successful API call to a specific broker and method.
 

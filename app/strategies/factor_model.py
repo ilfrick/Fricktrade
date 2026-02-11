@@ -49,8 +49,10 @@ class FactorModelStrategy(Strategy):
             + self.params.liquidity_weight * liquidity_score
             + self.params.volatility_weight * vol_score
         )
+        max_score = max(abs(self.params.buy_threshold), abs(self.params.sell_threshold)) * 3.0
+        confidence = float(min(abs(score) / max(max_score, 0.01), 1.0))
         if score >= self.params.buy_threshold:
-            return {"action": "buy", "score": float(score)}
+            return {"action": "buy", "score": float(score), "confidence": confidence}
         if score <= self.params.sell_threshold:
-            return {"action": "sell", "score": float(score)}
-        return {"action": "hold", "score": float(score)}
+            return {"action": "sell", "score": float(score), "confidence": confidence}
+        return {"action": "hold", "score": float(score), "confidence": 0.0}

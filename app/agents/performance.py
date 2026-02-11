@@ -144,6 +144,7 @@ class PerformanceTracker:
                         "strategy": strategy,
                         "opened_at": now,
                         "peak_price": curr_avg_entry,
+                        "took_partial": False,
                     }
                 continue
             prev_qty = float(prev.get("qty", 0.0) or 0.0)

@@ -15,6 +15,7 @@ class StrategyConfig:
     fee_aware: dict = field(default_factory=dict)
     signal_bias_guard: dict = field(default_factory=dict)
     performance: dict = field(default_factory=dict)
+    min_conviction: float = 0.0
 
     @classmethod
     def from_dict(cls, d: dict) -> "StrategyConfig":

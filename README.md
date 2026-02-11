@@ -144,20 +144,17 @@ flowchart LR
 - Updates metrics and checkpointed state
 - `risk.enabled` can bypass risk checks, but broker account flags still block orders.
 
-### Strategies
-- `rl_policy`: RL policy inference with optional GPU acceleration
-- `rl_policy_fees`: fee-aware RL policy with broker fee guardrails
-- `intraday_momentum`: price/volume threshold strategy
-- `pattern_trading`: momentum breakout with filters and trailing exits
-- `trend_following`: moving-average trend breakout
-- `factor_model`: momentum + liquidity + volatility composite
-- `stat_arb_pairs`: rolling correlation pair trading
-- `market_maker`: inventory-skewed limit quoting
+### Strategies (active)
+- `trend_following`: moving-average trend breakout with confidence scoring
+- `factor_model`: momentum + liquidity + volatility composite with confidence scoring
+- `pattern_trading`: momentum breakout with filters, TP/SL, and trailing exits
+
+Additional strategies available but disabled by default: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `stat_arb_pairs`, `market_maker`.
 
 ### Orchestrator
-- RL-based strategy selection that consumes strategy signals and AI-filter features
-- Records per-symbol decisions and updates on price movement + order feedback
-- Checkpoints biases/models on an interval
+- Weight-based strategy signal combination using configurable `strategy_weights`
+- Signals weighted by `confidence * strategy_weight`; `min_conviction` threshold filters low-conviction actions
+- RL orchestrator available but disabled by default (`orchestrator.rl.enabled: false`)
 
 ### Execution
 - `app/execution/executor.py`: broker-agnostic execution
