@@ -130,6 +130,8 @@ def _analyze(
     outcome_actions: Counter = Counter()
     sell_traces = []
     hold_with_position = []
+    position_exit_reasons: Counter = Counter()  # take_profit, partial_take_profit, trailing_stop, etc.
+    position_exits: list[dict] = []
     rl_value_timeline: list[dict] = []  # value estimates over time
     orchestrator_decisions: list[dict] = []  # orchestrator strategy selection log
     orchestrator_strategy_picks: Counter = Counter()  # how often each strategy is picked
@@ -179,6 +181,18 @@ def _analyze(
                 "action_strategy": t.get("action_strategy"),
                 "broker": t.get("broker_hint"),
                 "regime": t.get("regime_name"),
+            })
+
+        # Collect position exit events (take-profit, trailing stop, etc.)
+        if t.get("position_exit"):
+            exit_reason = t.get("position_exit_reason", "unknown")
+            position_exit_reasons[exit_reason] += 1
+            position_exits.append({
+                "symbol": t.get("symbol"),
+                "ts": t.get("ts"),
+                "reason": exit_reason,
+                "reduce_pct": t.get("position_exit_reduce_pct"),
+                "broker": t.get("broker_hint"),
             })
 
         # Collect sell/exit outcomes
@@ -268,6 +282,9 @@ def _analyze(
         "total_traces_in_window": len(window_traces),
         "signal_action_distribution": dict(signal_actions.most_common()),
         "outcome_distribution": dict(outcome_actions.most_common()),
+        "position_exit_reasons": dict(position_exit_reasons.most_common()),
+        "position_exit_count": len(position_exits),
+        "position_exits_sample": position_exits[:50],
         "sell_exit_traces": sell_traces[:50],
         "sell_exit_count": len(sell_traces),
         "hold_with_position": hold_with_position[:50],
@@ -377,6 +394,7 @@ def main() -> None:
         print(f"  Total traces: {report['total_traces_in_window']}")
         print(f"  Signal distribution: {report['signal_action_distribution']}")
         print(f"  Outcome distribution: {report['outcome_distribution']}")
+        print(f"  Position exits: {report['position_exit_count']} {report['position_exit_reasons']}")
         print(f"  Sell/exit decisions: {report['sell_exit_count']}")
         print(f"  Hold with position: {report['hold_with_position_count']}")
         print(f"  Sell skip reasons: {report['sell_skip_reasons']}")

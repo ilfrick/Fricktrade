@@ -641,7 +641,6 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `execution.open_orders.enabled`: Enable open-order tracking.
 - `execution.open_orders.interval_seconds`: Poll cadence.
 - `execution.open_orders.skip_if_pending`: Skip work if pending orders exist.
-- `execution.open_orders.strategy_guard`: Skip signals when pending orders exist.
 - `execution.open_orders.missing_grace_seconds`: Grace period before marking missing orders completed/canceled.
 - `execution.algos.*`: Execution algorithm settings (TWAP/VWAP/POV).
 - `execution.algos.default`: Default algo name (twap/vwap/pov/off).

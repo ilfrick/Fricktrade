@@ -761,7 +761,6 @@ execution:
     enabled: true
     interval_seconds: 30
     skip_if_pending: true
-    strategy_guard: true
     missing_grace_seconds: 30
   algos:
     enabled: true

@@ -15,7 +15,6 @@ Place, cancel, and close orders through the active broker.
 `config/config.yaml`:
 - `execution.open_orders.enabled`
 - `execution.open_orders.skip_if_pending`
-- `execution.open_orders.strategy_guard`
 - `execution.open_orders.interval_seconds`
 - `execution.algos.enabled`
 - `execution.algos.default`
