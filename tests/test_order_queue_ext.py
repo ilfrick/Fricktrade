@@ -73,3 +73,62 @@ class TestRetryBudgetReset:
         # 900 + 500 > 1000 => False
         assert result is False
         assert queue._retry_notional_used == 900.0
+
+
+class TestPositionCloseBypass:
+    def test_position_close_bypasses_notional_budget(self):
+        queue = OrderQueue(
+            _mock_broker(), "test",
+            retry_cfg={"enabled": True, "max_attempts": 3, "max_notional": 1000},
+        )
+        queue._retry_notional_used = 999.0
+        queue._retry_reset_date = datetime.now(timezone.utc).date()
+
+        req = OrderRequest(symbol="AAPL", side="sell", qty=10, notional=500.0,
+                          is_position_close=True)
+        result = queue._should_retry(req, "unknown")
+        # Position close bypasses budget check
+        assert result is True
+
+    def test_regular_order_blocked_by_budget(self):
+        queue = OrderQueue(
+            _mock_broker(), "test",
+            retry_cfg={"enabled": True, "max_attempts": 3, "max_notional": 1000},
+        )
+        queue._retry_notional_used = 999.0
+        queue._retry_reset_date = datetime.now(timezone.utc).date()
+
+        req = OrderRequest(symbol="AAPL", side="sell", qty=10, notional=500.0,
+                          is_position_close=False)
+        result = queue._should_retry(req, "unknown")
+        # Regular order blocked by budget
+        assert result is False
+
+    def test_position_close_retry_skips_notional_accounting(self):
+        queue = OrderQueue(
+            _mock_broker(), "test",
+            retry_cfg={"enabled": True, "max_attempts": 3, "backoff_seconds": 5,
+                       "max_notional": 1000},
+        )
+        queue._retry_notional_used = 0.0
+        queue._retry_reset_date = datetime.now(timezone.utc).date()
+
+        req = OrderRequest(symbol="AAPL", side="sell", qty=10, notional=500.0,
+                          is_position_close=True)
+        queue._enqueue_retry(req)
+        # Position close should not add to notional used
+        assert queue._retry_notional_used == 0.0
+
+    def test_regular_retry_adds_notional(self):
+        queue = OrderQueue(
+            _mock_broker(), "test",
+            retry_cfg={"enabled": True, "max_attempts": 3, "backoff_seconds": 5,
+                       "max_notional": 5000},
+        )
+        queue._retry_notional_used = 0.0
+        queue._retry_reset_date = datetime.now(timezone.utc).date()
+
+        req = OrderRequest(symbol="AAPL", side="buy", qty=10, notional=500.0,
+                          is_position_close=False)
+        queue._enqueue_retry(req)
+        assert queue._retry_notional_used == 500.0

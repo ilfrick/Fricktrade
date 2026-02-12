@@ -147,7 +147,7 @@ brokers:
       spread_pct: 0.0
 risk:
   enabled: true
-  max_daily_loss_pct: 1.0
+  max_daily_loss_pct: 3.0
   max_position_size_pct: 10.0
   max_portfolio_leverage: 1.5
   max_short_exposure_pct: 30.0
@@ -757,6 +757,7 @@ pattern_trading:
     partial_take_profit_pct: 0.1
     trailing_stop_pct: 0.02
 execution:
+  symbol_executor_workers: 4
   open_orders:
     enabled: true
     interval_seconds: 30

@@ -34,6 +34,7 @@ class OrderRequest:
     order_id: str | None = None
     attempts: int = 0
     notional: float | None = None
+    is_position_close: bool = False
     _seq: int = 0
 
     def __lt__(self, other: "OrderRequest") -> bool:
@@ -98,6 +99,7 @@ class OrderQueue:
         extended_hours: bool = False,
         earliest_at: datetime | None = None,
         notional: float | None = None,
+        is_position_close: bool = False,
     ) -> str | None:
         request = OrderRequest(
             symbol=symbol,
@@ -108,6 +110,7 @@ class OrderQueue:
             extended_hours=extended_hours,
             earliest_at=earliest_at or datetime.now(timezone.utc),
             notional=notional,
+            is_position_close=is_position_close,
         )
         result_order_id = None
         started_immediately = False
@@ -304,10 +307,12 @@ class OrderQueue:
         if isinstance(allowed, list) and allowed:
             if reason not in {str(item) for item in allowed}:
                 return False
-        max_notional = float(self._retry_cfg.get("max_notional", 0.0) or 0.0)
-        notional = float(request.notional or 0.0)
-        if max_notional > 0 and (self._retry_notional_used + notional) > max_notional:
-            return False
+        # Position-close orders bypass the retry notional budget
+        if not request.is_position_close:
+            max_notional = float(self._retry_cfg.get("max_notional", 0.0) or 0.0)
+            notional = float(request.notional or 0.0)
+            if max_notional > 0 and (self._retry_notional_used + notional) > max_notional:
+                return False
         return True
 
     def _enqueue_retry(self, request: OrderRequest) -> None:
@@ -316,9 +321,11 @@ class OrderQueue:
         backoff = int(self._retry_cfg.get("backoff_seconds", 5))
         request.earliest_at = datetime.now(timezone.utc) + timedelta(seconds=backoff * request.attempts)
         request._seq = next(self._seq_counter)
-        notional = float(request.notional or 0.0)
-        if notional > 0:
-            self._retry_notional_used += notional
+        # Position-close orders skip notional accounting
+        if not request.is_position_close:
+            notional = float(request.notional or 0.0)
+            if notional > 0:
+                self._retry_notional_used += notional
         heapq.heappush(self._queue, request)
 
 

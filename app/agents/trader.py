@@ -173,7 +173,8 @@ class TradingAgent:
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
         self._news_executor = ThreadPoolExecutor(max_workers=1)
-        self._symbol_executor = ThreadPoolExecutor(max_workers=4)
+        _executor_workers = int(cfg.get("execution", {}).get("symbol_executor_workers", 4))
+        self._symbol_executor = ThreadPoolExecutor(max_workers=max(1, _executor_workers))
         self._news_future = None
         self._news_future_lock = threading.Lock()
         self._news_inflight_at: datetime | None = None
@@ -273,6 +274,12 @@ class TradingAgent:
         self._kill_switch_warned = False
         self._perf_tracker = PerformanceTracker(cfg, self._strategy_names)
         self._lock = threading.RLock()
+        # Pending notional tracking to prevent leverage race across ThreadPool workers
+        self._pending_notional: dict[str, float] = {}
+        self._pending_notional_lock = threading.Lock()
+        # Exit backoff tracking for repeated sell failures
+        self._exit_fail_counts: dict[tuple[str, str], int] = {}
+        self._exit_backoff_until: dict[tuple[str, str], datetime] = {}
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -936,36 +943,40 @@ class TradingAgent:
                 _positions = market_state.get("portfolio", {}).get("positions", {})
                 _cqty = float(_positions.get(symbol, {}).get("qty", 0) or 0)
                 if _cqty > 0:
-                    _lp = market_state.get("last_price")
-                    if _lp is None:
-                        _pp = market_state.get("prices", [])
-                        _lp = _pp[-1] if _pp else None
-                    if _lp is not None:
-                        _should_exit, _exit_reason = self._check_position_exit(
-                            symbol, float(_lp), broker_state
-                        )
-                        if _should_exit:
-                            action = "sell_to_close"
-                            action_strategy = "position_exit"
-                            if _exit_reason == "partial_take_profit":
-                                _partial_ratio = float(
-                                    broker_state.risk.cfg.get("partial_take_profit_ratio", 0.5) or 0.5
-                                )
-                                reduce_pct = max(0.1, min(_partial_ratio, 0.9))
-                            else:
-                                reduce_pct = 1.0
-                            logging.info(
-                                "Position exit for %s: %s (reduce_pct=%.2f)", symbol, _exit_reason, reduce_pct
+                    # Check exit backoff before evaluating exit
+                    if self._should_skip_exit(broker_name, symbol):
+                        _slog.event("debug", "exit_backoff_active", symbol=symbol, broker=broker_name)
+                    else:
+                        _lp = market_state.get("last_price")
+                        if _lp is None:
+                            _pp = market_state.get("prices", [])
+                            _lp = _pp[-1] if _pp else None
+                        if _lp is not None:
+                            _should_exit, _exit_reason = self._check_position_exit(
+                                symbol, float(_lp), broker_state
                             )
-                            _slog.event("info", "position_exit", symbol=symbol, reason=_exit_reason, broker=broker_name, reduce_pct=reduce_pct)
-                            if trace:
-                                trace.update(
-                                    action="sell_to_close",
-                                    action_strategy="position_exit",
-                                    position_exit=True,
-                                    position_exit_reason=_exit_reason,
-                                    position_exit_reduce_pct=reduce_pct,
+                            if _should_exit:
+                                action = "sell_to_close"
+                                action_strategy = "position_exit"
+                                if _exit_reason == "partial_take_profit":
+                                    _partial_ratio = float(
+                                        broker_state.risk.cfg.get("partial_take_profit_ratio", 0.5) or 0.5
+                                    )
+                                    reduce_pct = max(0.1, min(_partial_ratio, 0.9))
+                                else:
+                                    reduce_pct = 1.0
+                                logging.info(
+                                    "Position exit for %s: %s (reduce_pct=%.2f)", symbol, _exit_reason, reduce_pct
                                 )
+                                _slog.event("info", "position_exit", symbol=symbol, reason=_exit_reason, broker=broker_name, reduce_pct=reduce_pct)
+                                if trace:
+                                    trace.update(
+                                        action="sell_to_close",
+                                        action_strategy="position_exit",
+                                        position_exit=True,
+                                        position_exit_reason=_exit_reason,
+                                        position_exit_reduce_pct=reduce_pct,
+                                    )
 
             # Guardrail check (might need lock if it has state, but typically stateless config)
             # We'll keep it locked for safety as it might access broker_state via _get_guardrail
@@ -1135,8 +1146,19 @@ class TradingAgent:
                 slices = self._plan_execution(action, qty, last_price, market_state, algo_name)
 
             order_notional = qty * last_price
+
+            # Atomic leverage check for buy orders (prevents ThreadPool race)
+            if action == "buy" and not _is_closing_position:
+                if not self._check_and_reserve_notional(broker_name, order_notional, portfolio):
+                    self._record_skip(symbol, action, "pending_leverage_cap", broker_name)
+                    logging.info("Skipping %s for %s: pending leverage cap exceeded", action, symbol)
+                    self._emit_decision_trace(trace, "skip", "pending_leverage_cap", "risk")
+                    return None
+
             order_queue = self._order_queues.get(broker_name, self._order_queue)
             if order_queue is None:
+                if action == "buy" and not _is_closing_position:
+                    self._release_pending_notional(broker_name, order_notional)
                 self._record_skip(symbol, action, "order_queue_missing", broker_name)
                 logging.warning("Skipping %s for %s: no order queue for broker %s", action, symbol, broker_name)
                 self._emit_decision_trace(trace, "skip", "order_queue_missing", "execution")
@@ -1154,6 +1176,7 @@ class TradingAgent:
                         extended_hours=bool(market_state.get("market_extended", False)),
                         earliest_at=order_slice.earliest_at,
                         notional=order_slice.qty * last_price,
+                        is_position_close=_is_closing_position,
                     )
             else:
                 order_id = order_queue.enqueue(
@@ -1164,7 +1187,14 @@ class TradingAgent:
                     limit_price=limit_price,
                     extended_hours=bool(market_state.get("market_extended", False)),
                     notional=order_notional,
+                    is_position_close=_is_closing_position,
                 )
+
+            # Update shared portfolio in-memory so subsequent threads see new exposure
+            with self._lock:
+                portfolio["gross_exposure"] = float(portfolio.get("gross_exposure", 0.0) or 0.0) + order_notional
+                if action == "sell" and not _is_closing_position:
+                    portfolio["short_exposure"] = float(portfolio.get("short_exposure", 0.0) or 0.0) + order_notional
             order_latency = time.perf_counter() - order_start
             ORDER_LATENCY.labels(symbol=symbol, side=action).observe(order_latency)
             if trace:
@@ -1228,12 +1258,83 @@ class TradingAgent:
                 logging.warning("Cancel order failed for %s (%s): %s", symbol, order_id, exc)
         return canceled
 
+    # --- Pending notional tracking (leverage race prevention) ---
+
+    def _check_and_reserve_notional(self, broker: str, notional: float, portfolio: dict) -> bool:
+        """Atomically check projected leverage and reserve notional if under limit."""
+        equity = float(portfolio.get("equity", 0.0) or 0.0)
+        if equity <= 0:
+            return False
+        max_leverage = float(self.cfg.get("risk", {}).get("max_portfolio_leverage", 1.5))
+        gross_exposure = float(portfolio.get("gross_exposure", 0.0) or 0.0)
+        with self._pending_notional_lock:
+            pending = self._pending_notional.get(broker, 0.0)
+            projected = (gross_exposure + pending + notional) / equity
+            if projected > max_leverage:
+                return False
+            self._pending_notional[broker] = pending + notional
+        return True
+
+    def _release_pending_notional(self, broker: str, notional: float) -> None:
+        """Decrement pending notional after order terminal response."""
+        with self._pending_notional_lock:
+            current = self._pending_notional.get(broker, 0.0)
+            self._pending_notional[broker] = max(0.0, current - notional)
+
+    # --- Exit backoff for repeated sell failures ---
+
+    def _should_skip_exit(self, broker: str, symbol: str) -> bool:
+        """Return True if exit backoff is active for this broker/symbol."""
+        key = (broker, symbol)
+        until = self._exit_backoff_until.get(key)
+        if until is None:
+            return False
+        if datetime.now(timezone.utc) < until:
+            return True
+        # Backoff expired — clear it
+        self._exit_backoff_until.pop(key, None)
+        self._exit_fail_counts.pop(key, None)
+        return False
+
+    def _record_exit_failure(self, broker: str, symbol: str) -> None:
+        """Increment fail count and set exponential backoff (1/2/4/8/15 min cap)."""
+        key = (broker, symbol)
+        count = self._exit_fail_counts.get(key, 0) + 1
+        self._exit_fail_counts[key] = count
+        backoff_minutes = min(2 ** (count - 1), 15)
+        self._exit_backoff_until[key] = datetime.now(timezone.utc) + timedelta(minutes=backoff_minutes)
+        logging.warning(
+            "Exit backoff for %s/%s: attempt=%d, backoff=%d min",
+            broker, symbol, count, backoff_minutes,
+        )
+
+    def _clear_exit_backoff(self, broker: str, symbol: str) -> None:
+        """Clear backoff on successful exit."""
+        key = (broker, symbol)
+        self._exit_fail_counts.pop(key, None)
+        self._exit_backoff_until.pop(key, None)
+
     def _flush_order_responses(self) -> None:
         for queue in self._order_queues.values():
             responses = queue.pop_responses()
             if not responses:
                 continue
             for response in responses:
+                # Release pending notional for buy-side terminal responses
+                side = str(response.side or "").lower()
+                status = str(response.status or "").lower()
+                if side == "buy" and status in ("completed", "rejected", "canceled"):
+                    est_price = response.filled_avg_price or 0.0
+                    resp_qty = float(response.qty or 0)
+                    notional = resp_qty * est_price if est_price else float(response.notional if hasattr(response, "notional") else 0)
+                    if notional > 0:
+                        self._release_pending_notional(response.broker, notional)
+                # Track exit success/failure for backoff
+                if side == "sell":
+                    if status == "completed":
+                        self._clear_exit_backoff(response.broker, response.symbol)
+                    elif status == "rejected":
+                        self._record_exit_failure(response.broker, response.symbol)
                 try:
                     self._orchestrator.on_order_update(response.__dict__)
                 except (AttributeError, TypeError, ValueError, KeyError) as exc:
