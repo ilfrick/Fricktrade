@@ -690,3 +690,39 @@ Implemented comprehensive reward system improvements for RL agents to increase p
 - Updated `docs/operations.md` and `docs/configuration.md` with guidance that `docker-socket-proxy` must be in `keep_services`
 - Updated AGENTS.md keep_services references to include `docker-socket-proxy`
 
+### Session 2026-02-13: Fix Leverage Race Condition + Sell Execution Bottleneck
+
+**Problem:** Account 2 accumulated 14 positions at 1.97x leverage (limit 1.5x) because all 4 ThreadPool workers saw the same stale portfolio snapshot and passed the leverage check simultaneously. Separately, position exits (sell-to-close) were failing repeatedly and exhausting the retry notional budget ($5,000), blocking all subsequent exits for the day. Only 2 sells executed out of 1,728 exit triggers.
+
+**Changes:**
+
+1. **Atomic pending notional counter** (`app/agents/trader.py`):
+   - `_check_and_reserve_notional()` atomically checks projected leverage including pending orders and reserves if under `max_portfolio_leverage`.
+   - `_release_pending_notional()` decrements on terminal responses (completed/rejected/canceled).
+   - Pre-enqueue check blocks buy orders with `pending_leverage_cap` when projected leverage exceeds limit.
+
+2. **In-memory portfolio adjustment** (`app/agents/trader.py`):
+   - After successful enqueue, updates `portfolio["gross_exposure"]` under lock so subsequent ThreadPool workers see updated leverage.
+
+3. **Configurable ThreadPool size** (`app/agents/trader.py` + `config/config.yaml`):
+   - Reads `execution.symbol_executor_workers` (default 4) from config.
+
+4. **Position-close bypass retry budget** (`app/execution/order_queue.py`):
+   - Added `is_position_close: bool = False` to `OrderRequest`.
+   - `_should_retry()` skips `max_notional` budget check for position closes.
+   - `_enqueue_retry()` skips notional accounting for position closes.
+
+5. **Exit backoff for repeated failures** (`app/agents/trader.py`):
+   - Exponential backoff (1/2/4/8/15 min cap) per broker+symbol on sell rejection.
+   - Skips exit evaluation during backoff; clears on successful sell.
+   - Tracked in `_flush_order_responses`.
+
+6. **Sell analysis monitoring script** (`scripts/monitor_sell_analysis.sh`):
+   - Captures exit triggers, backoff events, pending leverage blocks, retry budget, and order rates.
+
+**Files modified:** `app/agents/trader.py`, `app/execution/order_queue.py`, `config/config.yaml`, `tests/test_order_queue_ext.py` (4 new tests), `tests/test_pending_notional.py` (new, 8 tests), `tests/test_exit_backoff.py` (new, 9 tests), `scripts/monitor_sell_analysis.sh` (new).
+
+**Testing:** 132 passed, 15 skipped. All existing tests pass. New pending_notional and exit_backoff tests skip without tensorflow (expected).
+
+**Deployment:** Rebuilt and redeployed via `./scripts/compose_up.sh`. All services healthy.
+

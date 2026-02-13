@@ -28,6 +28,7 @@ Operational and development scripts for Fricktrade.
 | `monitor_cache_health.sh` | Snapshot health check: container status, market-cache logs, Redis ping; appends to `monitoring_checks.log` |
 | `monitor_cache_latency.py` | Track market cache bar freshness, stale data ages, and container failures until NYSE close |
 | `monitor_sell_decisions.py` | Parse decision traces for sell/exit signals and skip reasons; generate JSON report with RL value estimates and orchestrator picks |
+| `monitor_sell_analysis.sh` | Capture exit triggers, success/failure rates, retry budget usage, pending notional, and order rates by side; schedule via cron at 15:25 CET Mon-Fri |
 
 ## Profiling & Testing
 

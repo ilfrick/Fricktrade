@@ -81,6 +81,23 @@ The agent-level take-profit applies to all positions regardless of which strateg
 
 `_portfolio_position_scale()` adjusts order size based on portfolio allocation constraints. On error, it falls back to 1.0 (full allocation) and increments `portfolio_scale_fallback_total{symbol}`.
 
+## Pending Notional (Leverage Race Prevention)
+
+When symbols are processed in parallel via ThreadPool, multiple workers can see the same stale portfolio snapshot and all pass the leverage check simultaneously. The **atomic pending notional counter** prevents this:
+
+1. Before enqueuing a buy order, `_check_and_reserve_notional()` atomically checks `(gross_exposure + pending + new) / equity` against `max_portfolio_leverage` and reserves the notional if under the limit.
+2. After enqueue, the shared portfolio dict is updated under lock so subsequent threads see the new exposure.
+3. On terminal order responses (completed/rejected/canceled), `_release_pending_notional()` decrements the counter.
+
+## Exit Backoff
+
+When sell exits fail repeatedly, exponential backoff prevents exhausting the retry budget:
+
+- After each sell rejection, backoff doubles: 1 min -> 2 min -> 4 min -> 8 min -> 15 min cap.
+- During backoff, exit evaluation is skipped for that broker+symbol pair.
+- On successful sell completion, backoff is cleared immediately.
+- Different symbols have independent backoff counters.
+
 ## Tuning Notes
 - Lower `max_position_size_pct` for more diversified risk.
 - Tighten `hard_stop_pct` and `trailing_stop_pct` for faster exits.

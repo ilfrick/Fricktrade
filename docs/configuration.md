@@ -637,6 +637,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `pattern_trading.risk.trailing_stop_pct`: Trailing stop percent.
 
 ### execution
+- `execution.symbol_executor_workers`: Number of ThreadPool workers for parallel symbol processing (default: 4).
 - `execution.open_orders.*`: Open-order polling and guards.
 - `execution.open_orders.enabled`: Enable open-order tracking.
 - `execution.open_orders.interval_seconds`: Poll cadence.

@@ -53,11 +53,29 @@ flowchart TD
     D -- Yes --> E[Slice TWAP/VWAP/POV]
     D -- No --> F[Single Order]
     C --> F
-    E --> G[Queue Child Orders]
-    F --> H[Queue Order]
-    G --> H
+    E --> PLC{Buy? Pending Leverage OK?}
+    F --> PLC
+    PLC -- No --> SKIP[Skip: pending_leverage_cap]
+    PLC -- Yes --> G[Queue Order]
+    G --> H[Update Portfolio Exposure In-Memory]
     H --> I[Broker Router Submit]
     I --> J[Update Open Orders + Metrics]
+    J --> K[Release Pending Notional on Terminal]
+```
+
+## Exit Backoff Flow
+
+```mermaid
+flowchart TD
+    A[Position Exit Trigger] --> B{Exit Backoff Active?}
+    B -- Yes --> C[Skip Exit]
+    B -- No --> D[Check Position Exit]
+    D --> E{Should Exit?}
+    E -- Yes --> F[Sell-to-Close via Queue]
+    F --> G{Sell Result?}
+    G -- Completed --> H[Clear Backoff]
+    G -- Rejected --> I[Record Failure + Exponential Backoff]
+    E -- No --> J[Hold]
 ```
 
 ## Dynamic Symbols (AI Filter)

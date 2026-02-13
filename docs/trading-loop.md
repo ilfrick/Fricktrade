@@ -9,7 +9,7 @@ execution, and metrics updates.
 
 ## Implementation
 - Entry: `app/agents/trader.py`.
-- **Parallel Execution:** Symbols are processed concurrently using a `ThreadPoolExecutor` (default 12 workers).
+- **Parallel Execution:** Symbols are processed concurrently using a `ThreadPoolExecutor` (configurable via `execution.symbol_executor_workers`, default 4).
   - Market data fetching is unlocked (parallel IO).
   - AI inference (`strategy.generate_signal`, `orchestrator.select`) is unlocked (parallel CPU).
   - Critical state updates (risk checks, order placement) are serialized via locks for safety.
@@ -35,6 +35,9 @@ execution, and metrics updates.
 - `risk.enabled: false` bypasses risk checks, but broker account flags and trading limits still block orders.
 - Entry-only guards (VaR, exposure caps, order limits, cooldown, risk limits) are skipped for sell-to-close orders that reduce existing positions.
 - `RiskManager.risk_preflight()` consolidates order limits + cooldown + risk limits into a single check for entry orders.
+- **Pending notional counter** atomically tracks in-flight buy notional per broker to prevent ThreadPool workers from racing past the leverage limit with stale portfolio snapshots.
+- **Exit backoff** applies exponential backoff (1-15 min) to sell exits that fail repeatedly, preventing retry budget exhaustion.
+- Position-close orders bypass the retry notional budget (`execution.retry.max_notional`) so exits are never blocked by exhausted retry capacity.
 
 ## Key Components
 - Strategy selection: `strategy.name` or `strategy.names`.
