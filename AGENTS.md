@@ -25,7 +25,7 @@ This repo contains a Python intraday trading agent for US and EU equities (NYSE,
 - API: `app/api/server.py` (FastAPI) with `/health`, `/config`, `/config/raw`, `/config/update`, `/restart`, and `/ui`.
 - Metrics: `app/monitoring/metrics.py` exposes Prometheus counters/gauges.
 - Runtime config: `config/config.yaml` (supports `${ENV_VAR}` interpolation).
-- Market-hours gating: `app/utils/market.py` checks NYSE, Nasdaq, and Borsa Italiana based on `market.venues`.
+- Market-hours gating: `app/utils/market.py` checks NYSE, Nasdaq, and Borsa Italiana based on `market.venues`. The `market.trading_venues` filter restricts which venues count for the coarse `is_market_open()` / `next_market_open()` gate.
 
 ## Running (Docker-first)
 

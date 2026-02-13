@@ -28,6 +28,9 @@ market:
       ARCA: NYSE
       AMEX: NYSE
   open_mode: any
+  trading_venues:
+    - NYSE
+    - Nasdaq
   extended_hours:
     enabled: false
   holiday_update:

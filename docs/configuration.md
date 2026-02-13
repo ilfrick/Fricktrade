@@ -148,6 +148,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `market.symbol_venues_auto.max_symbols`: Max symbols to refresh in a cycle.
 - `market.symbol_venues_auto.exchange_venue_map`: Map broker exchange codes to venues.
 - `market.open_mode`: `any` trades if any venue is open, `all` requires all venues.
+- `market.trading_venues`: List of venue names (e.g. `[NYSE, Nasdaq]`) that count for the coarse `is_market_open()` / `next_market_open()` gate. When set and non-empty, only these venues are checked; other configured venues are ignored. When empty or absent, all configured venues are considered (backward compatible). Use this to prevent the trading loop from waking when non-trading venues (e.g. BorsaItaliana) open hours before the venues you actually trade on.
 - `market.extended_hours.enabled`: Trade during configured extended sessions.
 - `market.holiday_update.enabled`: Enable periodic holiday refresh.
 - `market.holiday_update.interval_days`: Days between holiday updates.

@@ -22,6 +22,9 @@ def is_market_open(cfg: dict, now: datetime | None = None, allow_extended: bool 
                 "holidays": market_cfg.get("holidays", []),
             }
         ]
+    venues = _filter_trading_venues(market_cfg, venues)
+    if not venues:
+        return False
     checks = [
         _venue_session_state(venue, now=now, allow_extended=allow_extended)["open"]
         for venue in venues
@@ -64,6 +67,9 @@ def next_market_open(cfg: dict, now: datetime | None = None, allow_extended: boo
                 "holidays": market_cfg.get("holidays", []),
             }
         ]
+    venues = _filter_trading_venues(market_cfg, venues)
+    if not venues:
+        return None
     next_times = []
     for venue in venues:
         next_time = _next_venue_open(venue, now=now, allow_extended=allow_extended)
@@ -81,6 +87,14 @@ def _normalize_venues(market_cfg: dict) -> list[dict]:
     if isinstance(venues, list):
         return [v for v in venues if isinstance(v, dict)]
     return []
+
+
+def _filter_trading_venues(market_cfg: dict, venues: list[dict]) -> list[dict]:
+    trading_venues = market_cfg.get("trading_venues") or []
+    if not trading_venues:
+        return venues
+    return [v for v in venues if v.get("name") in trading_venues]
+
 
 def _resolve_extended_flag(market_cfg: dict, allow_extended: bool | None) -> bool:
     if allow_extended is not None:
