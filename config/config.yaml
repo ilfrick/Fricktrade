@@ -158,7 +158,7 @@ risk:
   cooldown_seconds: 5
   hard_stop_pct: 0.8
   trailing_stop_pct: 0.35
-  circuit_breaker_drawdown_pct: 3.0
+  circuit_breaker_drawdown_pct: 5.0
   take_profit_pct: 1.5
   partial_take_profit_pct: 1.0
   partial_take_profit_ratio: 0.5
@@ -713,7 +713,7 @@ reports:
       provider: ollama
       base_url: http://ollama:11434
       model: llama3.2:3b  # Smaller model to avoid GPU OOM
-      timeout_seconds: 30
+      timeout_seconds: 60
       max_text_chars: 800
     email:
       use_alertmanager_config: true

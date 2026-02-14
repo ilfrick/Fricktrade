@@ -287,6 +287,9 @@ class SymbolManager:
         dyn_cfg = self._cfg.get("data", {}).get("dynamic_symbols", {})
         if not dyn_cfg.get("enabled", False):
             return
+        # Skip dynamic symbol refresh (including AI filter) when market is closed
+        if not is_market_open(self._cfg):
+            return
         now = now or datetime.now(timezone.utc)
         refresh_minutes = int(dyn_cfg.get("refresh_minutes", 15))
         if self._dynamic_symbols_at and (now - self._dynamic_symbols_at).total_seconds() < refresh_minutes * 60:

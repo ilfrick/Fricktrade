@@ -182,7 +182,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `risk.cooldown_seconds`: Cooldown after a trade before re-entering.
 - `risk.hard_stop_pct`: Hard stop loss threshold (%).
 - `risk.trailing_stop_pct`: Trailing stop threshold (%).
-- `risk.circuit_breaker_drawdown_pct`: Drawdown that halts trading (%).
+- `risk.circuit_breaker_drawdown_pct`: Per-symbol unrealized loss threshold (%) that blocks trading on that symbol only (default: 5.0). Symbols with no position or profitable positions pass through.
 - `risk.take_profit_pct`: Full exit when price rises this % from entry (default: 1.5).
 - `risk.partial_take_profit_pct`: Partial exit at this % gain from entry (default: 1.0).
 - `risk.partial_take_profit_ratio`: Fraction of position to sell at partial TP (default: 0.5).

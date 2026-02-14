@@ -56,6 +56,7 @@ class OrderResponse:
     qty: float | None = None
     filled_qty: float | None = None
     filled_avg_price: float | None = None
+    reason: str = ""
     received_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -252,6 +253,7 @@ class OrderQueue:
                     order_id=None,
                     side=request.side,
                     qty=request.qty,
+                    reason=reason,
                 )
             )
             return

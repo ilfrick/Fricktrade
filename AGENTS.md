@@ -726,3 +726,35 @@ Implemented comprehensive reward system improvements for RL agents to increase p
 
 **Deployment:** Rebuilt and redeployed via `./scripts/compose_up.sh`. All services healthy.
 
+### Session 2026-02-14: Fix Session Anomalies (CB, PDT, AI Filter, Ollama, Notional)
+
+**Problem:** Analysis of 2026-02-13 session revealed 6 correlated issues: account-level circuit breaker at 3% blocked all 9k+ symbols for 6+ hours (548k skip logs); PFAI sell stuck in infinite PDT retry loop (19 rejects, 5.5 hours); AI filter scored 9k symbols twice after market close (GPU waste); ollama contention caused 29 timeouts in daily report; pending notional leaked on enqueue failure causing false leverage cap blocks.
+
+**Changes:**
+
+1. **Per-symbol circuit breaker** (`app/agents/trader.py`, `config/config.yaml`):
+   - Replaced account-level drawdown check with per-symbol unrealized loss check.
+   - Only blocks the specific symbol whose loss exceeds `circuit_breaker_drawdown_pct` (now 5%, was 3%).
+   - Symbols with no position or profitable positions pass through unaffected.
+
+2. **PDT retry suppression** (`app/agents/trader.py`, `app/execution/order_queue.py`):
+   - Added `reason: str` field to `OrderResponse` dataclass, populated from `_reject_reason()` on rejection.
+   - Added `_pdt_blocked` set tracking `(broker, symbol)` pairs blocked by PDT protection.
+   - Sell-to-close exits skip for PDT-blocked symbols instead of re-entering the retry loop.
+   - `_pdt_blocked` clears daily in `_flush_order_responses`.
+
+3. **AI filter market-open gate** (`app/agents/symbol_manager.py`):
+   - `refresh_dynamic_symbols()` returns early if `is_market_open()` is false.
+   - Prevents GPU-expensive AI filter scoring when market is closed.
+
+4. **Ollama timeout increase** (`config/config.yaml`):
+   - `reports.daily_top_movers.explain_ai.timeout_seconds`: 60 (was 30).
+
+5. **Enqueue failure notional release** (`app/agents/trader.py`):
+   - Wrapped enqueue calls in try/except; releases pending notional on failure for buy orders.
+   - Prevents false leverage cap blocks from leaked notional.
+
+**Files modified:** `app/agents/trader.py`, `app/agents/symbol_manager.py`, `app/execution/order_queue.py`, `config/config.yaml`, `docs/configuration.md`, `tests/test_session_fixes.py` (new, 15 tests).
+
+**Testing:** 65 relevant tests pass (session_fixes + order_queue + symbol_manager + risk_manager). 1 pre-existing completion_grace test failure unrelated.
+

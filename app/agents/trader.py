@@ -280,6 +280,9 @@ class TradingAgent:
         # Exit backoff tracking for repeated sell failures
         self._exit_fail_counts: dict[tuple[str, str], int] = {}
         self._exit_backoff_until: dict[tuple[str, str], datetime] = {}
+        # PDT-blocked symbols: suppress sell retries until next trading day
+        self._pdt_blocked: set[tuple[str, str]] = set()
+        self._pdt_blocked_date: date | None = None
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -914,11 +917,22 @@ class TradingAgent:
                         return None
                 names = allowed_names
                 weights = filtered_weights
-            if not risk_disabled and broker_state.risk.should_circuit_break(broker_state.current_drawdown_pct):
-                self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
-                logging.warning("Skipping %s: circuit breaker drawdown hit", symbol)
-                self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
-                return None
+            # Per-symbol circuit breaker: block only the symbol whose unrealized loss exceeds threshold
+            if not risk_disabled:
+                _cb_pos = broker_state.position_state.get(symbol)
+                if _cb_pos and float(_cb_pos.get("qty", 0)) > 0:
+                    _cb_entry = float(_cb_pos.get("avg_entry", 0) or 0)
+                    _cb_lp = market_state.get("last_price")
+                    if _cb_lp is None:
+                        _cb_pp = market_state.get("prices", [])
+                        _cb_lp = float(_cb_pp[-1]) if _cb_pp else None
+                    if _cb_entry > 0 and _cb_lp is not None and float(_cb_lp) < _cb_entry:
+                        _sym_dd = (_cb_entry - float(_cb_lp)) / _cb_entry * 100.0
+                        if broker_state.risk.should_circuit_break(_sym_dd):
+                            self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
+                            logging.warning("Skipping %s: per-symbol drawdown %.1f%% hit", symbol, _sym_dd)
+                            self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
+                            return None
             if trace:
                 trace["orchestrator_selected"] = list(names)
                 trace["orchestrator_weights"] = list(weights) if isinstance(weights, (list, tuple)) else weights
@@ -943,8 +957,11 @@ class TradingAgent:
                 _positions = market_state.get("portfolio", {}).get("positions", {})
                 _cqty = float(_positions.get(symbol, {}).get("qty", 0) or 0)
                 if _cqty > 0:
+                    # PDT-blocked symbols: suppress sell retries until next day
+                    if (broker_name, symbol) in self._pdt_blocked:
+                        _slog.event("debug", "pdt_blocked", symbol=symbol, broker=broker_name)
                     # Check exit backoff before evaluating exit
-                    if self._should_skip_exit(broker_name, symbol):
+                    elif self._should_skip_exit(broker_name, symbol):
                         _slog.event("debug", "exit_backoff_active", symbol=symbol, broker=broker_name)
                     else:
                         _lp = market_state.get("last_price")
@@ -1164,31 +1181,39 @@ class TradingAgent:
                 self._emit_decision_trace(trace, "skip", "order_queue_missing", "execution")
                 return None
             order_start = time.perf_counter()
-            if slices:
-                order_id = None
-                for order_slice in slices:
-                    order_queue.enqueue(
+            try:
+                if slices:
+                    order_id = None
+                    for order_slice in slices:
+                        order_queue.enqueue(
+                            symbol,
+                            action,
+                            qty=order_slice.qty,
+                            order_type=order_type,
+                            limit_price=limit_price,
+                            extended_hours=bool(market_state.get("market_extended", False)),
+                            earliest_at=order_slice.earliest_at,
+                            notional=order_slice.qty * last_price,
+                            is_position_close=_is_closing_position,
+                        )
+                else:
+                    order_id = order_queue.enqueue(
                         symbol,
                         action,
-                        qty=order_slice.qty,
+                        qty=qty,
                         order_type=order_type,
                         limit_price=limit_price,
                         extended_hours=bool(market_state.get("market_extended", False)),
-                        earliest_at=order_slice.earliest_at,
-                        notional=order_slice.qty * last_price,
+                        notional=order_notional,
                         is_position_close=_is_closing_position,
                     )
-            else:
-                order_id = order_queue.enqueue(
-                    symbol,
-                    action,
-                    qty=qty,
-                    order_type=order_type,
-                    limit_price=limit_price,
-                    extended_hours=bool(market_state.get("market_extended", False)),
-                    notional=order_notional,
-                    is_position_close=_is_closing_position,
-                )
+            except Exception as exc:
+                if action == "buy" and not _is_closing_position:
+                    self._release_pending_notional(broker_name, order_notional)
+                self._record_skip(symbol, action, "order_failed", broker_name)
+                logging.warning("Order enqueue failed for %s %s: %s", action, symbol, exc)
+                self._emit_decision_trace(trace, "skip", "order_failed", "execution")
+                return None
 
             # Update shared portfolio in-memory so subsequent threads see new exposure
             with self._lock:
@@ -1315,6 +1340,13 @@ class TradingAgent:
         self._exit_backoff_until.pop(key, None)
 
     def _flush_order_responses(self) -> None:
+        # Clear PDT blocks daily
+        today = datetime.now(timezone.utc).date()
+        if self._pdt_blocked_date != today:
+            if self._pdt_blocked:
+                logging.info("Clearing %d PDT blocks for new trading day", len(self._pdt_blocked))
+            self._pdt_blocked.clear()
+            self._pdt_blocked_date = today
         for queue in self._order_queues.values():
             responses = queue.pop_responses()
             if not responses:
@@ -1335,6 +1367,9 @@ class TradingAgent:
                         self._clear_exit_backoff(response.broker, response.symbol)
                     elif status == "rejected":
                         self._record_exit_failure(response.broker, response.symbol)
+                        if getattr(response, "reason", "") == "pdt_protection":
+                            self._pdt_blocked.add((response.broker, response.symbol))
+                            logging.warning("PDT block recorded for %s/%s — suppressing sell retries", response.broker, response.symbol)
                 try:
                     self._orchestrator.on_order_update(response.__dict__)
                 except (AttributeError, TypeError, ValueError, KeyError) as exc:
