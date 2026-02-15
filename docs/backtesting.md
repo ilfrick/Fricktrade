@@ -43,6 +43,9 @@ Run historical simulations with the real trading loop or legacy SMA engine.
 docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml
 ```
 
+## Default Configuration
+The default backtest config uses $10,000 initial cash and 20 liquid US equities (AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA, JPM, V, UNH, HD, PG, JNJ, BAC, XOM, COST, AMD, CRM, NFLX, INTC) over 2025-11-01 to 2026-02-01. Adjust in `config/config.yaml` under `backtest.*`.
+
 ## Data Requirements
 - CSVs in `backtest.data_dir` with timestamp and OHLCV columns.
 - If `data.symbols` is empty, the engine can fall back to CSV symbols.

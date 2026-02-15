@@ -48,6 +48,13 @@ Alerts based on these metrics:
 - `monitoring.audit.*` (JSONL audit logs for decision paths)
 - `monitoring.compliance.*` (daily JSONL/CSV compliance exports)
 
+## Scripts
+
+- `scripts/live_pnl_summary.sh [PROMETHEUS_URL]` — queries Prometheus for PnL, drawdown, equity, positions, trades by strategy, win rate, leverage, VaR, and circuit breaker blocks. Quick terminal dashboard.
+- `scripts/monitor_full_session.sh [--start HH:MM] [--end HH:MM]` — full US market session monitor. Captures decision traces, docker logs, Prometheus snapshots (every 60s), PnL/equity CSV (every 2 min), order flow, strategy signals, risk blocks, position changes, and generates an end-of-session summary report. Output: `data/monitoring/YYYY-MM-DD/`.
+- `scripts/monitor_agent_session.sh` — lighter session capture (decision traces + docker logs + metrics samples).
+- `scripts/monitor_sell_analysis.sh` — sell/exit performance report (triggers, backoff, leverage caps, retry budget).
+
 ## Access
 - Grafana: `http://localhost:3002`
 - Prometheus: `http://localhost:9090`

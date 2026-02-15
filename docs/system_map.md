@@ -101,9 +101,11 @@ flowchart LR
 - Flow: symbols -> market data -> strategies -> orchestrator -> risk -> execution -> metrics/logging.
 
 ## Strategies
-- `app/strategies/`: signal generators (intraday momentum, trend_following, factor_model,
-  stat_arb_pairs, market_maker, pattern_trading, rl_policy, rl_policy_fees).
+- `app/strategies/`: signal generators.
+  - **Active**: `trend_following` (RSI + volume filter), `factor_model` (mean-reversion + trend quality), `pattern_trading` (ATR stop), `stat_arb_pairs` (z-score spread).
+  - **Inactive**: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `market_maker`.
 - `app/strategies/base.py`: strategy interface.
+- `app/learning/indicators.py`: shared technical indicators (ATR, Bollinger, stochastic, etc.).
 
 ## Orchestrator
 - `app/agents/orchestrator.py`: RL policy-gradient selector over strategy signals; uses AI filter

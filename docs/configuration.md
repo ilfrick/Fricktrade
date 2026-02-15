@@ -244,7 +244,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `strategy.params.position_horizon_minutes`: Max holding window.
 - `strategy.params.allow_shorts`: Strategy-level shorting override.
 - `strategy.params.trend_following.*`: Trend strategy parameters.
-- `strategy.params.factor_model.*`: Factor model weights and thresholds.
+- `strategy.params.factor_model.*`: Factor model weights and thresholds (momentum_weight, liquidity_weight, volatility_weight, mr_weight, buy_threshold, sell_threshold).
 - `strategy.params.stat_arb_pairs.*`: Pair trading parameters.
 - `strategy.params.market_maker.*`: Market maker parameters.
 
@@ -252,7 +252,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `orchestrator.mode`: Strategy selection mode (`weight` default, `direct`, `select`).
 - `orchestrator.top_k`: Max strategies to keep.
 - `orchestrator.min_score`: Minimum score to be selected.
-- `orchestrator.strategy_weights`: Per-strategy weight map (e.g., `{trend_following: 0.4, factor_model: 0.3, pattern_trading: 0.3}`).
+- `orchestrator.strategy_weights`: Per-strategy weight map (e.g., `{trend_following: 0.35, factor_model: 0.25, pattern_trading: 0.25, stat_arb_pairs: 0.15}`).
 - `orchestrator.rl.enabled`: Enable RL orchestrator (default: false).
 - `orchestrator.rl.model_type`: `lstm` or `mlp`.
 - `orchestrator.rl.device`: `auto`, `cpu`, or `cuda`.

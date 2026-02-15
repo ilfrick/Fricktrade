@@ -48,7 +48,7 @@ flowchart LR
     end
     subgraph Core["Trading Loop"]
         Trader[TradingAgent]
-        Strat["Strategies - rl_policy / rl_policy_fees / intraday_momentum / pattern_trading / trend_following / factor_model / stat_arb_pairs / market_maker"]
+        Strat["Strategies - trend_following + RSI - factor_model + mean-reversion - pattern_trading + ATR stop - stat_arb_pairs - rl_policy - market_maker"]
         Orchestrator[RL Strategy Orchestrator]
         Drift["Drift Monitor - feature + PnL"]
         AccountFlags[Account Flags + Trading Limits]
@@ -145,11 +145,12 @@ flowchart LR
 - `risk.enabled` can bypass risk checks, but broker account flags still block orders.
 
 ### Strategies (active)
-- `trend_following`: moving-average trend breakout with confidence scoring
-- `factor_model`: momentum + liquidity + volatility composite with confidence scoring
-- `pattern_trading`: momentum breakout with filters, TP/SL, and trailing exits
+- `trend_following`: MA trend breakout + RSI(14) filter + volume confirmation
+- `factor_model`: momentum (10-bar) + liquidity + volatility + mean-reversion composite with trend quality gate
+- `pattern_trading`: chart pattern breakout with ATR-based adaptive stop + trailing exits
+- `stat_arb_pairs`: dynamic pair selection (rolling correlation) + spread z-score mean-reversion
 
-Additional strategies available but disabled by default: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `stat_arb_pairs`, `market_maker`.
+Additional strategies available but disabled by default: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `market_maker`.
 
 ### Orchestrator
 - Weight-based strategy signal combination using configurable `strategy_weights`
@@ -318,6 +319,7 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 ## History
 
 Recent changes (newest first):
+- **Strategy upgrades**: trend_following gains RSI(14) filter + volume confirmation; factor_model extends to 10-bar momentum + mean-reversion factor + trend quality gate; pattern_trading uses ATR-based adaptive stop; stat_arb_pairs enabled as 4th strategy. Orchestrator weights rebalanced (0.35/0.25/0.25/0.15). Benchmark config fixed ($10k, 20 liquid symbols). Added `scripts/live_pnl_summary.sh` and `scripts/monitor_full_session.sh` for live diagnostics.
 - Added dynamic Grafana dashboard generation: per-account dashboards are auto-generated from `.env` by `scripts/generate_grafana_dashboards.py` (run automatically by `compose_up.sh`). Static per-account JSONs replaced by a template + generator; orphan dashboards are cleaned up on account removal.
 - **v3.0 code review**: 19 issues resolved — concurrency safety (regime detection under lock, enrich snapshots), exception narrowing in financial paths, full `datetime.utcnow()` migration, RiskManager timezone-aware daily reset, persistent ThreadPoolExecutor, OrderQueue FIFO stability + retry budget reset, code deduplication (`_calc_exposure_metrics`, `_build_rl_strategy`, `extract_equity_cash`), dead code removal (pipeline.py, market_state.py), Docker socket proxy for healthwatch/autoheal, Prometheus cardinality fix.
 - Switched trading loop to parallel execution (ThreadPoolExecutor) with fine-grained locking and decoupled metric reporting for better responsiveness.

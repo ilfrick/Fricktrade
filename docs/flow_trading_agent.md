@@ -18,10 +18,10 @@ flowchart TD
     F -- No --> G[Sleep Interval]
     G --> A
     F -- Yes --> H["Per-Symbol Market Data (market-cache)"]
-    H --> I[Generate Strategy Signals + Features]
+    H --> I["Generate Strategy Signals + Features (RSI, volume, mean-reversion, ATR stop, z-score)"]
     I --> J[Drift Monitor + Auto Rollback]
     J --> K[Orchestrator Direct Strategy Selection]
-    K --> L[Guardrail Optional]
+    K --> L[Guardrail + Trend Quality Gate]
     L --> AccountFlags[Account Flags + Trading Limits]
     AccountFlags --> M["Risk + VaR/CVaR + Caps - configurable disable"]
     M --> N[Execution Algo + Queue]
