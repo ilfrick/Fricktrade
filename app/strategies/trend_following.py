@@ -40,8 +40,32 @@ class TrendFollowingStrategy(Strategy):
             return {"action": "hold"}
         trend_strength = (fast - slow) / slow * 100.0
         confidence = float(min(abs(trend_strength) / max(self.params.breakout_pct * 3.0, 0.01), 1.0))
-        if trend_strength >= self.params.breakout_pct and last >= fast:
-            return {"action": "buy", "confidence": confidence, "trend_strength": trend_strength}
-        if trend_strength <= -self.params.exit_pct and last <= fast:
-            return {"action": "sell", "confidence": confidence, "trend_strength": trend_strength}
-        return {"action": "hold", "confidence": 0.0, "trend_strength": trend_strength}
+
+        # RSI(14) filter
+        rsi_period = 14
+        if len(close) >= rsi_period + 1:
+            deltas = np.diff(close[-(rsi_period + 1):])
+            gains = np.where(deltas > 0, deltas, 0.0)
+            losses = np.where(deltas < 0, -deltas, 0.0)
+            avg_gain = float(gains.mean())
+            avg_loss = float(losses.mean())
+            if avg_loss > 0:
+                rs = avg_gain / avg_loss
+                rsi = 100.0 - (100.0 / (1.0 + rs))
+            else:
+                rsi = 100.0
+        else:
+            rsi = 50.0  # neutral default
+
+        # Volume confirmation
+        volumes = market_state.get("volumes", []) or []
+        vol_ok = True
+        if len(volumes) >= 5:
+            avg_vol = float(np.mean(volumes[-5:-1])) if len(volumes) > 1 else 0.0
+            vol_ok = avg_vol <= 0 or volumes[-1] >= avg_vol * 1.5
+
+        if trend_strength >= self.params.breakout_pct and last >= fast and rsi < 70 and vol_ok:
+            return {"action": "buy", "confidence": confidence, "trend_strength": trend_strength, "rsi": rsi}
+        if trend_strength <= -self.params.exit_pct and last <= fast and rsi > 30:
+            return {"action": "sell", "confidence": confidence, "trend_strength": trend_strength, "rsi": rsi}
+        return {"action": "hold", "confidence": 0.0, "trend_strength": trend_strength, "rsi": rsi}

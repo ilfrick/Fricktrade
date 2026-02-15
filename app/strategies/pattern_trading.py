@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from app.learning.indicators import atr as compute_atr
 from app.strategies.base import Strategy
 
 
@@ -40,8 +41,18 @@ class PatternTradingStrategy(Strategy):
         if self.state.entry_price is None:
             if self._entry_signal(prices, highs, lows, volumes, last_price):
                 stop_pct = float(self.cfg["risk"].get("stop_loss_pct", 0.05))
-                recent_low = min(lows[-self._lookback_bars() :]) if lows else last_price
-                stop_price = max(last_price * (1.0 - stop_pct), recent_low)
+                # ATR-based adaptive stop (2x ATR) with fixed stop as floor
+                atr_stop = last_price
+                if len(highs) >= 2 and len(lows) >= 2 and len(prices) >= 2:
+                    n = min(14, len(highs))
+                    h_arr = np.array(highs[-n:], dtype=float)
+                    l_arr = np.array(lows[-n:], dtype=float)
+                    c_arr = np.array(prices[-n:], dtype=float)
+                    atr_val = compute_atr(h_arr, l_arr, c_arr, period=min(14, n))
+                    if atr_val > 0:
+                        atr_stop = last_price - 2.0 * atr_val
+                fixed_stop = last_price * (1.0 - stop_pct)
+                stop_price = max(atr_stop, fixed_stop)
                 self.state = _PositionState(entry_price=last_price, stop_price=stop_price)
                 return {"action": "buy"}
             return {"action": "hold"}

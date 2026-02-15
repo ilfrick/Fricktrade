@@ -758,3 +758,39 @@ Implemented comprehensive reward system improvements for RL agents to increase p
 
 **Testing:** 65 relevant tests pass (session_fixes + order_queue + symbol_manager + risk_manager). 1 pre-existing completion_grace test failure unrelated.
 
+### Session 2026-02-15: Strategy Upgrades + Diagnostics
+
+**Context:** Opus 4.6 review scored Fricktrade 6.5/10 — infrastructure/risk 8-8.5/10, alpha generation ~4/10. Strategies were basic classical TA, benchmark config was broken ($200 capital, 3 expiring symbols), and stat_arb_pairs was dormant.
+
+**Changes:**
+
+1. **Fix benchmark configuration** (`config/config.yaml`):
+   - Updated backtest: $10,000 cash, 20 liquid symbols (AAPL/MSFT/NVDA/GOOGL/AMZN/META/TSLA/JPM/V/UNH/HD/PG/JNJ/BAC/XOM/COST/AMD/CRM/NFLX/INTC), date range 2025-11-01 to 2026-02-01.
+
+2. **Upgrade trend_following** (`app/strategies/trend_following.py`):
+   - Added RSI(14) filter: blocks buys when RSI >= 70 (overbought), blocks sells when RSI <= 30 (oversold).
+   - Added volume confirmation: buy requires last bar volume >= 1.5x average of prior 4 bars.
+   - Signal dict now includes `rsi` field.
+
+3. **Upgrade factor_model** (`app/strategies/factor_model.py`):
+   - Extended momentum lookback from 3 to 10 bars.
+   - Added mean-reversion factor (z-score of price vs 20-bar mean, inverted) with `mr_weight: 0.15`.
+   - Added trend quality gate (simplified ADX proxy): hold when trend_quality < 0.3.
+   - Adjusted default weights: momentum 0.5, liquidity 0.2, volatility 0.1, mr 0.15.
+   - Signal dict now includes `trend_quality` field.
+
+4. **Add ATR-based stop to pattern_trading** (`app/strategies/pattern_trading.py`):
+   - Imported `atr()` from `app/learning/indicators.py`.
+   - Entry stop uses 2x ATR with fixed `stop_loss_pct` as floor: `max(last - 2*ATR, last * (1 - stop_pct))`.
+
+5. **Enable stat_arb_pairs** (`config/config.yaml`):
+   - Added `stat_arb_pairs` to `strategy.names`.
+   - Updated orchestrator weights: trend 0.35, factor 0.25, pattern 0.25, stat_arb 0.15.
+
+6. **Live PnL summary script** (`scripts/live_pnl_summary.sh`):
+   - Queries Prometheus for PnL%, drawdown, equity, positions, trades by strategy, win rate, order stats, leverage, VaR, circuit breaker blocks.
+
+**Files modified:** `config/config.yaml`, `app/strategies/trend_following.py`, `app/strategies/factor_model.py`, `app/strategies/pattern_trading.py`, `scripts/live_pnl_summary.sh` (new), `tests/test_strategy_upgrades.py` (new, 14 tests), `scripts/README.md`.
+
+**Testing:** 152 passed, 16 skipped. All existing + new tests pass.
+

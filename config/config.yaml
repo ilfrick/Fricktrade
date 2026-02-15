@@ -216,6 +216,7 @@ strategy:
   - trend_following
   - factor_model
   - pattern_trading
+  - stat_arb_pairs
   combine: vote
   min_conviction: 0.3
   fee_aware:
@@ -247,9 +248,10 @@ strategy:
       breakout_pct: 0.3
       exit_pct: 0.15
     factor_model:
-      momentum_weight: 0.6
-      liquidity_weight: 0.3
+      momentum_weight: 0.5
+      liquidity_weight: 0.2
       volatility_weight: 0.1
+      mr_weight: 0.15
       buy_threshold: 0.2
       sell_threshold: -0.2
     stat_arb_pairs:
@@ -268,9 +270,10 @@ orchestrator:
   top_k: 3
   min_score: 0.0
   strategy_weights:
-    trend_following: 0.4
-    factor_model: 0.3
-    pattern_trading: 0.3
+    trend_following: 0.35
+    factor_model: 0.25
+    pattern_trading: 0.25
+    stat_arb_pairs: 0.15
   rl:
     enabled: false
     model_type: lstm
@@ -445,9 +448,30 @@ portfolio:
     min_interval_minutes: 30
 backtest:
   data_dir: /data
-  start: '2025-10-23'
-  end: '2025-12-22'
-  initial_cash: 200
+  start: '2025-11-01'
+  end: '2026-02-01'
+  initial_cash: 10000
+  symbols:
+    - AAPL
+    - MSFT
+    - NVDA
+    - GOOGL
+    - AMZN
+    - META
+    - TSLA
+    - JPM
+    - V
+    - UNH
+    - HD
+    - PG
+    - JNJ
+    - BAC
+    - XOM
+    - COST
+    - AMD
+    - CRM
+    - NFLX
+    - INTC
   commission_pct: 0.05
   slippage_bps: 2
   spread_bps: 0
