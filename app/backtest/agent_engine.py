@@ -274,7 +274,13 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
             agent._enrich_market_state(market_state, portfolio, symbol)
             market_state["strategy_symbols"] = getattr(agent, "_symbols_by_strategy", {})
             agent.run_once(symbol, market_state)
+        # Drain order queue: SimBroker completes instantly but queue processes one per update()
+        _drain_order_queues(agent)
+        agent._flush_order_responses()
 
+    # Final flush for any remaining orders
+    _drain_order_queues(agent)
+    agent._flush_order_responses()
     end_value = broker.get_account()["equity"]
     return BacktestResult(
         start_value=start_value,
@@ -285,6 +291,19 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
         end=end.strftime("%Y-%m-%d"),
         symbols=sorted(prepared_frames.keys()),
     )
+
+
+def _drain_order_queues(agent: TradingAgent, max_rounds: int = 100) -> None:
+    """Repeatedly flush order queues until all SimBroker orders are processed."""
+    for _ in range(max_rounds):
+        has_pending = False
+        for queue in agent._order_queues.values():
+            with queue._lock:
+                if queue._active is not None or queue._queue:
+                    has_pending = True
+        if not has_pending:
+            break
+        agent._update_open_order_queues()
 
 
 def _load_backtest_news(backtest_cfg: dict) -> dict[str, set[str]]:
@@ -493,6 +512,9 @@ def _backtest_cfg_override(cfg: dict) -> dict:
         new_cfg["news"]["enabled"] = news_enabled
     new_cfg["execution"] = dict(cfg.get("execution", {}))
     new_cfg["execution"]["open_orders"] = {"enabled": False}
+    # Disable algo slicing in backtest — SimBroker has no market impact
+    new_cfg["execution"]["algos"] = dict(cfg.get("execution", {}).get("algos", {}))
+    new_cfg["execution"]["algos"]["enabled"] = False
     orchestrator_cfg = dict(cfg.get("orchestrator", {}))
     ml_cfg = dict(orchestrator_cfg.get("ml", {}))
     pretrain_cfg = dict(ml_cfg.get("pretrain", {}))

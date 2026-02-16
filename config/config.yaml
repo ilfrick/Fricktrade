@@ -448,36 +448,31 @@ portfolio:
     min_interval_minutes: 30
 backtest:
   data_dir: /data
-  start: '2025-11-01'
-  end: '2026-02-01'
-  initial_cash: 10000
+  start: '2025-01-06'
+  end: '2025-02-28'
+  initial_cash: 100000
   symbols:
     - AAPL
     - MSFT
-    - NVDA
     - GOOGL
-    - AMZN
-    - META
     - TSLA
-    - JPM
-    - V
-    - UNH
-    - HD
-    - PG
-    - JNJ
-    - BAC
-    - XOM
-    - COST
-    - AMD
-    - CRM
-    - NFLX
-    - INTC
+    - PLUG
+    - STLA
+    - SBSW
+    - S
+    - NIO
+    - MARA
+    - FUBO
+    - LCID
+    - CLSK
+    - LUNR
+    - LYFT
   commission_pct: 0.05
   slippage_bps: 2
   spread_bps: 0
   use_gpu: true
   mode: agent
-  symbols_source: data_dir
+  symbols_source: config
   cache:
     enabled: true
     format: npz
