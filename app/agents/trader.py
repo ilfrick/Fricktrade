@@ -18,6 +18,8 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from app.utils.account import extract_equity_cash
 from app.execution.executor import ExecutionEngine
 from app.execution.order_queue import OrderQueue
+from app.execution.smart_router import SmartOrderRouter, OrderContext
+from app.execution.tca import TCAAnalyzer, Fill
 from app.execution.algos import pov_slices, twap_slices, vwap_slices
 from app.execution.impact import estimate_market_impact
 from app.execution import routing as routing_utils
@@ -89,7 +91,8 @@ from app.agents.orchestrator import RLStrategyOrchestrator
 from app.agents.performance import PerformanceTracker
 from app.agents.symbol_manager import SymbolManager
 from app.learning.regime_hmm import RegimeHMM, RegimeState
-from app.portfolio import PortfolioOptimizer, RiskModel
+from app.portfolio import PortfolioOptimizer, PortfolioConstraints, RiskModel
+from app.strategies.confidence_calibrator import ConfidenceCalibrator
 
 
 @dataclass
@@ -144,6 +147,7 @@ class TradingAgent:
         self._strategy_by_symbol: dict[tuple[str, str], dict[str, object]] = {}
         self._guardrail_by_symbol: dict[tuple[str, str], object] = {}
         self.executor = ExecutionEngine(broker)
+        self._smart_router = SmartOrderRouter(cfg.get("execution", {}).get("smart_router", {}))
         self._routing_cfg = self._execution_cfg.routing
         self._broker_map = self._resolve_broker_map()
         self._broker_names = list(self._broker_map.keys())
@@ -273,6 +277,10 @@ class TradingAgent:
         self._kill_switch_liquidated = False
         self._kill_switch_warned = False
         self._perf_tracker = PerformanceTracker(cfg, self._strategy_names)
+        self._confidence_calibrator = ConfidenceCalibrator()
+        self._tca_analyzer = TCAAnalyzer()
+        self._symbol_slippage_penalty: dict[str, float] = {}
+        self._slippage_decay_date: date | None = None
         self._lock = threading.RLock()
         # Pending notional tracking to prevent leverage race across ThreadPool workers
         self._pending_notional: dict[str, float] = {}
@@ -572,6 +580,25 @@ class TradingAgent:
         min_notional = float(algo_cfg.get("min_notional", 0.0))
         if notional < min_notional:
             return []
+        # Delegate to SmartOrderRouter for algo selection
+        try:
+            urgency = 0.5
+            if algo_name and algo_name.lower() == "market":
+                urgency = 0.9
+            ctx = OrderContext(
+                symbol=market_state.get("symbol", ""),
+                side=action,
+                qty=qty,
+                price=last_price,
+                urgency=urgency,
+                market_state=market_state,
+            )
+            decision = self._smart_router.route(ctx)
+            if decision.slices:
+                return decision.slices
+        except Exception as exc:
+            logging.debug("SmartOrderRouter fallback: %s", exc)
+        # Fallback to legacy algo selection
         name = algo_name or str(algo_cfg.get("default", "twap"))
         adaptive_cfg = algo_cfg.get("adaptive", {}) or {}
         if algo_name is None and adaptive_cfg.get("enabled", False):
@@ -819,6 +846,22 @@ class TradingAgent:
                     continue
                 strategies_to_run.append((name, strategy))
 
+        # Inject extended indicators into market_state for strategy use
+        _ms_prices = market_state.get("prices") or []
+        if len(_ms_prices) >= 20:
+            try:
+                from app.learning.indicators import compute_all_indicators as _compute_ind
+                _ms_opens = np.array(market_state.get("opens") or _ms_prices, dtype=float)
+                _ms_highs = np.array(market_state.get("highs") or _ms_prices, dtype=float)
+                _ms_lows = np.array(market_state.get("lows") or _ms_prices, dtype=float)
+                _ms_closes = np.array(_ms_prices, dtype=float)
+                _ms_vols = np.array(market_state.get("volumes") or [], dtype=float)
+                if _ms_vols.size < _ms_closes.size:
+                    _ms_vols = np.ones_like(_ms_closes)
+                market_state["indicators"] = _compute_ind(_ms_opens, _ms_highs, _ms_lows, _ms_closes, _ms_vols)
+            except Exception as exc:
+                logging.debug("Indicator injection failed for %s: %s", symbol, exc)
+
         # UNLOCKED: Run strategy inference (CPU heavy)
         signals = []
         for name, strategy in strategies_to_run:
@@ -879,7 +922,7 @@ class TradingAgent:
         # LOCKED: Execution logic (Critical State Updates)
         with self._lock:
             filtered_signals = [signal for signal in signals if signal.get("name") in names]
-            action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names)
+            action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names, market_state=market_state)
             order_meta = self._select_order_meta(filtered_signals, names)
             if broker_override:
                 broker_name = broker_override
@@ -902,7 +945,7 @@ class TradingAgent:
                 if isinstance(weights, dict):
                     filtered_weights = {name: weights.get(name, 1.0) for name in allowed_names}
                 action, reduce_pct, action_strategy = self._combine_signals(
-                    filtered_signals, filtered_weights, order=allowed_names
+                    filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
                 )
                 order_meta = self._select_order_meta(filtered_signals, allowed_names)
                 if not broker_override:
@@ -1152,6 +1195,17 @@ class TradingAgent:
             order_type = str(order_meta.get("order_type") or "market").lower()
             limit_price = order_meta.get("limit_price")
             algo_name = order_meta.get("algo")
+            # Auto-upgrade market orders to limit at mid-price when spread data available
+            if order_type == "market" and limit_price is None:
+                spread_pct = market_state.get("spread_pct")
+                if spread_pct is not None and last_price > 0:
+                    half_spread = last_price * float(spread_pct) / 200.0
+                    if action == "buy":
+                        limit_price = round(last_price + half_spread, 2)
+                    else:
+                        limit_price = round(last_price - half_spread, 2)
+                    if limit_price > 0:
+                        order_type = "limit"
             if order_type == "limit" and limit_price is None:
                 self._record_skip(symbol, action, "limit_price_missing", broker_name)
                 logging.info("Skipping %s for %s: limit price missing", action, symbol)
@@ -1340,13 +1394,19 @@ class TradingAgent:
         self._exit_backoff_until.pop(key, None)
 
     def _flush_order_responses(self) -> None:
-        # Clear PDT blocks daily
+        # Clear PDT blocks daily + decay slippage penalties
         today = datetime.now(timezone.utc).date()
         if self._pdt_blocked_date != today:
             if self._pdt_blocked:
                 logging.info("Clearing %d PDT blocks for new trading day", len(self._pdt_blocked))
             self._pdt_blocked.clear()
             self._pdt_blocked_date = today
+        if self._slippage_decay_date != today:
+            for sym in list(self._symbol_slippage_penalty):
+                self._symbol_slippage_penalty[sym] *= 0.9
+                if self._symbol_slippage_penalty[sym] < 0.001:
+                    del self._symbol_slippage_penalty[sym]
+            self._slippage_decay_date = today
         for queue in self._order_queues.values():
             responses = queue.pop_responses()
             if not responses:
@@ -1370,6 +1430,18 @@ class TradingAgent:
                         if getattr(response, "reason", "") == "pdt_protection":
                             self._pdt_blocked.add((response.broker, response.symbol))
                             logging.warning("PDT block recorded for %s/%s — suppressing sell retries", response.broker, response.symbol)
+                # TCA slippage tracking on completed fills
+                if status == "completed":
+                    try:
+                        fill_price = float(getattr(response, "filled_avg_price", 0) or 0)
+                        decision_price = float(getattr(response, "decision_price", 0) or getattr(response, "limit_price", 0) or 0)
+                        if fill_price > 0 and decision_price > 0:
+                            slippage_bps = abs(fill_price - decision_price) / decision_price * 10000.0
+                            sym = response.symbol
+                            prev = self._symbol_slippage_penalty.get(sym, 0.0)
+                            self._symbol_slippage_penalty[sym] = prev * 0.7 + slippage_bps * 0.3
+                    except (AttributeError, TypeError, ValueError):
+                        pass
                 try:
                     self._orchestrator.on_order_update(response.__dict__)
                 except (AttributeError, TypeError, ValueError, KeyError) as exc:
@@ -1384,6 +1456,15 @@ class TradingAgent:
                                 logging.warning("Orchestrator reward update failed: %s", exc)
                     except (AttributeError, TypeError, ValueError, KeyError) as exc:
                         logging.warning("Live reward update failed: %s", exc)
+                # Record calibration data on completed sell (trade close)
+                if side == "sell" and status == "completed":
+                    try:
+                        strategy_name = getattr(response, "strategy", None) or ""
+                        raw_conf = float(getattr(response, "confidence", 0.5) or 0.5)
+                        pnl = float(getattr(response, "realized_pnl", 0.0) or 0.0)
+                        self._confidence_calibrator.record(strategy_name, raw_conf, pnl > 0)
+                    except (AttributeError, TypeError, ValueError):
+                        pass
 
     def _size_order(
         self,
@@ -1429,6 +1510,11 @@ class TradingAgent:
             )
             if haircut_metrics:
                 market_state.update(haircut_metrics)
+            # Apply TCA slippage penalty
+            slippage_bps = self._symbol_slippage_penalty.get(symbol, 0.0)
+            if slippage_bps > 1.0:
+                penalty_factor = max(0.5, 1.0 - slippage_bps / 200.0)
+                allowed_value *= penalty_factor
             if allowed_value < last_price:
                 if "illiquid_spread" in haircut_reasons:
                     return 0, "illiquid_spread"
@@ -1491,40 +1577,76 @@ class TradingAgent:
         return max(min(scale, max_scale), min_scale)
 
     def _portfolio_position_scale(self, symbol: str, market_state: dict, portfolio: dict) -> float:
-        """Adjust position size based on portfolio optimization."""
+        """Adjust position size based on portfolio optimization (risk parity)."""
         if not self._portfolio_enabled or self._portfolio_optimizer is None:
             return 1.0
         try:
             positions = portfolio.get("positions", {})
-            if not positions:
-                return 1.0
-            # Get current weights
             equity = float(portfolio.get("equity", 0.0) or 0.0)
             if equity <= 0:
                 return 1.0
-            current_weights = {}
-            for sym, pos in positions.items():
-                qty = float(pos.get("qty", 0.0) or 0.0)
-                price = float(pos.get("current_price", 0.0) or market_state.get("last_price", 0.0) or 0.0)
-                if price > 0 and qty > 0:
-                    current_weights[sym] = (qty * price) / equity
-            if symbol not in current_weights:
-                current_weights[symbol] = 0.0
-            # Check if symbol is over-allocated (risk parity adjustment)
             portfolio_cfg = self.cfg.get("portfolio", {})
             max_pos_pct = float(portfolio_cfg.get("constraints", {}).get("max_position_pct", 0.25))
-            current_weight = current_weights.get(symbol, 0.0)
-            if current_weight >= max_pos_pct:
-                return 0.5  # Reduce allocation if overweight
-            # Scale based on distance from max
-            headroom = max_pos_pct - current_weight
-            if headroom < 0.05:  # Less than 5% headroom
-                return 0.7
-            return 1.0
-        except (ValueError, TypeError, KeyError) as exc:
+            # Collect symbols with price history for covariance estimation
+            syms_with_prices = []
+            returns_matrix = []
+            for sym, pos in positions.items():
+                prices_list = pos.get("price_history") or []
+                if len(prices_list) < 10:
+                    continue
+                arr = np.array(prices_list[-30:], dtype=float)
+                rets = np.diff(arr) / arr[:-1]
+                if rets.size >= 5:
+                    syms_with_prices.append(sym)
+                    returns_matrix.append(rets)
+            # Add current symbol if not already in positions
+            if symbol not in syms_with_prices:
+                ms_prices = market_state.get("prices") or []
+                if len(ms_prices) >= 10:
+                    arr = np.array(ms_prices[-30:], dtype=float)
+                    rets = np.diff(arr) / arr[:-1]
+                    if rets.size >= 5:
+                        syms_with_prices.append(symbol)
+                        returns_matrix.append(rets)
+            if len(syms_with_prices) < 2 or symbol not in syms_with_prices:
+                # Fallback to headroom heuristic
+                return self._portfolio_headroom_scale(symbol, positions, equity, max_pos_pct, market_state)
+            # Align return lengths and compute covariance
+            min_len = min(r.size for r in returns_matrix)
+            aligned = np.array([r[-min_len:] for r in returns_matrix])
+            cov_matrix = np.cov(aligned)
+            if cov_matrix.ndim < 2:
+                return self._portfolio_headroom_scale(symbol, positions, equity, max_pos_pct, market_state)
+            constraints = PortfolioConstraints(max_position_pct=max_pos_pct, long_only=True)
+            result = self._portfolio_optimizer.risk_parity(cov_matrix, syms_with_prices, constraints)
+            target_weight = result.weights.get(symbol, 0.0)
+            if target_weight <= 0:
+                return 0.3
+            # Scale = target_weight / max_pos_pct (how much of max allocation optimizer recommends)
+            scale = target_weight / max_pos_pct
+            return float(np.clip(scale, 0.3, 1.5))
+        except (ValueError, TypeError, KeyError, np.linalg.LinAlgError) as exc:
             logging.warning("Portfolio position scale failed for %s: %s", symbol, exc)
             PORTFOLIO_SCALE_FALLBACK.labels(symbol=symbol).inc()
             return 1.0
+
+    def _portfolio_headroom_scale(
+        self, symbol: str, positions: dict, equity: float, max_pos_pct: float, market_state: dict,
+    ) -> float:
+        """Fallback headroom-based scaling when optimizer can't run."""
+        current_weights = {}
+        for sym, pos in positions.items():
+            qty = float(pos.get("qty", 0.0) or 0.0)
+            price = float(pos.get("current_price", 0.0) or market_state.get("last_price", 0.0) or 0.0)
+            if price > 0 and qty > 0:
+                current_weights[sym] = (qty * price) / equity
+        current_weight = current_weights.get(symbol, 0.0)
+        if current_weight >= max_pos_pct:
+            return 0.5
+        headroom = max_pos_pct - current_weight
+        if headroom < 0.05:
+            return 0.7
+        return 1.0
 
     def _limits_enabled(self) -> bool:
         return bool(self.cfg.get("trading_limits", {}).get("enabled", False))
@@ -1878,11 +2000,27 @@ class TradingAgent:
                 return name
         return broker_name
 
+    def _adjust_weights_for_regime(self, weights: dict[str, float], market_state: dict) -> dict[str, float]:
+        regime = market_state.get("regime")
+        if regime is None:
+            return weights
+        adjusted = dict(weights)
+        if regime == 0:  # low_vol_trending
+            adjusted["trend_following"] = adjusted.get("trend_following", 0) * 1.3
+            adjusted["pattern_trading"] = adjusted.get("pattern_trading", 0) * 1.2
+            adjusted["stat_arb_pairs"] = adjusted.get("stat_arb_pairs", 0) * 0.8
+        elif regime == 2:  # high_vol_crisis
+            adjusted["trend_following"] = adjusted.get("trend_following", 0) * 0.7
+            adjusted["stat_arb_pairs"] = adjusted.get("stat_arb_pairs", 0) * 1.4
+            adjusted["factor_model"] = adjusted.get("factor_model", 0) * 1.2
+        return adjusted
+
     def _combine_signals(
         self,
         signals: list[dict],
         weights: dict[str, float] | None = None,
         order: list[str] | None = None,
+        market_state: dict | None = None,
     ) -> tuple[str, float, str | None]:
         if not signals:
             return "hold", 1.0, None
@@ -1900,6 +2038,8 @@ class TradingAgent:
                         return action, reduce_pct, name
             return "hold", 1.0, None
         weights = weights or {}
+        if market_state:
+            weights = self._adjust_weights_for_regime(weights, market_state)
         min_conviction = self._strategy_cfg.min_conviction
         buy_score = 0.0
         sell_score = 0.0
@@ -1914,6 +2054,7 @@ class TradingAgent:
             action = signal.get("action")
             name = signal.get("name")
             confidence = float(signal.get("confidence", 1.0))
+            confidence = self._confidence_calibrator.calibrate(name or "", confidence)
             strategy_weight = float(weights.get(name, 1.0))
             effective_weight = confidence * strategy_weight
             if top_weight is None or effective_weight > top_weight:

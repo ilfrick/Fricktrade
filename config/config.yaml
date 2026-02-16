@@ -654,9 +654,9 @@ market_cache:
   file_dir: /data/market_cache
   batch_size: 50
   delay_seconds: 3.0
-  max_age_multiplier: 24  # 5m * 24 = 2 hours TTL
-  cache_only: true
-  ignore_staleness: true
+  max_age_multiplier: 6  # 5m * 6 = 30 min TTL
+  cache_only: false
+  ignore_staleness: false
   allow_pickle: false
   filtered_symbols:
     enabled: true
