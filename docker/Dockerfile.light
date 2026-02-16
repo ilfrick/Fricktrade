@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
+#
+# Lightweight image for services that don't need TF/CUDA/numpy:
+# daily-report, healthwatch, etc.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+COPY requirements-light.txt /app/requirements-light.txt
+RUN pip install --no-cache-dir -r /app/requirements-light.txt
+
+COPY app /app/app
+COPY config /app/config
+
+ENV PYTHONPATH=/app
+
+CMD ["python", "-m", "app.reporting.daily_top_movers", "--config", "/app/config/config.yaml"]

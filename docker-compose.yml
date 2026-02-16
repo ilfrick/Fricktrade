@@ -176,7 +176,7 @@ services:
   daily-report:
     build:
       context: .
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/Dockerfile.light
     env_file:
       - .env
     volumes:
@@ -184,6 +184,10 @@ services:
       - ./alertmanager/alertmanager.generated.yml:/app/alertmanager/alertmanager.yml
       - ./data:/data
     command: ["python", "-m", "app.reporting.daily_top_movers", "--config", "/app/config/config.yaml"]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     labels:
       - "autoheal=true"
     restart: unless-stopped

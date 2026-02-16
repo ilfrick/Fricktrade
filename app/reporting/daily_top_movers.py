@@ -507,26 +507,37 @@ def _load_decision_traces(cfg: dict, date_str: str) -> dict[str, dict]:
         if not path.exists():
             continue
         try:
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                record = json.loads(line)
-                symbol = record.get("symbol")
-                if not symbol:
-                    continue
-                ts = record.get("ts")
-                existing = latest.get(symbol)
-                if not existing:
-                    latest[symbol] = record
-                    continue
-                try:
-                    if ts and existing.get("ts") and ts > existing.get("ts"):
-                        latest[symbol] = record
-                except Exception:
-                    continue
+            _load_traces_tail(path, latest)
         except Exception as exc:
             logging.warning("Decision trace load failed for %s: %s", path, exc)
     return latest
+
+
+def _load_traces_tail(path: Path, latest: dict[str, dict], tail_bytes: int = 2 * 1024 * 1024) -> None:
+    """Read only the tail of a trace file to find latest record per symbol."""
+    file_size = path.stat().st_size
+    if file_size == 0:
+        return
+    with open(path, "rb") as fh:
+        offset = max(0, file_size - tail_bytes)
+        fh.seek(offset)
+        if offset > 0:
+            fh.readline()  # discard partial first line
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            symbol = record.get("symbol")
+            if not symbol:
+                continue
+            ts = record.get("ts")
+            existing = latest.get(symbol)
+            if not existing or (ts and existing.get("ts") and ts > existing["ts"]):
+                latest[symbol] = record
 
 
 def _alpaca_news_keys(cfg: dict) -> tuple[str, str, str]:
