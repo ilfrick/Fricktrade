@@ -50,6 +50,7 @@ class SimBroker:
         self.slippage_bps = float(slippage_bps)
         self.spread_bps = float(spread_bps)
         self.positions: dict[str, float] = {}
+        self.avg_entry_prices: dict[str, float] = {}
         self.current_prices: dict[str, float] = {}
         self._order_id = 0
         self.trades = 0
@@ -61,6 +62,8 @@ class SimBroker:
     def get_positions(self) -> list[dict]:
         results = []
         for symbol, qty in self.positions.items():
+            if qty == 0.0:
+                continue
             price = self.current_prices.get(symbol, 0.0)
             results.append(
                 {
@@ -68,6 +71,7 @@ class SimBroker:
                     "qty": qty,
                     "market_value": qty * price,
                     "current_price": price,
+                    "avg_entry_price": self.avg_entry_prices.get(symbol, 0.0),
                 }
             )
         return results
@@ -84,10 +88,17 @@ class SimBroker:
         commission = cost * (self.commission_pct / 100.0)
         if side.lower() == "buy":
             self.cash -= cost + commission
-            self.positions[symbol] = self.positions.get(symbol, 0.0) + qty
+            prev_qty = self.positions.get(symbol, 0.0)
+            prev_avg = self.avg_entry_prices.get(symbol, 0.0)
+            new_qty = prev_qty + qty
+            if new_qty > 0:
+                self.avg_entry_prices[symbol] = (prev_avg * prev_qty + exec_price * qty) / new_qty
+            self.positions[symbol] = new_qty
         else:
             self.cash += cost - commission
             self.positions[symbol] = self.positions.get(symbol, 0.0) - qty
+            if self.positions[symbol] <= 0:
+                self.avg_entry_prices.pop(symbol, None)
         self._order_id += 1
         self.trades += 1
         return f"sim-{self._order_id}"
@@ -186,9 +197,11 @@ def run_agent_backtest(cfg: dict) -> BacktestResult | BacktestPlanResult:
 
     symbols_source = str(backtest_cfg.get("symbols_source", "data"))
     symbols = data_cfg.get("symbols", [])
-    if symbols_source == "dynamic":
+    if symbols_source == "config":
+        symbols = backtest_cfg.get("symbols", []) or data_cfg.get("symbols", [])
+    elif symbols_source == "dynamic":
         symbols = _resolve_dynamic_symbols(cfg)
-    if symbols_source == "data_dir":
+    elif symbols_source == "data_dir":
         symbols = _symbols_from_data_dir(data_dir, interval)
     if not symbols:
         raise ValueError("No symbols configured for backtest.")
@@ -277,6 +290,8 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
         # Drain order queue: SimBroker completes instantly but queue processes one per update()
         _drain_order_queues(agent)
         agent._flush_order_responses()
+        # Update position_state so stops/trailing stops can fire next bar
+        _update_backtest_positions(agent, broker)
 
     # Final flush for any remaining orders
     _drain_order_queues(agent)
@@ -291,6 +306,35 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
         end=end.strftime("%Y-%m-%d"),
         symbols=sorted(prepared_frames.keys()),
     )
+
+
+def _update_backtest_positions(agent: TradingAgent, broker) -> None:
+    """Sync position_state from SimBroker so stops/trailing stops can fire."""
+    portfolio = agent._get_portfolio_snapshot()
+    # Update last_prices on broker_state from SimBroker's current_prices
+    broker_state = agent._broker_state(agent._broker_name)
+    if hasattr(broker, "current_prices"):
+        broker_state.last_prices.update(broker.current_prices)
+    elif hasattr(broker, "_brokers"):
+        # SimBrokerRouter: merge all broker prices
+        for name, sub_broker in broker._brokers.items():
+            bs = agent._broker_state(name)
+            bs.last_prices.update(sub_broker.current_prices)
+    # Populate position_state with entry prices, peak prices, etc.
+    if agent._perf_tracker.enabled:
+        brokers_data = portfolio.get("brokers", {})
+        if isinstance(brokers_data, dict) and brokers_data:
+            for broker_name in brokers_data.keys():
+                bp = agent._portfolio_for_broker(portfolio, broker_name)
+                bs = agent._broker_state(broker_name)
+                agent._perf_tracker.update_from_positions(
+                    bs, bp, broker_name, agent._strategy_names, bs.last_prices,
+                )
+        else:
+            agent._perf_tracker.update_from_positions(
+                broker_state, portfolio, agent._broker_name,
+                agent._strategy_names, broker_state.last_prices,
+            )
 
 
 def _drain_order_queues(agent: TradingAgent, max_rounds: int = 100) -> None:
