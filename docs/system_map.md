@@ -13,10 +13,15 @@ flowchart LR
     end
     subgraph Core[Trading Loop]
         Trader[TradingAgent]
+        Indicators[Indicator Engine ~30]
         Strategies[Strategies]
+        Calibrator[Confidence Calibrator]
         Orchestrator[RL Orchestrator]
         AccountFlags[Account Flags + Trading Limits]
         Risk["Risk Manager - configurable disable"]
+        PortOpt[Portfolio Optimizer]
+        SmartRouter[Smart Order Router]
+        TCA[TCA Analyzer]
         Exec[Execution Engine]
         Queue[Order Queue]
         Routing[Broker Routing]
@@ -60,7 +65,8 @@ flowchart LR
 
     CLI --> Trader
     Compose --> Trader
-    Trader --> Strategies --> Orchestrator --> AccountFlags --> Risk --> Exec --> Queue --> Routing --> Brokers
+    Trader --> Indicators --> Strategies --> Calibrator --> Orchestrator --> AccountFlags --> Risk --> PortOpt --> SmartRouter --> Exec --> Queue --> Routing --> Brokers
+    TCA --> Trader
     Scanner --> Trader
     AIFilter --> Trader
     AIFilter --> MarketCache
@@ -102,10 +108,11 @@ flowchart LR
 
 ## Strategies
 - `app/strategies/`: signal generators.
-  - **Active**: `trend_following` (RSI + volume filter), `factor_model` (mean-reversion + trend quality), `pattern_trading` (ATR stop), `stat_arb_pairs` (z-score spread).
+  - **Active**: `trend_following` (supertrend + VWAP + RSI + regime), `factor_model` (hurst-adaptive + stochastic/CCI), `pattern_trading` (ATR stop), `stat_arb_pairs` (log-ratio spread + ADF cointegration).
   - **Inactive**: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `market_maker`.
 - `app/strategies/base.py`: strategy interface.
-- `app/learning/indicators.py`: shared technical indicators (ATR, Bollinger, stochastic, etc.).
+- `app/strategies/confidence_calibrator.py`: bin-based confidence calibration per strategy.
+- `app/learning/indicators.py`: shared technical indicators (~30: supertrend, VWAP, stochastic, CCI, hurst, Ichimoku, etc.). Injected into `market_state["indicators"]` before strategy calls.
 
 ## Orchestrator
 - `app/agents/orchestrator.py`: RL policy-gradient selector over strategy signals; uses AI filter
@@ -119,9 +126,12 @@ flowchart LR
 - Risk gating is integrated in `app/agents/trader.py`.
 
 ## Execution
-- `app/execution/executor.py`: broker-agnostic order placement.
+- `app/execution/executor.py`: broker-agnostic order placement (supports limit orders).
 - `app/execution/order_queue.py`: FIFO queue and feedback loop.
+- `app/execution/smart_router.py`: `SmartOrderRouter` — algo selection (TWAP/VWAP/POV/market) based on impact, spread, volatility.
+- `app/execution/tca.py`: `TCAAnalyzer` — slippage/impact measurement; feeds back to position sizing.
 - `app/execution/routing.py`: multi-broker routing logic.
+- `app/portfolio/optimizer.py`: `PortfolioOptimizer` — risk parity position sizing via covariance matrix.
 - `app/brokers/`: Alpaca/IBKR adapters + router.
 
 ## Data and Market State

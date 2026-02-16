@@ -794,3 +794,31 @@ Implemented comprehensive reward system improvements for RL agents to increase p
 
 **Testing:** 152 passed, 16 skipped. All existing + new tests pass.
 
+### 2026-02-16: Connect Dormant Components — Phases 0-3
+
+**Goal:** Wire dormant infrastructure (SmartOrderRouter, PortfolioOptimizer, TCA, indicators engine) into the live decision path. Fix data staleness and execution quality.
+
+**Phase 0 — Stop Losing Money:**
+1. `config/config.yaml`: `cache_only: false`, `ignore_staleness: false`, `max_age_multiplier: 6` (30min TTL, was 2hr stale-ok).
+2. `app/agents/trader.py`: Auto-upgrade market orders to limit at mid-price when `spread_pct` is available in market_state. Computes `limit_price = last_price ± half_spread`.
+3. `app/execution/executor.py`: Added `order_type` and `limit_price` parameters to `execute()`.
+
+**Phase 1 — Signals That Work:**
+1. **Indicator injection** (`trader.py`): Before strategy calls, `compute_all_indicators()` from `app/learning/indicators.py` populates `market_state["indicators"]` with ~30 values (supertrend, vwap_dev, stochastic, CCI, hurst, etc.).
+2. **trend_following rewrite**: Uses `indicators["supertrend"]` (bullish confirmation), `indicators["vwap_dev"]` (above VWAP), `regime_name` (crisis gate blocks buys). Weighted confidence from trend strength + RSI distance + supertrend alignment + VWAP. Extended exit: RSI > 75 or bearish supertrend flip.
+3. **stat_arb_pairs rewrite**: Log-ratio spread `log(a) - beta * log(b)`, OLS hedge ratio via `np.polyfit`, numpy-only ADF cointegration test (t-stat < -2.86 = ~5% significance). Pairs ranked by t-stat instead of correlation. z_entry widened to 2.0. Confidence added to signals.
+4. **factor_model upgrade**: Uses `indicators["roc"]`, `indicators["stoch_k"]`, `indicators["cci"]` for richer mr_score. Hurst exponent adaptive: `hurst > 0.5` boosts momentum weight 1.3x / reduces mr 0.5x; `hurst < 0.5` boosts mr 1.5x / reduces momentum 0.6x. Trend quality gate skipped when hurst available.
+5. **Confidence calibrator** (`app/strategies/confidence_calibrator.py` — NEW): Bin-based, per-strategy. Tracks (raw_confidence, was_profitable) in rolling window of 200. Maps raw confidence to empirical win-rate per bin with linear interpolation. Conservative cold start: `raw * 0.5` before 30 samples. Integrated into `_combine_signals` and `_flush_order_responses`.
+6. **Regime-weighted combiner** (`trader.py`): `_adjust_weights_for_regime()` applied before signal scoring. Low-vol trending: boost trend 1.3x, pattern 1.2x, reduce stat_arb 0.8x. High-vol crisis: reduce trend 0.7x, boost stat_arb 1.4x, factor 1.2x.
+
+**Phase 2 — Smart Execution:**
+1. **SmartOrderRouter** wired into `_plan_execution()`. Builds `OrderContext`, calls `router.route()`, maps `RoutingDecision.slices` directly. Falls back to legacy algo selection on failure.
+2. **TCA feedback loop**: On completed fills in `_flush_order_responses`, computes slippage_bps from fill vs decision price. Tracks `_symbol_slippage_penalty` (EWMA α=0.3). In `_size_order`, reduces `allowed_value` by penalty factor (max 50% reduction). Penalties decay 0.9x daily.
+
+**Phase 3 — Portfolio Optimization:**
+1. **PortfolioOptimizer** wired into `_portfolio_position_scale()`. Collects price history from positions, computes covariance matrix, calls `risk_parity()` for target weights. Scale = `target_weight / max_pos_pct` (clamped 0.3–1.5). Falls back to headroom heuristic when < 2 symbols or insufficient price history.
+
+**Files modified:** `config/config.yaml`, `app/agents/trader.py`, `app/execution/executor.py`, `app/strategies/trend_following.py`, `app/strategies/factor_model.py`, `app/strategies/stat_arb_pairs.py`, `app/strategies/confidence_calibrator.py` (new), `tests/test_strategy_upgrades.py`.
+
+**Testing:** 170 passed, 16 skipped. 32 tests in test_strategy_upgrades.py (18 new).
+
