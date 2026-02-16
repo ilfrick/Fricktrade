@@ -157,7 +157,7 @@ risk:
   max_positions: 30
   cooldown_seconds: 5
   hard_stop_pct: 0.8
-  trailing_stop_pct: 0.35
+  trailing_stop_pct: 5.0
   circuit_breaker_drawdown_pct: 5.0
   take_profit_pct: 1.5
   partial_take_profit_pct: 1.0
