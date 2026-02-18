@@ -177,9 +177,15 @@ class DecisionAggregator:
                 else:
                     self.strategy_signal_hold[name] += 1
 
-        # P0 fix: orchestrator weights
+        # P0 fix: effective weights (config override applied inside _combine_signals)
+        # effective_weights is written to trace only when config weights override uniform 1.0
+        ew = rec.get("effective_weights")
         ow = rec.get("orchestrator_weights")
-        if ow is not None:
+        if ew is not None:
+            # effective_weights present → config weights were applied
+            self.config_weights_applied += 1
+        elif ow is not None:
+            # orchestrator_weights present but no effective_weights → uniform 1.0 used
             if isinstance(ow, dict):
                 vals = list(ow.values())
             elif isinstance(ow, list):

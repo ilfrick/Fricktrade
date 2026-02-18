@@ -935,6 +935,10 @@ class TradingAgent:
             if _cs_qty <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
                 filtered_signals = [s for s in filtered_signals if s.get("action") != "sell"]
             action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names, market_state=market_state)
+            if trace and self._config_strategy_weights and (
+                not weights or all(v == 1.0 for v in (weights.values() if isinstance(weights, dict) else weights))
+            ):
+                trace["effective_weights"] = dict(self._config_strategy_weights)
             order_meta = self._select_order_meta(filtered_signals, names)
             if broker_override:
                 broker_name = broker_override
