@@ -291,6 +291,12 @@ class TradingAgent:
         # PDT-blocked symbols: suppress sell retries until next trading day
         self._pdt_blocked: set[tuple[str, str]] = set()
         self._pdt_blocked_date: date | None = None
+        # Config strategy weights — used when orchestrator is disabled (returns uniform 1.0)
+        self._config_strategy_weights: dict[str, float] = dict(
+            self.cfg.get("orchestrator", {}).get("strategy_weights", {}) or {}
+        )
+        # Pending sell qty tracking to prevent sell orders overshooting past zero
+        self._pending_sell_qty: dict[tuple[str, str], float] = {}  # (broker, symbol) -> qty
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -922,6 +928,12 @@ class TradingAgent:
         # LOCKED: Execution logic (Critical State Updates)
         with self._lock:
             filtered_signals = [signal for signal in signals if signal.get("name") in names]
+            # Filter phantom short-entry signals: if no position and shorting disabled,
+            # sell signals are short entries that can never execute — don't let them vote
+            _cs_positions = market_state.get("portfolio", {}).get("positions", {})
+            _cs_qty = float(_cs_positions.get(symbol, {}).get("qty", 0) or 0)
+            if _cs_qty <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
+                filtered_signals = [s for s in filtered_signals if s.get("action") != "sell"]
             action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names, market_state=market_state)
             order_meta = self._select_order_meta(filtered_signals, names)
             if broker_override:
@@ -941,6 +953,9 @@ class TradingAgent:
                 return None
             if allowed_names != list(names) or (action_strategy and action_strategy not in allowed_names):
                 filtered_signals = [signal for signal in signals if signal.get("name") in allowed_names]
+                # Filter phantom short-entry signals (same logic as above)
+                if _cs_qty <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
+                    filtered_signals = [s for s in filtered_signals if s.get("action") != "sell"]
                 filtered_weights = weights
                 if isinstance(weights, dict):
                     filtered_weights = {name: weights.get(name, 1.0) for name in allowed_names}
@@ -1218,6 +1233,25 @@ class TradingAgent:
 
             order_notional = qty * last_price
 
+            # Pending sell qty check: prevent sell orders from overshooting past zero
+            _pending_sell_key: tuple[str, str] | None = None
+            if action == "sell" and _is_closing_position:
+                _can_short_here = self._can_short(symbol, portfolio)
+                if not _can_short_here:
+                    _pending_sell_key = (broker_name, symbol)
+                    _pending_sells = self._pending_sell_qty.get(_pending_sell_key, 0.0)
+                    _available_qty = current_qty - _pending_sells
+                    if _available_qty <= 0:
+                        self._record_skip(symbol, action, "pending_sell_covers_position", broker_name)
+                        self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
+                        return None
+                    qty = min(qty, int(_available_qty))
+                    if qty <= 0:
+                        self._record_skip(symbol, action, "pending_sell_covers_position", broker_name)
+                        self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
+                        return None
+                    order_notional = qty * last_price
+
             # Atomic leverage check for buy orders (prevents ThreadPool race)
             if action == "buy" and not _is_closing_position:
                 if not self._check_and_reserve_notional(broker_name, order_notional, portfolio):
@@ -1268,6 +1302,12 @@ class TradingAgent:
                 logging.warning("Order enqueue failed for %s %s: %s", action, symbol, exc)
                 self._emit_decision_trace(trace, "skip", "order_failed", "execution")
                 return None
+
+            # Track pending sell qty to prevent overshoot
+            if _pending_sell_key is not None:
+                self._pending_sell_qty[_pending_sell_key] = (
+                    self._pending_sell_qty.get(_pending_sell_key, 0.0) + qty
+                )
 
             # Update shared portfolio in-memory so subsequent threads see new exposure
             with self._lock:
@@ -1421,6 +1461,14 @@ class TradingAgent:
                     notional = resp_qty * est_price if est_price else float(response.notional if hasattr(response, "notional") else 0)
                     if notional > 0:
                         self._release_pending_notional(response.broker, notional)
+                # Release pending sell qty on terminal sell responses
+                if side == "sell" and status in ("completed", "rejected", "canceled"):
+                    _ps_key = (response.broker, response.symbol)
+                    _ps_resp_qty = float(response.qty or 0)
+                    if _ps_resp_qty > 0 and _ps_key in self._pending_sell_qty:
+                        self._pending_sell_qty[_ps_key] = max(
+                            0.0, self._pending_sell_qty[_ps_key] - _ps_resp_qty
+                        )
                 # Track exit success/failure for backoff
                 if side == "sell":
                     if status == "completed":
@@ -1465,6 +1513,33 @@ class TradingAgent:
                         self._confidence_calibrator.record(strategy_name, raw_conf, pnl > 0)
                     except (AttributeError, TypeError, ValueError):
                         pass
+                # Airbag: buy-to-cover if position went negative despite allow_shorts=false
+                if side == "sell" and status == "completed":
+                    try:
+                        _allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
+                        _limits = self.cfg.get("trading_limits", {})
+                        if _limits.get("enabled") and not _limits.get("allow_shorts", True):
+                            _allow_shorts = False
+                        if not _allow_shorts:
+                            _ab_bs = self._broker_state(response.broker)
+                            _ab_pos = _ab_bs.position_state.get(response.symbol, {})
+                            _ab_qty = float(_ab_pos.get("qty", 0) or 0)
+                            if _ab_qty < 0:
+                                _cover_qty = abs(int(_ab_qty))
+                                logging.warning(
+                                    "SAFETY: %s position negative (%s) despite allow_shorts=false. "
+                                    "Queuing buy-to-cover for %d shares.",
+                                    response.symbol, _ab_qty, _cover_qty,
+                                )
+                                _ab_queue = self._order_queues.get(response.broker, self._order_queue)
+                                if _ab_queue and _cover_qty > 0:
+                                    _ab_queue.enqueue(
+                                        response.symbol, "buy", _cover_qty,
+                                        order_type="market",
+                                        is_position_close=True,
+                                    )
+                    except (AttributeError, TypeError, ValueError, KeyError) as exc:
+                        logging.warning("Airbag check failed for %s: %s", response.symbol, exc)
 
     def _size_order(
         self,
@@ -2038,6 +2113,12 @@ class TradingAgent:
                         return action, reduce_pct, name
             return "hold", 1.0, None
         weights = weights or {}
+        # Orchestrator returns uniform 1.0 when disabled — use config weights instead
+        if self._config_strategy_weights and (
+            not weights or all(v == 1.0 for v in weights.values())
+        ):
+            weights = dict(self._config_strategy_weights)
+            logging.debug("Applied config strategy_weights: %s", weights)
         if market_state:
             weights = self._adjust_weights_for_regime(weights, market_state)
         min_conviction = self._strategy_cfg.min_conviction
