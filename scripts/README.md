@@ -30,6 +30,7 @@ Operational and development scripts for Fricktrade.
 | `monitor_cache_latency.py` | Track market cache bar freshness, stale data ages, and container failures until NYSE close |
 | `monitor_sell_decisions.py` | Parse decision traces for sell/exit signals and skip reasons; generate JSON report with RL value estimates and orchestrator picks |
 | `monitor_sell_analysis.sh` | Capture exit triggers, success/failure rates, retry budget usage, pending notional, and order rates by side; schedule via cron at 15:25 CET Mon-Fri |
+| `decision_monitor.py` | Incremental decision trace aggregator: byte-offset reader, P0 fix verification (weights, phantom sells, sell overshoot), periodic JSONL snapshots, session report; schedule via cron at 15:25 CET Mon-Fri |
 
 | `live_pnl_summary.sh` | Query Prometheus for live PnL, drawdown, trades, win rate, leverage, and risk metrics |
 
@@ -58,6 +59,9 @@ python3 scripts/monitor_sell_decisions.py --start "2026-02-11 15:30" --tz Europe
 
 # Monitor cache latency
 python3 scripts/monitor_cache_latency.py --config config/config.yaml --interval 60
+
+# Monitor decision traces (aggregated session analysis)
+python3 scripts/decision_monitor.py --trace-dir data/reports/decision_trace --output-dir data/monitoring
 
 # Profile live trader
 ./scripts/run_live_profile.sh
