@@ -822,3 +822,19 @@ Implemented comprehensive reward system improvements for RL agents to increase p
 
 **Testing:** 170 passed, 16 skipped. 32 tests in test_strategy_upgrades.py (18 new).
 
+### 2026-02-19: Two-Phase Symbol Dispatch — Hard Exit Barrier
+
+**Problem:** `_run_symbol_batch` sorted position-holders first then submitted all
+symbols to the ThreadPoolExecutor in a single batch. With ≤4 positions and 4 workers,
+non-holders started concurrently with holders — the sort only biased submission order
+and did not guarantee exits completed before new entries began.
+
+**Fix:** Split into two phases with a `concurrent.futures.wait()` barrier.
+Phase 1 submits and awaits all position-holding symbols; Phase 2 submits and awaits
+all new-entry candidates. Local helper `_submit_phase(syms)` avoids repeating the
+8-argument `executor.submit()` call.
+
+**Files modified:** `app/agents/trader.py`, `tests/test_session_fixes.py` (+4 tests),
+`docs/trading-loop.md`, `MEMORY.md`.
+
+**Testing:** All existing tests pass; 4 new tests in `TestTwoPhaseSymbolDispatch`.

@@ -2045,26 +2045,32 @@ class TradingAgent:
             news_snap = dict(self._news_cache)
             orders_snap = list(self._open_order_mgr.cache)
 
-        # Sort exits-first so position-holders run before new-entry candidates,
-        # reducing the chance that new buys exhaust notional before exits free it.
-        _positions = batch_portfolio.get("positions", {})
-        symbols = sorted(symbols, key=lambda s: (0 if s in _positions else 1))
+        _positions  = batch_portfolio.get("positions", {})
+        holders     = [s for s in symbols if s     in _positions]
+        non_holders = [s for s in symbols if s not in _positions]
 
-        # Use persistent ThreadPoolExecutor for parallel processing
-        futures = [
-            self._symbol_executor.submit(
-                self._process_single_symbol,
-                sym,
-                batch_portfolio,
-                market_data_provider,
-                broker_override,
-                skip_unchanged,
-                news_snap,
-                orders_snap,
-            )
-            for sym in symbols
-        ]
-        wait(futures)
+        def _submit_phase(syms: list[str]) -> None:
+            if not syms:
+                return
+            wait([
+                self._symbol_executor.submit(
+                    self._process_single_symbol,
+                    sym,
+                    batch_portfolio,
+                    market_data_provider,
+                    broker_override,
+                    skip_unchanged,
+                    news_snap,
+                    orders_snap,
+                )
+                for sym in syms
+            ])
+
+        # Phase 1 — position-holders (exits, stops, take-profits).
+        # Fully complete before Phase 2 so freed notional is visible to new entries.
+        _submit_phase(holders)
+        # Phase 2 — new-entry candidates.
+        _submit_phase(non_holders)
 
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")

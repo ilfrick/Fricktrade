@@ -35,6 +35,12 @@ execution, and metrics updates.
 - `risk.enabled: false` bypasses risk checks, but broker account flags and trading limits still block orders.
 - Entry-only guards (VaR, exposure caps, order limits, cooldown, risk limits) are skipped for sell-to-close orders that reduce existing positions.
 - `RiskManager.risk_preflight()` consolidates order limits + cooldown + risk limits into a single check for entry orders.
+- **Two-phase symbol dispatch:** Within each broker batch, position-holding symbols
+  (exits, stops, take-profits) are submitted to the ThreadPool and fully awaited
+  (`concurrent.futures.wait`) before new-entry candidates are submitted. This
+  guarantees that freed notional from exits is reflected in `gross_exposure` (under
+  `self._lock`) before any buy evaluation begins, regardless of portfolio size or
+  worker count.
 - **Pending notional counter** atomically tracks in-flight buy notional per broker to prevent ThreadPool workers from racing past the leverage limit with stale portfolio snapshots.
 - **Exit backoff** applies exponential backoff (1-15 min) to sell exits that fail repeatedly, preventing retry budget exhaustion.
 - Position-close orders bypass the retry notional budget (`execution.retry.max_notional`) so exits are never blocked by exhausted retry capacity.
