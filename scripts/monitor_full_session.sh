@@ -191,18 +191,19 @@ with open('$trace_out') as f:
     for line in f:
         try:
             d = json.loads(line)
-            key = (d.get('symbol',''), d.get('ts',''), d.get('outcome',''))
+            decision = d.get('decision','')
+            action = d.get('action','')
+            key = (d.get('symbol',''), d.get('ts',''), decision)
             if key in seen:
                 continue
             seen.add(key)
-            outcome = d.get('outcome','')
-            if outcome in ('buy', 'sell', 'exit'):
+            if decision == 'order_enqueued' and action in ('buy', 'sell'):
                 print(json.dumps({
                     'ts': d.get('ts'),
                     'symbol': d.get('symbol'),
-                    'outcome': outcome,
+                    'action': action,
                     'stage': d.get('stage'),
-                    'strategy': d.get('strategy'),
+                    'action_strategy': d.get('action_strategy'),
                     'confidence': d.get('confidence'),
                     'signal': d.get('signal'),
                 }, default=str), flush=True)
@@ -219,12 +220,12 @@ with open('$trace_out') as f:
     for line in f:
         try:
             d = json.loads(line)
-            key = (d.get('symbol',''), d.get('ts',''), d.get('outcome',''))
+            decision = d.get('decision','')
+            key = (d.get('symbol',''), d.get('ts',''), decision)
             if key in seen:
                 continue
             seen.add(key)
-            outcome = d.get('outcome','')
-            if outcome == 'skip':
+            if decision == 'skip':
                 print(json.dumps({
                     'ts': d.get('ts'),
                     'symbol': d.get('symbol'),
@@ -244,20 +245,21 @@ with open('$trace_out') as f:
     for line in f:
         try:
             d = json.loads(line)
-            key = (d.get('symbol',''), d.get('ts',''), d.get('outcome',''))
+            decision = d.get('decision','')
+            action = d.get('action','')
+            key = (d.get('symbol',''), d.get('ts',''), decision)
             if key in seen:
                 continue
             seen.add(key)
-            outcome = d.get('outcome','')
-            if outcome in ('buy', 'sell', 'exit'):
+            if decision == 'order_enqueued' and action in ('buy', 'sell'):
                 print(json.dumps({
                     'ts': d.get('ts'),
                     'symbol': d.get('symbol'),
-                    'outcome': outcome,
+                    'action': action,
                     'price': d.get('price'),
                     'qty': d.get('qty'),
                     'broker': d.get('broker'),
-                    'strategy': d.get('strategy'),
+                    'action_strategy': d.get('action_strategy'),
                 }, default=str), flush=True)
         except Exception:
             pass
@@ -303,11 +305,11 @@ summary="$run_dir/session_summary.txt"
     echo "--- Decision Trace Stats ---"
     if [ -f "$trace_out" ] && [ -s "$trace_out" ]; then
         total=$(wc -l < "$trace_out")
-        buys=$(grep -c '"outcome".*"buy"' "$trace_out" 2>/dev/null || echo 0)
-        sells=$(grep -c '"outcome".*"sell"' "$trace_out" 2>/dev/null || echo 0)
-        exits=$(grep -c '"outcome".*"exit"' "$trace_out" 2>/dev/null || echo 0)
-        skips=$(grep -c '"outcome".*"skip"' "$trace_out" 2>/dev/null || echo 0)
-        holds=$(grep -c '"outcome".*"hold"' "$trace_out" 2>/dev/null || echo 0)
+        buys=$(grep -c '"action".*"buy"' "$trace_out" 2>/dev/null || echo 0)
+        sells=$(grep -c '"action".*"sell"' "$trace_out" 2>/dev/null || echo 0)
+        exits=$(grep -c '"action".*"exit"' "$trace_out" 2>/dev/null || echo 0)
+        skips=$(grep -c '"decision".*"skip"' "$trace_out" 2>/dev/null || echo 0)
+        holds=$(grep -c '"decision".*"hold"' "$trace_out" 2>/dev/null || echo 0)
         echo "  Total decisions: $total"
         echo "  Buys: $buys"
         echo "  Sells: $sells"
@@ -351,8 +353,8 @@ with open('$run_dir/strategy_signals.jsonl') as f:
     for line in f:
         try:
             d = json.loads(line)
-            s = d.get('strategy','unknown')
-            a = d.get('outcome','unknown')
+            s = d.get('action_strategy','unknown')
+            a = d.get('action','unknown')
             strategies[s] += 1
             actions[a] += 1
         except Exception:
@@ -392,6 +394,58 @@ else:
 " 2>/dev/null || echo "  (parse error)"
     else
         echo "  (no PnL snapshots)"
+    fi
+    echo ""
+
+    echo "--- Memory Trend ---"
+    if [ -d "$metrics_dir" ] && [ "$(ls "$metrics_dir" 2>/dev/null | wc -l)" -gt 0 ]; then
+        python3 -c "
+import os, re, glob
+
+metrics_dir = '$metrics_dir'
+pattern = re.compile(r'^process_resident_memory_bytes\s+([\d.e+]+)', re.MULTILINE)
+time_pattern = re.compile(r'^### (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)', re.MULTILINE)
+
+snapshots = []  # (timestamp_str, rss_mb)
+for fpath in sorted(glob.glob(os.path.join(metrics_dir, '*.txt'))):
+    try:
+        content = open(fpath).read()
+        ts_match = time_pattern.search(content)
+        rss_match = pattern.search(content)
+        if rss_match:
+            rss_mb = float(rss_match.group(1)) / (1024 * 1024)
+            ts = ts_match.group(1) if ts_match else os.path.basename(fpath)
+            snapshots.append((ts, rss_mb))
+    except Exception:
+        pass
+
+if not snapshots:
+    print('  (no RSS data found in metrics snapshots)')
+else:
+    first_ts, first_mb = snapshots[0]
+    last_ts, last_mb = snapshots[-1]
+    peak_mb = max(mb for _, mb in snapshots)
+    n = len(snapshots)
+    # growth rate: MB per minute; each snapshot is ~60s apart
+    elapsed_min = (n - 1) if n > 1 else 1
+    growth_rate = (last_mb - first_mb) / elapsed_min if elapsed_min > 0 else 0.0
+    print(f'  Snapshots: {n}')
+    print(f'  First: {first_mb:.0f} MB at {first_ts}')
+    print(f'  Last:  {last_mb:.0f} MB at {last_ts}')
+    print(f'  Peak:  {peak_mb:.0f} MB')
+    print(f'  Growth: {growth_rate:+.1f} MB/min')
+    flags = []
+    if growth_rate > 50:
+        flags.append('ALERT: growth_rate > 50 MB/min — possible memory leak')
+    if peak_mb > 8000:
+        flags.append('ALERT: peak RSS > 8000 MB — OOM risk')
+    for flag in flags:
+        print(f'  *** {flag} ***')
+    if not flags:
+        print('  Status: OK (no OOM risk flags)')
+" 2>/dev/null || echo "  (parse error)"
+    else
+        echo "  (no metrics snapshots found)"
     fi
     echo ""
 
