@@ -116,6 +116,8 @@ class DecisionAggregator:
 
         # Regime
         self.regime_counts: Counter = Counter()
+        self.regime_prob_sum: float = 0.0
+        self.regime_prob_count: int = 0
 
         # Latency
         self.latency_sum: float = 0.0
@@ -219,6 +221,13 @@ class DecisionAggregator:
         regime_name = rec.get("regime_name")
         if regime_name:
             self.regime_counts[regime_name] += 1
+        regime_prob = rec.get("regime_probability")
+        if regime_prob is not None:
+            try:
+                self.regime_prob_sum += float(regime_prob)
+                self.regime_prob_count += 1
+            except (TypeError, ValueError):
+                pass
 
         # Latency
         lat = rec.get("decision_latency_seconds")
@@ -248,6 +257,7 @@ class DecisionAggregator:
             "pending_sell_blocks": self.pending_sell_blocks,
             "top_skip_reasons": dict(self.skip_reasons.most_common(15)),
             "regime": dict(self.regime_counts),
+            "regime_prob_mean": round(self.regime_prob_sum / self.regime_prob_count, 4) if self.regime_prob_count else None,
             "latency_mean": round(self.latency_sum / self.latency_count, 4) if self.latency_count else 0,
             "latency_max": round(self.latency_max, 4),
         }
@@ -345,6 +355,9 @@ def write_session_report(agg: DecisionAggregator, path: Path, date_str: str, win
         lines.append("--- Regime Distribution ---")
         for regime, cnt in agg.regime_counts.most_common():
             lines.append(f"  {regime}: {cnt:,}")
+        if agg.regime_prob_count:
+            prob_mean = agg.regime_prob_sum / agg.regime_prob_count
+            lines.append(f"  Mean probability: {prob_mean:.4f}" + (" (HMM may be stuck)" if prob_mean > 0.95 else ""))
         lines.append("")
 
     # Latency

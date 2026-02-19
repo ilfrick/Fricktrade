@@ -277,10 +277,10 @@ def test_stat_arb_short_data():
 
 
 def test_calibrator_cold_start():
-    """Before min_samples, calibrated confidence is conservative (raw * 0.5)."""
+    """Before min_samples, calibrated confidence is conservative (raw * 0.75)."""
     cal = ConfidenceCalibrator(min_samples=30)
     result = cal.calibrate("trend", 0.8)
-    assert result == 0.4  # 0.8 * 0.5
+    assert abs(result - 0.6) < 1e-9  # 0.8 * 0.75
 
 
 def test_calibrator_record_and_calibrate():

@@ -32,7 +32,7 @@ class ConfidenceCalibrator:
         raw = max(0.0, min(1.0, raw_confidence))
         buf = self._history.get(strategy)
         if buf is None or len(buf) < self._min_samples:
-            return raw * 0.5  # conservative before enough data
+            return raw * 0.75  # conservative before enough data
 
         # Compute win rate per bin
         bin_wins: list[int] = [0] * self._n_bins

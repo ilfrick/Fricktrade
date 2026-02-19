@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -38,22 +39,22 @@ class StatArbPairsStrategy(Strategy):
         symbol = market_state.get("symbol")
         prices = market_state.get("prices", []) or []
         if not symbol or len(prices) < 3:
-            return {"action": "hold"}
+            return {"action": "hold", "name": "stat_arb_pairs"}
         self._update_cache(symbol, prices)
         self._refresh_pairs_if_needed()
         pair_info = self._find_pair(symbol)
         if pair_info is None:
-            return {"action": "hold"}
+            return {"action": "hold", "name": "stat_arb_pairs"}
         sym_a, sym_b, hedge_ratio = pair_info
         other = sym_b if sym_a == symbol else sym_a
         series_a = self._price_cache.get(sym_a, [])
         series_b = self._price_cache.get(sym_b, [])
         if len(series_a) < self.params.lookback or len(series_b) < self.params.lookback:
-            return {"action": "hold"}
+            return {"action": "hold", "name": "stat_arb_pairs"}
         a = np.array(series_a[-self.params.lookback :], dtype=float)
         b = np.array(series_b[-self.params.lookback :], dtype=float)
         if np.any(a <= 0) or np.any(b <= 0):
-            return {"action": "hold"}
+            return {"action": "hold", "name": "stat_arb_pairs"}
         # Log-ratio spread: log(a) - beta * log(b)
         log_a = np.log(a)
         log_b = np.log(b)
@@ -61,7 +62,7 @@ class StatArbPairsStrategy(Strategy):
         spread_mean = float(spread.mean())
         spread_std = float(spread.std())
         if spread_std < 1e-10:
-            return {"action": "hold"}
+            return {"action": "hold", "name": "stat_arb_pairs"}
         z = (spread[-1] - spread_mean) / spread_std
 
         # Flip signal if current symbol is sym_b (the hedge leg)
@@ -70,12 +71,12 @@ class StatArbPairsStrategy(Strategy):
 
         confidence = float(np.clip(abs(z) / (self.params.z_entry * 1.5), 0.0, 1.0))
         if z >= self.params.z_entry:
-            return {"action": "sell", "pair": other, "z_score": float(z), "confidence": confidence}
+            return {"action": "sell", "name": "stat_arb_pairs", "pair": other, "z_score": float(z), "confidence": confidence}
         if z <= -self.params.z_entry:
-            return {"action": "buy", "pair": other, "z_score": float(z), "confidence": confidence}
+            return {"action": "buy", "name": "stat_arb_pairs", "pair": other, "z_score": float(z), "confidence": confidence}
         if abs(z) <= self.params.z_exit:
-            return {"action": "exit", "pair": other, "z_score": float(z), "confidence": confidence}
-        return {"action": "hold", "pair": other, "z_score": float(z)}
+            return {"action": "exit", "name": "stat_arb_pairs", "pair": other, "z_score": float(z), "confidence": confidence}
+        return {"action": "hold", "name": "stat_arb_pairs", "pair": other, "z_score": float(z)}
 
     def _update_cache(self, symbol: str, prices: list[float]) -> None:
         cache = self._price_cache.setdefault(symbol, [])
@@ -90,6 +91,8 @@ class StatArbPairsStrategy(Strategy):
             return
         symbols = list(self._price_cache.keys())
         candidates: list[tuple[str, str, float, float]] = []  # (sym_a, sym_b, hedge_ratio, t_stat)
+        n_tested = 0
+        n_passed = 0
         for i in range(len(symbols)):
             for j in range(i + 1, len(symbols)):
                 a = self._price_cache.get(symbols[i], [])
@@ -100,13 +103,19 @@ class StatArbPairsStrategy(Strategy):
                 b_series = np.array(b[-self.params.lookback :], dtype=float)
                 if np.any(a_series <= 0) or np.any(b_series <= 0):
                     continue
+                n_tested += 1
                 hedge_ratio, t_stat = self._cointegration_test(a_series, b_series)
                 if t_stat is not None and t_stat < -2.86:  # ~5% significance for ADF
+                    n_passed += 1
                     candidates.append((symbols[i], symbols[j], hedge_ratio, t_stat))
         # Rank by most negative t-stat (strongest cointegration)
         candidates.sort(key=lambda p: p[3])
         self._pairs = [(a, b, hr) for a, b, hr, _ in candidates[: self.params.max_pairs]]
         self._last_refresh = now
+        logging.info(
+            "stat_arb: %d symbols in cache, %d pairs tested, %d passed ADF, %d active pairs",
+            len(symbols), n_tested, n_passed, len(self._pairs),
+        )
 
     def _find_pair(self, symbol: str) -> tuple[str, str, float] | None:
         for pair in self._pairs:

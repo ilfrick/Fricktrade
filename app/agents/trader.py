@@ -916,6 +916,7 @@ class TradingAgent:
                     if trace:
                         trace["regime"] = regime_state.regime
                         trace["regime_name"] = regime_state.regime_name
+                        trace["regime_probability"] = regime_state.probability
 
         # UNLOCKED: Orchestrator inference (CPU heavy)
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
@@ -2044,6 +2045,11 @@ class TradingAgent:
             news_snap = dict(self._news_cache)
             orders_snap = list(self._open_order_mgr.cache)
 
+        # Sort exits-first so position-holders run before new-entry candidates,
+        # reducing the chance that new buys exhaust notional before exits free it.
+        _positions = batch_portfolio.get("positions", {})
+        symbols = sorted(symbols, key=lambda s: (0 if s in _positions else 1))
+
         # Use persistent ThreadPoolExecutor for parallel processing
         futures = [
             self._symbol_executor.submit(
@@ -2088,6 +2094,7 @@ class TradingAgent:
             adjusted["trend_following"] = adjusted.get("trend_following", 0) * 1.3
             adjusted["pattern_trading"] = adjusted.get("pattern_trading", 0) * 1.2
             adjusted["stat_arb_pairs"] = adjusted.get("stat_arb_pairs", 0) * 0.8
+            adjusted["factor_model"] = adjusted.get("factor_model", 0) * 0.9
         elif regime == 2:  # high_vol_crisis
             adjusted["trend_following"] = adjusted.get("trend_following", 0) * 0.7
             adjusted["stat_arb_pairs"] = adjusted.get("stat_arb_pairs", 0) * 1.4
