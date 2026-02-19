@@ -336,6 +336,11 @@ class SymbolManager:
         if ai_cfg.get("enabled", False) and score_symbols is not None:
             ai_cfg_payload = dict(ai_cfg)
             ai_cfg_payload["market_cache"] = self._cfg.get("market_cache", {})
+            _ai_filter_fallback = False
+            inflight_at = None
+            ordered: list[str] = []
+            scores: dict = {}
+            signal_map: dict = {}
             with self._ai_filter_future_lock:
                 if self._ai_filter_future is None:
                     logging.info("AI filter run starting; universe=%d", len(universe))
@@ -350,76 +355,94 @@ class SymbolManager:
                     self._ai_filter_inflight_at = now
                     return
                 if not self._ai_filter_future.done():
+                    _inflight_elapsed = 0
                     if self._ai_filter_inflight_at is not None:
-                        elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
+                        _inflight_elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
+                    _max_inflight = int(ai_cfg.get("max_inflight_seconds", 300))
+                    if _inflight_elapsed > _max_inflight:
+                        logging.warning(
+                            "AI filter abandoned after %d s (max_inflight_seconds=%d); "
+                            "falling back to scanner.",
+                            _inflight_elapsed,
+                            _max_inflight,
+                        )
+                        self._ai_filter_future = None
+                        self._ai_filter_inflight_at = None
+                        self._ai_filter_inflight_log_at = None
+                        _ai_filter_fallback = True
+                    else:
                         last_log = self._ai_filter_inflight_log_at
                         if last_log is None or (now - last_log).total_seconds() >= 60:
-                            logging.info("AI filter still running; elapsed_sec=%d", elapsed)
+                            logging.info("AI filter still running; elapsed_sec=%d", _inflight_elapsed)
                             self._ai_filter_inflight_log_at = now
-                    return
-                try:
-                    result = self._ai_filter_future.result()
-                    if isinstance(result, tuple) and len(result) == 3:
-                        ordered, scores, signal_map = result
-                    else:
-                        ordered, scores = result
+                        return
+                if not _ai_filter_fallback:
+                    try:
+                        result = self._ai_filter_future.result()
+                        if isinstance(result, tuple) and len(result) == 3:
+                            ordered, scores, signal_map = result
+                        else:
+                            ordered, scores = result
+                            signal_map = {}
+                    except Exception as exc:
+                        elapsed = None
+                        if self._ai_filter_inflight_at is not None:
+                            elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
+                        logging.warning("AI filter run failed; elapsed_sec=%s err=%s", elapsed, exc)
+                        ordered = []
+                        scores = {}
                         signal_map = {}
-                except Exception as exc:
-                    elapsed = None
-                    if self._ai_filter_inflight_at is not None:
-                        elapsed = int((now - self._ai_filter_inflight_at).total_seconds())
-                    logging.warning("AI filter run failed; elapsed_sec=%s err=%s", elapsed, exc)
-                    ordered = []
-                    scores = {}
-                    signal_map = {}
-                inflight_at = self._ai_filter_inflight_at
-                self._ai_filter_future = None
-                self._ai_filter_inflight_at = None
-                self._ai_filter_inflight_log_at = None
-            elapsed = None
-            if inflight_at is not None:
-                elapsed = int((now - inflight_at).total_seconds())
-            logging.info(
-                "AI filter scored %d symbols (enabled); elapsed_sec=%s top=%s",
-                len(ordered),
-                elapsed,
-                ",".join(ordered[:5]),
-            )
-            self._ai_filter_last_run_at = now
-            self._ai_filter_last_count = len(ordered)
-            self._ai_filter_last_signals = dict(signal_map)
-            if signal_map and signal_metrics_fn is not None:
-                for sym, vals in signal_map.items():
-                    if vals:
-                        signal_metrics_fn(sym, vals)
-            if not ordered:
-                ordered = list(universe)
-            if ai_cfg.get("coverage_filter", False) and signal_map:
-                covered = {sym for sym, vals in signal_map.items() if vals}
-                if covered:
-                    before = len(ordered)
-                    ordered = [sym for sym in ordered if sym in covered]
-                    removed = before - len(ordered)
-                    if removed > 0:
-                        logging.info("AI filter coverage removed %d symbols without bars.", removed)
-            ordered = self.merge_with_positions(ordered, portfolio, max_symbols)
-            self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)
-            self._symbols_by_strategy["__global__"] = ordered
-            for name in strategy_names:
-                self._symbols_by_strategy[name] = ordered
-            self._symbols = ordered
-            self._dynamic_symbols = list(ordered)
-            self._dynamic_symbols_at = now
-            if (
-                self._market_cache_cfg is not None
-                and self._market_cache_cfg.enabled
-                and self._market_cache_cfg.filtered_symbols_enabled
-            ):
-                cache_interval = str(ai_cfg.get("interval", self._cfg.get("data", {}).get("interval", "1m")))
-                ttl_seconds = interval_to_seconds(cache_interval)
-                if self._market_cache is not None:
-                    self._market_cache.set_filtered_symbols(ordered, cache_interval, ttl_seconds=ttl_seconds)
-            return
+                    inflight_at = self._ai_filter_inflight_at
+                    self._ai_filter_future = None
+                    self._ai_filter_inflight_at = None
+                    self._ai_filter_inflight_log_at = None
+            if _ai_filter_fallback:
+                pass  # fall through to scanner path below
+            else:
+                elapsed = None
+                if inflight_at is not None:
+                    elapsed = int((now - inflight_at).total_seconds())
+                logging.info(
+                    "AI filter scored %d symbols (enabled); elapsed_sec=%s top=%s",
+                    len(ordered),
+                    elapsed,
+                    ",".join(ordered[:5]),
+                )
+                self._ai_filter_last_run_at = now
+                self._ai_filter_last_count = len(ordered)
+                self._ai_filter_last_signals = dict(signal_map)
+                if signal_map and signal_metrics_fn is not None:
+                    for sym, vals in signal_map.items():
+                        if vals:
+                            signal_metrics_fn(sym, vals)
+                if not ordered:
+                    ordered = list(universe)
+                if ai_cfg.get("coverage_filter", False) and signal_map:
+                    covered = {sym for sym, vals in signal_map.items() if vals}
+                    if covered:
+                        before = len(ordered)
+                        ordered = [sym for sym in ordered if sym in covered]
+                        removed = before - len(ordered)
+                        if removed > 0:
+                            logging.info("AI filter coverage removed %d symbols without bars.", removed)
+                ordered = self.merge_with_positions(ordered, portfolio, max_symbols)
+                self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)
+                self._symbols_by_strategy["__global__"] = ordered
+                for name in strategy_names:
+                    self._symbols_by_strategy[name] = ordered
+                self._symbols = ordered
+                self._dynamic_symbols = list(ordered)
+                self._dynamic_symbols_at = now
+                if (
+                    self._market_cache_cfg is not None
+                    and self._market_cache_cfg.enabled
+                    and self._market_cache_cfg.filtered_symbols_enabled
+                ):
+                    cache_interval = str(ai_cfg.get("interval", self._cfg.get("data", {}).get("interval", "1m")))
+                    ttl_seconds = interval_to_seconds(cache_interval)
+                    if self._market_cache is not None:
+                        self._market_cache.set_filtered_symbols(ordered, cache_interval, ttl_seconds=ttl_seconds)
+                return
         if ai_cfg.get("enabled", False) and score_symbols is None:
             logging.warning("AI filter enabled but module unavailable; falling back to scanner filters.")
         filters_cfg_default = dyn_cfg.get("filters", {})
