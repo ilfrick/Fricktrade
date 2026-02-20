@@ -77,11 +77,13 @@ def test_order_queue_retry() -> None:
 
 def test_order_queue_completion_grace(monkeypatch) -> None:
     class _Clock:
-        now = None
+        current = None
 
         @classmethod
-        def utcnow(cls):
-            return cls.now
+        def now(cls, tz=None):
+            if tz is None:
+                return cls.current
+            return cls.current.replace(tzinfo=tz)
 
     class _StubBroker:
         def __init__(self) -> None:
@@ -95,7 +97,7 @@ def test_order_queue_completion_grace(monkeypatch) -> None:
     from datetime import datetime, timedelta
     import app.execution.order_queue as order_queue
 
-    _Clock.now = datetime(2026, 1, 1, 0, 0, 0)
+    _Clock.current = datetime(2026, 1, 1, 0, 0, 0)
     monkeypatch.setattr(order_queue, "datetime", _Clock)
 
     broker = _StubBroker()
@@ -107,7 +109,7 @@ def test_order_queue_completion_grace(monkeypatch) -> None:
     queue.update([])
     assert queue.pop_responses() == []
 
-    _Clock.now = _Clock.now + timedelta(seconds=61)
+    _Clock.current = _Clock.current + timedelta(seconds=61)
     queue.update([])
     responses = queue.pop_responses()
     assert any(r.status == "completed" for r in responses)

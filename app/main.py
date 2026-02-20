@@ -39,6 +39,8 @@ def _empty_market_state() -> dict:
     return {
         "prices": [],
         "volumes": [],
+        "session_prices": [],
+        "session_volumes": [],
         "qty": 1,
         "exposure_pct": 1.0,
         "short_exposure_pct": 0.0,
@@ -47,6 +49,10 @@ def _empty_market_state() -> dict:
         "opens": [],
         "highs": [],
         "lows": [],
+        "session_opens": [],
+        "session_highs": [],
+        "session_lows": [],
+        "session_bar_count": 0,
         "session_volume": 0.0,
         "relative_volume": 0.0,
         "session_gain_pct": 0.0,
@@ -157,6 +163,30 @@ def _market_state_from_df(data: pd.DataFrame, lookback_days: int, interval: str,
     opens = open_.iloc[-lookback_bars:].to_numpy(dtype=float).tolist() if open_ is not None else []
     highs = high.iloc[-lookback_bars:].to_numpy(dtype=float).tolist() if high is not None else []
     lows = low.iloc[-lookback_bars:].to_numpy(dtype=float).tolist() if low is not None else []
+
+    day_data = data
+    idx = data.index
+    if isinstance(idx, pd.DatetimeIndex) and len(idx) > 0:
+        day_mask = idx.date == idx[-1].date()
+        if day_mask.any():
+            day_data = data.loc[day_mask]
+
+    session_close = day_data["Close"] if "Close" in day_data.columns else close
+    session_volume_col = day_data["Volume"] if "Volume" in day_data.columns else volume
+    session_open_col = day_data["Open"] if "Open" in day_data.columns else open_
+    session_high_col = day_data["High"] if "High" in day_data.columns else high
+    session_low_col = day_data["Low"] if "Low" in day_data.columns else low
+
+    session_prices = session_close.to_numpy(dtype=float).tolist() if session_close is not None else []
+    session_volumes = (
+        session_volume_col.to_numpy(dtype=float).tolist()
+        if session_volume_col is not None
+        else []
+    )
+    session_opens = session_open_col.to_numpy(dtype=float).tolist() if session_open_col is not None else []
+    session_highs = session_high_col.to_numpy(dtype=float).tolist() if session_high_col is not None else []
+    session_lows = session_low_col.to_numpy(dtype=float).tolist() if session_low_col is not None else []
+
     last_price = prices[-1] if prices else None
     avg_volume = float(sum(volumes) / len(volumes)) if volumes else 0.0
     session_volume = float(sum(volumes)) if volumes else 0.0
@@ -166,6 +196,8 @@ def _market_state_from_df(data: pd.DataFrame, lookback_days: int, interval: str,
     state = {
         "prices": prices,
         "volumes": volumes,
+        "session_prices": session_prices,
+        "session_volumes": session_volumes,
         "qty": 1,
         "exposure_pct": 1.0,
         "short_exposure_pct": 0.0,
@@ -174,6 +206,10 @@ def _market_state_from_df(data: pd.DataFrame, lookback_days: int, interval: str,
         "opens": opens,
         "highs": highs,
         "lows": lows,
+        "session_opens": session_opens,
+        "session_highs": session_highs,
+        "session_lows": session_lows,
+        "session_bar_count": len(session_prices),
         "session_volume": session_volume,
         "relative_volume": rel_volume,
         "session_gain_pct": session_gain_pct,

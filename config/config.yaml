@@ -217,15 +217,17 @@ strategy:
   - factor_model
   - pattern_trading
   - stat_arb_pairs
+  - top_movers_rf
   combine: vote
-  min_conviction: 0.3
+  min_conviction: 0.12
+  single_sided_conviction_multiplier: 0.4
   fee_aware:
     min_edge_pct: 0.005
     edge_multiplier: 0.5
     min_notional: 50.0
   signal_bias_guard:
     enabled: true
-    threshold: 0.2
+    threshold: 0.65
   performance:
     enabled: true
     window_days: 30
@@ -265,15 +267,43 @@ strategy:
       inventory_target_pct: 0.0
       skew_pct: 0.15
       min_qty: 1
+    top_movers_rf:
+      data_dir: /data
+      model_path: /data/models/top_movers_rf/top_movers_rf.pkl
+      auto_train_on_start: true
+      retrain_if_older_hours: 24
+      min_training_days: 5
+      min_bars: 60
+      top_n: 10
+      runtime_interval: 5m
+      training_interval: 5m
+      cutoff_minutes: 30
+      entry_warmup_minutes: 20
+      entry_horizon_minutes: 90
+      low_zone_tol_pct: 0.35
+      rebound_target_pct: 2.0
+      buy_nowcast_min: 0.50
+      buy_entry_min: 0.50
+      buy_score_min: 0.54
+      exit_score_max: 0.40
+      exit_pullback_from_high_pct: 1.2
+      nowcast_weight: 0.65
+      entry_weight: 0.35
+      respect_account_blocks: true
+      respect_pdt_soft_block: true
+      pdt_daytrade_limit: 3
+      pdt_min_equity: 25000
+      min_buying_power: 50
 orchestrator:
   mode: weight
   top_k: 3
   min_score: 0.0
   strategy_weights:
-    trend_following: 0.35
-    factor_model: 0.25
-    pattern_trading: 0.25
-    stat_arb_pairs: 0.15
+    trend_following: 0.18
+    factor_model: 0.14
+    pattern_trading: 0.20
+    stat_arb_pairs: 0.06
+    top_movers_rf: 0.42
   rl:
     enabled: false
     model_type: lstm
@@ -554,8 +584,8 @@ data:
     retries: 2
     ai_filter:
       enabled: true
-      provider: yfinance
-      coverage_filter: true
+      provider: alpaca
+      coverage_filter: false
       use_cached_symbols: false
       interval: 5m
       lookback_days: 2
@@ -716,7 +746,7 @@ reports:
     check_interval_seconds: 60
     close_delay_minutes: 5
     broker_venues: {}
-    use_symbol_venues_auto: false
+    use_symbol_venues_auto: true
     prometheus_url: http://prometheus:9090
     signal_thresholds:
       early_return_30m_pct: 1.5

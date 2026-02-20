@@ -14,6 +14,7 @@ def test_defaults():
     assert cfg.signal_bias_guard == {}
     assert cfg.performance == {}
     assert cfg.min_conviction == 0.0
+    assert cfg.single_sided_conviction_multiplier == 1.0
 
 
 def test_from_dict_roundtrip():
@@ -26,6 +27,7 @@ def test_from_dict_roundtrip():
         "signal_bias_guard": {"threshold": 0.3},
         "performance": {"track": True},
         "min_conviction": 0.3,
+        "single_sided_conviction_multiplier": 0.5,
     }
     cfg = StrategyConfig.from_dict(d)
     assert cfg.name == "trend_following"
@@ -33,6 +35,7 @@ def test_from_dict_roundtrip():
     assert cfg.combine == "vote"
     assert cfg.params == {"lookback_minutes": 30}
     assert cfg.min_conviction == 0.3
+    assert cfg.single_sided_conviction_multiplier == 0.5
     assert cfg.to_dict() == d
 
 

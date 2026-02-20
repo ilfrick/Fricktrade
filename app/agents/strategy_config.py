@@ -16,6 +16,7 @@ class StrategyConfig:
     signal_bias_guard: dict = field(default_factory=dict)
     performance: dict = field(default_factory=dict)
     min_conviction: float = 0.0
+    single_sided_conviction_multiplier: float = 1.0
 
     @classmethod
     def from_dict(cls, d: dict) -> "StrategyConfig":

@@ -19,6 +19,9 @@ Operational and development scripts for Fricktrade.
 | `backtest_gpu.sh` | Run GPU-accelerated backtests via `docker compose --profile gpu` |
 | `benchmark_runner.py` | Multi-scenario backtest benchmarks with Sharpe/Sortino/Calmar ratios, bootstrap CIs, and PDF report |
 | `orchestrator_sweep.py` | Hyperparameter grid search for RL orchestrator (model type, hidden dim, seq len, learning rate) |
+| `top_movers_forecast.py` | Build a walk-forward model from historical `*_YYYY-MM-DD_1m.csv` data and forecast next-day top movers |
+| `top_movers_same_day.py` | Same-day models: early-session top-mover nowcast plus intraday low-zone entry scoring (`--model random_forest|xgboost`) |
+| `tune_xgb_same_day.py` | Random-search tune XGBoost for same-day nowcast/entry objectives and emit best-params final run |
 
 ## Monitoring
 
@@ -31,6 +34,7 @@ Operational and development scripts for Fricktrade.
 | `monitor_sell_decisions.py` | Parse decision traces for sell/exit signals and skip reasons; generate JSON report with RL value estimates and orchestrator picks |
 | `monitor_sell_analysis.sh` | Capture exit triggers, success/failure rates, retry budget usage, pending notional, and order rates by side; schedule via cron at 15:25 CET Mon-Fri |
 | `decision_monitor.py` | Incremental decision trace aggregator: byte-offset reader, P0 fix verification (weights, phantom sells, sell overshoot), periodic JSONL snapshots, session report; schedule via cron at 15:25 CET Mon-Fri |
+| `analyze_top_movers_trade_gap.py` | Diagnose why reported top movers were not traded by streaming decision traces and classifying symbol-level blockers |
 
 | `live_pnl_summary.sh` | Query Prometheus for live PnL, drawdown, trades, win rate, leverage, and risk metrics |
 

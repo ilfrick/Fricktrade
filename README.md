@@ -149,6 +149,7 @@ flowchart LR
 - `factor_model`: momentum (10-bar) + liquidity + volatility + mean-reversion composite with trend quality gate
 - `pattern_trading`: chart pattern breakout with ATR-based adaptive stop + trailing exits
 - `stat_arb_pairs`: dynamic pair selection (rolling correlation) + spread z-score mean-reversion
+- `top_movers_rf`: same-day top-mover random-forest nowcast + intraday low-zone entry scoring
 
 Additional strategies available but disabled by default: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `market_maker`.
 

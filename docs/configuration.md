@@ -223,7 +223,7 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `strategy.name`: Single strategy name (legacy).
 - `strategy.names`: Multi-strategy list.
 - `strategy.combine`: `priority` or `vote` when combining signals.
-- `strategy.min_conviction`: Minimum weighted score to act (default: 0.0). Signals below this threshold result in hold.
+- `strategy.min_conviction`: Minimum weighted score to act (default: 0.12). Signals below this threshold result in hold.
 - `strategy.fee_aware.*`: Fee-aware bias adjustments.
 - `strategy.fee_aware.min_edge_pct`: Minimum expected edge to trade.
 - `strategy.fee_aware.edge_multiplier`: Scale factor for edge.
@@ -247,12 +247,25 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `strategy.params.factor_model.*`: Factor model weights and thresholds (momentum_weight, liquidity_weight, volatility_weight, mr_weight, buy_threshold, sell_threshold).
 - `strategy.params.stat_arb_pairs.*`: Pair trading parameters.
 - `strategy.params.market_maker.*`: Market maker parameters.
+- `strategy.params.top_movers_rf.*`: Same-day RF top-mover model settings.
+- `strategy.params.top_movers_rf.data_dir/model_path`: Training data directory and persisted model bundle path.
+- `strategy.params.top_movers_rf.auto_train_on_start`: Train automatically when bundle is missing/stale.
+- `strategy.params.top_movers_rf.retrain_if_older_hours`: Max age before retrain.
+- `strategy.params.top_movers_rf.top_n`: Per-day top-N label used for nowcast training.
+- `strategy.params.top_movers_rf.cutoff_minutes`: Early-session window for nowcast features.
+- `strategy.params.top_movers_rf.entry_warmup_minutes/entry_horizon_minutes`: Entry model warmup + forward horizon.
+- `strategy.params.top_movers_rf.low_zone_tol_pct/rebound_target_pct`: Entry-label definition thresholds.
+- `strategy.params.top_movers_rf.buy_nowcast_min/buy_entry_min/buy_score_min`: Entry thresholds.
+- `strategy.params.top_movers_rf.exit_score_max/exit_pullback_from_high_pct`: Exit thresholds.
+- `strategy.params.top_movers_rf.nowcast_weight/entry_weight`: Score blend weights.
+- `strategy.params.top_movers_rf.respect_account_blocks/respect_pdt_soft_block`: Account-aware gating switches.
+- `strategy.params.top_movers_rf.min_buying_power`: Minimum buying power required for entries.
 
 ### orchestrator
 - `orchestrator.mode`: Strategy selection mode (`weight` default, `direct`, `select`).
 - `orchestrator.top_k`: Max strategies to keep.
 - `orchestrator.min_score`: Minimum score to be selected.
-- `orchestrator.strategy_weights`: Per-strategy weight map (e.g., `{trend_following: 0.35, factor_model: 0.25, pattern_trading: 0.25, stat_arb_pairs: 0.15}`).
+- `orchestrator.strategy_weights`: Per-strategy weight map (e.g., `{trend_following: 0.18, factor_model: 0.14, pattern_trading: 0.20, stat_arb_pairs: 0.06, top_movers_rf: 0.42}`).
 - `orchestrator.rl.enabled`: Enable RL orchestrator (default: false).
 - `orchestrator.rl.model_type`: `lstm` or `mlp`.
 - `orchestrator.rl.device`: `auto`, `cpu`, or `cuda`.

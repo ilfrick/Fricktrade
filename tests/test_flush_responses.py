@@ -31,7 +31,7 @@ def test_flush_responses_dispatches_to_orchestrator():
     agent = _make_agent()
     resp = OrderResponse(
         symbol="AAPL", broker="test", status="filled",
-        order_id="123", side="buy", qty=10, price=150.0,
+        order_id="123", side="buy", qty=10, filled_qty=10, filled_avg_price=150.0,
     )
     queue = MagicMock()
     queue.pop_responses.return_value = [resp]
@@ -46,7 +46,7 @@ def test_flush_responses_handles_orchestrator_error():
     agent = _make_agent()
     resp = OrderResponse(
         symbol="AAPL", broker="test", status="filled",
-        order_id="123", side="buy", qty=10, price=150.0,
+        order_id="123", side="buy", qty=10, filled_qty=10, filled_avg_price=150.0,
     )
     queue = MagicMock()
     queue.pop_responses.return_value = [resp]

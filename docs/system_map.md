@@ -108,7 +108,7 @@ flowchart LR
 
 ## Strategies
 - `app/strategies/`: signal generators.
-  - **Active**: `trend_following` (supertrend + VWAP + RSI + regime), `factor_model` (hurst-adaptive + stochastic/CCI), `pattern_trading` (ATR stop), `stat_arb_pairs` (log-ratio spread + ADF cointegration).
+  - **Active**: `trend_following` (supertrend + VWAP + RSI + regime), `factor_model` (hurst-adaptive + stochastic/CCI), `pattern_trading` (ATR stop), `stat_arb_pairs` (log-ratio spread + ADF cointegration), `top_movers_rf` (same-day mover nowcast + low-zone entry).
   - **Inactive**: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `market_maker`.
 - `app/strategies/base.py`: strategy interface.
 - `app/strategies/confidence_calibrator.py`: bin-based confidence calibration per strategy.

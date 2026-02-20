@@ -59,6 +59,7 @@ from app.strategies.factor_model import FactorModelStrategy
 from app.strategies.stat_arb_pairs import StatArbPairsStrategy
 from app.strategies.market_maker import MarketMakerStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
+from app.strategies.top_movers_rf import TopMoversRFStrategy
 from app.data.news import fetch_catalyst_symbols_for_config
 from app.data.market_cache import build_market_cache, build_market_cache_config
 from app.learning.drift import DriftMonitor
@@ -407,6 +408,12 @@ class TradingAgent:
             return StatArbPairsStrategy(params)
         if name == "market_maker":
             return MarketMakerStrategy(params)
+        if name == "top_movers_rf":
+            strategy_cfg = dict(params.get("top_movers_rf", {}) or {})
+            interval = str(self.cfg.get("data", {}).get("interval", "1m"))
+            strategy_cfg.setdefault("runtime_interval", interval)
+            strategy_cfg.setdefault("training_interval", interval)
+            return TopMoversRFStrategy(strategy_cfg, runtime_interval=interval)
         logging.warning("Unknown strategy '%s' requested, skipping.", name)
         return None
 
@@ -2148,6 +2155,19 @@ class TradingAgent:
         top_buy_weight = None
         top_sell = None
         top_sell_weight = None
+
+        def _hold_strategy_name() -> str | None:
+            # For hold outcomes, prefer the strongest directional strategy if one side dominates.
+            if buy_score > sell_score and top_buy:
+                return top_buy.get("name")
+            if sell_score > buy_score and top_sell:
+                return top_sell.get("name")
+            if top_buy and not top_sell:
+                return top_buy.get("name")
+            if top_sell and not top_buy:
+                return top_sell.get("name")
+            return top_signal.get("name") if top_signal else None
+
         for signal in signals:
             action = signal.get("action")
             name = signal.get("name")
@@ -2170,10 +2190,19 @@ class TradingAgent:
                     top_sell_weight = effective_weight
                     top_sell = signal
         if buy_score == sell_score:
-            return "hold", 1.0, top_signal.get("name") if top_signal else None
+            return "hold", 1.0, _hold_strategy_name()
         winning_score = max(buy_score, sell_score)
-        if min_conviction > 0 and winning_score < min_conviction:
-            return "hold", 1.0, top_signal.get("name") if top_signal else None
+        effective_min_conviction = float(min_conviction)
+        if min_conviction > 0 and (
+            (buy_score > 0 and sell_score == 0) or (sell_score > 0 and buy_score == 0)
+        ):
+            multiplier = float(
+                getattr(self._strategy_cfg, "single_sided_conviction_multiplier", 1.0) or 1.0
+            )
+            multiplier = min(max(multiplier, 0.0), 1.0)
+            effective_min_conviction = min_conviction * multiplier
+        if effective_min_conviction > 0 and winning_score < effective_min_conviction:
+            return "hold", 1.0, _hold_strategy_name()
         if buy_score > sell_score:
             chosen = top_buy or top_signal
             return "buy", 1.0, chosen.get("name") if chosen else None
@@ -2543,10 +2572,28 @@ class TradingAgent:
         def _flag_value(key: str) -> bool:
             val = account.get(key)
             return str(val).lower() in {"true", "1", "yes"} or val == True
+        def _float_value(*keys: str) -> float | None:
+            for key in keys:
+                if key not in account:
+                    continue
+                raw = account.get(key)
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    continue
+            return None
         market_state["account_flags"] = {
             "account_blocked": _flag_value("account_blocked"),
             "trading_blocked": _flag_value("trading_blocked"),
             "trade_suspended_by_user": _flag_value("trade_suspended_by_user"),
+            "pattern_day_trader": _flag_value("pattern_day_trader"),
+            "shorting_enabled": _flag_value("shorting_enabled"),
+            "daytrade_count": _float_value(
+                "daytrade_count",
+                "day_trade_count",
+                "daytrading_count",
+                "daytrades",
+            ),
         }
         market_state["catalyst"] = (news_snapshot or self._news_cache).get(symbol, False)
         market_state["open_orders"] = orders_snapshot if orders_snapshot is not None else self._open_order_mgr.cache

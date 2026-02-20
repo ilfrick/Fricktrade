@@ -46,13 +46,14 @@ execution, and metrics updates.
 - Position-close orders bypass the retry notional budget (`execution.retry.max_notional`) so exits are never blocked by exhausted retry capacity.
 
 ## Key Components
-- Strategy selection: `strategy.name` or `strategy.names` (default: trend_following, factor_model, pattern_trading, stat_arb_pairs).
+- Strategy selection: `strategy.name` or `strategy.names` (default: trend_following, factor_model, pattern_trading, stat_arb_pairs, top_movers_rf).
 - Orchestrator: `app/agents/orchestrator.py` (weight-based strategy selection; RL mode available but disabled by default).
 - Strategy signal enhancements:
   - **Trend following**: RSI(14) overbought/oversold filter + volume spike confirmation.
   - **Factor model**: 10-bar momentum, mean-reversion z-score, trend quality gate (holds in choppy markets).
   - **Pattern trading**: ATR-based adaptive stop (2x ATR with fixed % floor).
   - **Stat-arb pairs**: spread z-score mean-reversion with dynamic pair selection.
+  - **Top movers RF**: same-day top-mover nowcast + low-zone entry probability with account-aware gating.
 - Open-order guard: `execution.open_orders`.
 - Market hours gating: `app/utils/market.py`.
 - Metrics: `app/monitoring/metrics.py`.

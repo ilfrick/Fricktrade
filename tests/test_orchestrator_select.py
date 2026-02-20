@@ -48,7 +48,9 @@ def test_select_direct_mode():
     probs = {"s1": 0.8, "s2": 0.5, "s3": 0.1}
     with patch.object(orch, "_predict", return_value=probs):
         with patch.object(orch, "_ensure_model"):
-            names, weights = orch.select("AAPL", ["s1", "s2", "s3"], {})
+            # Avoid epsilon exploration so direct mode remains deterministic.
+            with patch("random.random", return_value=1.0):
+                names, weights = orch.select("AAPL", ["s1", "s2", "s3"], {})
     assert len(names) == 1
     assert names[0] == "s1"
 

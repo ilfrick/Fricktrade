@@ -18,6 +18,8 @@ market state and influence actions via the signal bias guard.
 
 - **Stat-arb pairs**: `app/strategies/stat_arb_pairs.py` — dynamic pair selection via **numpy ADF cointegration test** (pairs ranked by t-stat, threshold < -2.86 for ~5% significance). Uses **log-ratio spread**: `log(a) - beta * log(b)` with OLS hedge ratio from `np.polyfit`. Z-score entry at 2.0 (wider for selectivity), exit at 0.5. Pairs refresh every `refresh_minutes`. Emits `confidence` on actionable signals.
 
+- **Top movers RF**: `app/strategies/top_movers_rf.py` — trains two RandomForest models from historical intraday CSVs: (1) early-session same-day top-mover nowcast and (2) intraday low-zone entry probability. Runtime signal blends nowcast + entry scores, emits `buy` when both exceed thresholds, and emits `exit` on score deterioration/pullback. It is account-aware: blocks entries on account-block flags and can soft-block entries under PDT conditions.
+
 ## Inactive Strategies (available but disabled by default)
 - RL policy (`rl_policy`), fee-aware RL policy (`rl_policy_fees`): disabled — near-uniform output (~33/33/33), needs retraining.
 - Market maker (`market_maker`): conflicts with directional strategies.
@@ -40,7 +42,8 @@ All strategies receive `market_state["indicators"]` — ~30 indicators computed 
 - Default mode is `weight`: each strategy gets a fixed weight from `orchestrator.strategy_weights`, signals are combined by `calibrated_confidence * regime_adjusted_weight`.
 - RL orchestrator (`orchestrator.rl.enabled: false` by default) is available but disabled — it adds latency without conviction when untrained.
 - Combine mode: `priority` or `vote` (see `strategy.combine`).
-- `strategy.min_conviction`: minimum weighted score required before acting (default 0.3). Below this threshold the agent holds.
+- `strategy.min_conviction`: minimum weighted score required before acting (default 0.12). Below this threshold the agent holds.
+- `strategy.single_sided_conviction_multiplier`: scales `min_conviction` when only one side has non-zero score.
 
 ### Global Account Activity Tracking
 - **Purpose**: Penalizes prolonged inactivity across all symbols on an account
@@ -55,21 +58,23 @@ All strategies receive `market_state["indicators"]` — ~30 indicators computed 
 
 ## Configuration
 `config/config.yaml`:
-- `strategy.name` or `strategy.names` — active strategy list (default: `[trend_following, factor_model, pattern_trading, stat_arb_pairs]`)
+- `strategy.name` or `strategy.names` — active strategy list (default: `[trend_following, factor_model, pattern_trading, stat_arb_pairs, top_movers_rf]`)
 - `strategy.combine` — signal combination mode (`priority` or `vote`)
-- `strategy.min_conviction` — minimum weighted score to act (default: 0.3)
+- `strategy.min_conviction` — minimum weighted score to act (default: 0.12)
 - `strategy.params.trend_following.*` — fast/slow window, breakout/exit thresholds
 - `strategy.params.factor_model.*` — weights (momentum, liquidity, volatility, mr_weight), buy/sell thresholds
 - `strategy.params.stat_arb_pairs.*` — lookback, z_entry, z_exit, refresh_minutes, max_pairs
+- `strategy.params.top_movers_rf.*` — model training/inference thresholds, score blend, and account-aware gating
 - `strategy.fee_aware.*` (fee guard)
 - `strategy.signal_bias_guard.*`
+- `strategy.single_sided_conviction_multiplier`
 - `pattern_trading.*` (selection filters, pattern params, entry/risk settings)
 - `orchestrator.mode` — `weight` (default), `direct`, or `select`
-- `orchestrator.strategy_weights` — per-strategy weight map (default: `{trend_following: 0.35, factor_model: 0.25, pattern_trading: 0.25, stat_arb_pairs: 0.15}`)
+- `orchestrator.strategy_weights` — per-strategy weight map (default: `{trend_following: 0.18, factor_model: 0.14, pattern_trading: 0.20, stat_arb_pairs: 0.06, top_movers_rf: 0.42}`)
 - `orchestrator.rl.*` — RL orchestrator (disabled by default)
 
 ## Usage
-- Default: set `strategy.names: [trend_following, factor_model, pattern_trading, stat_arb_pairs]` with `strategy.combine: vote`.
+- Default: set `strategy.names: [trend_following, factor_model, pattern_trading, stat_arb_pairs, top_movers_rf]` with `strategy.combine: vote`.
 - Single strategy: set `strategy.name: trend_following`.
 - Add confidence: strategies emit `confidence` (0-1); `_combine_signals()` uses `confidence * strategy_weight` as effective weight.
 

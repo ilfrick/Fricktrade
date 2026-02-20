@@ -631,6 +631,11 @@ class _SymbolState:
         self.opens = deque(maxlen=max_len)
         self.highs = deque(maxlen=max_len)
         self.lows = deque(maxlen=max_len)
+        self.session_prices = deque(maxlen=max_len)
+        self.session_volumes = deque(maxlen=max_len)
+        self.session_opens = deque(maxlen=max_len)
+        self.session_highs = deque(maxlen=max_len)
+        self.session_lows = deque(maxlen=max_len)
         self.session_open = None
         self.prev_close = None
         self.current_date = None
@@ -643,11 +648,21 @@ class _SymbolState:
                 self.prev_close = self.prices[-1]
             self.session_open = price
             self.current_date = date
+            self.session_prices.clear()
+            self.session_volumes.clear()
+            self.session_opens.clear()
+            self.session_highs.clear()
+            self.session_lows.clear()
         self.prices.append(price)
         self.opens.append(float(row.get("Open", 0.0) or 0.0))
         self.highs.append(float(row.get("High", 0.0) or 0.0))
         self.lows.append(float(row.get("Low", 0.0) or 0.0))
         self.volumes.append(float(row.get("Volume", 0.0) or 0.0))
+        self.session_prices.append(price)
+        self.session_opens.append(float(row.get("Open", 0.0) or 0.0))
+        self.session_highs.append(float(row.get("High", 0.0) or 0.0))
+        self.session_lows.append(float(row.get("Low", 0.0) or 0.0))
+        self.session_volumes.append(float(row.get("Volume", 0.0) or 0.0))
 
     def update_from_values(self, ts: datetime, values) -> None:
         price = float(values[3] or 0.0)
@@ -657,20 +672,35 @@ class _SymbolState:
                 self.prev_close = self.prices[-1]
             self.session_open = price
             self.current_date = date
+            self.session_prices.clear()
+            self.session_volumes.clear()
+            self.session_opens.clear()
+            self.session_highs.clear()
+            self.session_lows.clear()
         self.prices.append(price)
         self.opens.append(float(values[0] or 0.0))
         self.highs.append(float(values[1] or 0.0))
         self.lows.append(float(values[2] or 0.0))
         self.volumes.append(float(values[4] or 0.0))
+        self.session_prices.append(price)
+        self.session_opens.append(float(values[0] or 0.0))
+        self.session_highs.append(float(values[1] or 0.0))
+        self.session_lows.append(float(values[2] or 0.0))
+        self.session_volumes.append(float(values[4] or 0.0))
 
     def market_state(self) -> dict:
         prices = list(self.prices)
         volumes = list(self.volumes)
+        session_prices = list(self.session_prices) if self.session_prices else prices
+        session_volumes = list(self.session_volumes) if self.session_volumes else volumes
+        session_opens = list(self.session_opens) if self.session_opens else list(self.opens)
+        session_highs = list(self.session_highs) if self.session_highs else list(self.highs)
+        session_lows = list(self.session_lows) if self.session_lows else list(self.lows)
         last_price = prices[-1] if prices else None
         rel_volume = 0.0
-        if volumes:
-            avg_volume = sum(volumes) / len(volumes)
-            rel_volume = (volumes[-1] / avg_volume) if avg_volume else 0.0
+        if session_volumes:
+            avg_volume = sum(session_volumes) / len(session_volumes)
+            rel_volume = (session_volumes[-1] / avg_volume) if avg_volume else 0.0
         session_gain_pct = 0.0
         if self.session_open:
             session_gain_pct = (last_price - self.session_open) / self.session_open * 100.0 if last_price else 0.0
@@ -679,11 +709,17 @@ class _SymbolState:
         return {
             "prices": prices,
             "volumes": volumes,
+            "session_prices": session_prices,
+            "session_volumes": session_volumes,
             "opens": list(self.opens),
             "highs": list(self.highs),
             "lows": list(self.lows),
+            "session_opens": session_opens,
+            "session_highs": session_highs,
+            "session_lows": session_lows,
+            "session_bar_count": len(session_prices),
             "last_price": last_price,
-            "session_volume": sum(volumes) if volumes else 0.0,
+            "session_volume": sum(session_volumes) if session_volumes else 0.0,
             "relative_volume": rel_volume,
             "session_gain_pct": session_gain_pct,
             "spread_pct": None,
