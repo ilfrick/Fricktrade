@@ -18,7 +18,7 @@ execution, and metrics updates.
 - Per-symbol venue gating uses `market.symbol_venues` and falls back to `market.default_symbol_venue`.
 - Symbol venue mappings can be refreshed from the broker via `market.symbol_venues_auto`.
 - Refreshes symbols (scanner or AI filter with Keras overlay), news cache (processed via Ollama LLM gate), and open orders.
-- Cash-aware symbol filtering enforces price <= buying power; held/open-order symbols are retained.
+- Dynamic symbol filtering enforces configured `price_min`/`price_max`; held/open-order symbols are retained.
 - The dynamic symbol cap is limited to the tradeable universe size (plus any held/open-order symbols).
 - Live market data uses `data.provider` (yfinance, alpaca, or brokers); yfinance runs through the market-cache service (Redis + file fallback).
 - When `data.dynamic_symbols.ai_filter.use_cached_symbols` is enabled, the trader consumes cached AI-filter symbol lists if available.

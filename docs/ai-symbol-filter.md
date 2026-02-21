@@ -74,9 +74,8 @@ Keras return overlay (optional):
 
 Universe selection:
 - `data.dynamic_symbols.universe` (use `brokers_active` to start from Alpaca active universe today plus positions/orders)
-- `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap before scoring)
-- `data.dynamic_symbols.cash_aware` / `data.dynamic_symbols.cash_cap_mode` enforce price <= cash;
-  when cash <= 0 or cap < price_min only held/open-order symbols are kept.
+- `data.dynamic_symbols.universe_price_filter` (filters broker universe by `price_min`/`price_max` before scoring)
+- `data.dynamic_symbols.cash_aware` / `data.dynamic_symbols.cash_cap_mode` are retained for compatibility and do not cap AI-filter symbol selection.
 
 ## Usage
 - Enable dynamic symbols: `data.dynamic_symbols.enabled: true`.

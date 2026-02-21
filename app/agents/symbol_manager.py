@@ -522,9 +522,6 @@ class SymbolManager:
                 extras.add(symbol)
         if extras:
             max_symbols = max(max_symbols, len(extras))
-        max_symbols = self.cap_symbols_by_cash(max_symbols, portfolio, dyn_cfg)
-        if extras:
-            max_symbols = max(max_symbols, len(extras))
         return max_symbols
 
     def cap_symbols_by_cash(self, max_symbols: int, portfolio: dict, dyn_cfg: dict) -> int:
@@ -619,7 +616,7 @@ class SymbolManager:
         if dyn_cfg and dyn_cfg.get("universe_price_filter", False):
             filters_cfg = dyn_cfg.get("filters", {}) or {}
             price_min = float(filters_cfg.get("price_min", 0.0))
-            price_max = self.apply_cash_cap(price_min, float("inf"), portfolio, dyn_cfg)
+            price_max = float(filters_cfg.get("price_max", float("inf")))
             filtered = filter_universe_by_price(
                 universe,
                 api_key=api_key,
@@ -718,7 +715,7 @@ class SymbolManager:
         news_cache: dict | None = None,
     ) -> list[str]:
         price_min = float(filters_cfg.get("price_min", 1.0))
-        price_max = self.apply_cash_cap(price_min, float("inf"), portfolio, dyn_cfg)
+        price_max = float(filters_cfg.get("price_max", float("inf")))
         filters = ScanFilters(
             price_min=price_min,
             price_max=price_max,

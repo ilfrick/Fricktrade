@@ -65,9 +65,9 @@ Centralize runtime settings for all subsystems.
 - Data quality validation: `data.quality.enabled`.
 - Data adjustments: `data.adjustments.enabled`.
 - Broker universe: `data.dynamic_symbols.universe: brokers_active` (Alpaca active universe today).
-- Universe price filter: `data.dynamic_symbols.universe_price_filter` (limits broker universe by price_min and cash cap).
-- Cash-aware cap: `data.dynamic_symbols.cash_aware` + `data.dynamic_symbols.cash_cap_mode`
-  (`cash` limits by available cash; `risk` also caps to max position size).
+- Universe price filter: `data.dynamic_symbols.universe_price_filter` (limits broker universe by `price_min`/`price_max`).
+- Cash-aware settings: `data.dynamic_symbols.cash_aware` + `data.dynamic_symbols.cash_cap_mode`
+  (retained for compatibility; they do not cap dynamic symbol selection).
 - News LLM catalyst gate: `news.llm.enabled` (Ollama service on `http://ollama:11434` by default).
 - Multi-broker news: `news.provider: brokers`.
 - Strategy performance reporting + kill switch: `strategy.performance.*`.
@@ -448,8 +448,8 @@ This section enumerates every setting in `config/config.yaml` and explains what 
 - `data.dynamic_symbols.refresh_minutes`: Scanner refresh cadence.
 - `data.dynamic_symbols.max_symbols/max_universe`: Caps for selection.
 - `data.dynamic_symbols.universe`: Universe source (e.g., alpaca_active).
-- `data.dynamic_symbols.universe_price_filter`: Price/cash filter for universe.
-- `data.dynamic_symbols.cash_aware`: Apply cash-aware caps.
+- `data.dynamic_symbols.universe_price_filter`: Price filter (`price_min`/`price_max`) for universe.
+- `data.dynamic_symbols.cash_aware`: Compatibility toggle (no symbol-count cap effect).
 - `data.dynamic_symbols.cash_buffer_pct`: Reserve buffer when cash-aware.
 - `data.dynamic_symbols.cash_cap_mode`: `cash` or `risk` cap mode.
 - `data.dynamic_symbols.cash_max_pct`: Max percent of cash to deploy.

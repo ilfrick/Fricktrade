@@ -47,9 +47,9 @@ Legitimate tickers that would otherwise be excluded are in `_WHITELIST`:
 - `data.dynamic_symbols.ai_filter.provider` (alpaca or yfinance bars for AI scoring)
 - `data.dynamic_symbols.ai_filter.coverage_filter` (drop symbols without bars)
 - `data.dynamic_symbols.ai_filter.use_cached_symbols` (prefer cached filtered symbols when available)
-- `data.dynamic_symbols.universe_price_filter` (filters broker universe by price_min and cash cap)
+- `data.dynamic_symbols.universe_price_filter` (filters broker universe by `price_min`/`price_max` only)
 - `data.dynamic_symbols.cash_aware` and `data.dynamic_symbols.cash_cap_mode`
-  (caps candidates to <= buying power; when buying power <= 0 or cap < price_min, only positions/open orders remain)
+  (no longer cap dynamic symbol count or universe filtering; kept for compatibility)
 - `data.dynamic_symbols.max_symbols` is capped to the tradeable universe size, but can grow to include positions/open orders.
 - `news.*`
   - `news.provider: brokers` aggregates catalysts across enabled brokers (Alpaca-backed today)

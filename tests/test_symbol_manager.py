@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
+import math
+
 from app.agents.symbol_manager import SymbolManager
 from app.agents.open_orders import OpenOrderManager
 
@@ -133,3 +135,80 @@ class TestCapSymbolsByCash:
         mgr = _make_mgr()
         result = mgr.cap_symbols_by_cash(50, {}, {"cash_aware": True, "filters": {"price_min": 0}})
         assert result == 50
+
+
+class TestCashLimitsRemovedFromSymbolSelection:
+    def test_resolve_max_symbols_for_broker_ignores_cash_cap(self):
+        mgr = _make_mgr()
+        dyn_cfg = {"max_symbols": 50, "cash_aware": True, "filters": {"price_min": 100.0}}
+        universe = [f"S{i}" for i in range(200)]
+        portfolio = {"cash": 100.0, "buying_power": 100.0, "equity": 100.0, "positions": {}}
+        result = mgr.resolve_max_symbols_for_broker(dyn_cfg, universe, portfolio, "alpaca")
+        assert result == 50
+
+    def test_scan_with_filters_keeps_price_min_without_cash_price_cap(self, monkeypatch):
+        mgr = _make_mgr()
+        captured = {}
+
+        def _fake_scan_symbols(*args, **kwargs):
+            captured["filters"] = kwargs["filters"]
+            return []
+
+        monkeypatch.setattr("app.agents.symbol_manager.scan_symbols", _fake_scan_symbols)
+
+        dyn_cfg = {
+            "max_symbols": 10,
+            "feed": "iex",
+            "timeout_seconds": 1,
+            "retries": 0,
+            "fallback": {"enabled": False},
+            "cash_aware": True,
+        }
+        portfolio = {"cash": 0.0, "buying_power": 0.0, "equity": 0.0, "positions": {}}
+        mgr.scan_with_filters(
+            portfolio,
+            {"price_min": 2.0},
+            dyn_cfg,
+            "key",
+            "secret",
+            ["AAPL", "MSFT"],
+            max_symbols=10,
+        )
+        assert captured["filters"].price_min == 2.0
+        assert math.isinf(captured["filters"].price_max)
+
+    def test_resolve_universe_price_filter_uses_unbounded_price_max(self, monkeypatch):
+        mgr = _make_mgr()
+        captured = {}
+
+        def _fake_load_universe(*args, **kwargs):
+            return ["AAPL", "MSFT"]
+
+        def _fake_filter_universe_by_price(symbols, **kwargs):
+            captured["price_min"] = kwargs["price_min"]
+            captured["price_max"] = kwargs["price_max"]
+            return list(symbols)
+
+        monkeypatch.setattr("app.agents.symbol_manager.load_universe", _fake_load_universe)
+        monkeypatch.setattr("app.agents.symbol_manager.filter_universe_by_price", _fake_filter_universe_by_price)
+
+        dyn_cfg = {
+            "universe_price_filter": True,
+            "filters": {"price_min": 2.0},
+            "feed": "iex",
+            "timeout_seconds": 1,
+            "retries": 0,
+            "cash_aware": True,
+        }
+        portfolio = {"cash": 0.0, "buying_power": 0.0, "equity": 0.0, "positions": {}}
+        result = mgr.resolve_universe(
+            "alpaca_active",
+            "key",
+            "secret",
+            max_universe=100,
+            portfolio=portfolio,
+            dyn_cfg=dyn_cfg,
+        )
+        assert result == ["AAPL", "MSFT"]
+        assert captured["price_min"] == 2.0
+        assert math.isinf(captured["price_max"])
