@@ -7,6 +7,9 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
+import pytest
+
+pytest.importorskip("sklearn", reason="scikit-learn not installed")
 
 from app.strategies.top_movers_rf import TopMoversRFStrategy
 
