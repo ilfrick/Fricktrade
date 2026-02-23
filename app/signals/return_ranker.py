@@ -59,12 +59,15 @@ FEATURE_NAMES: list[str] = [
     "atr_pct",
     # Volume-weighted momentum
     "stoch_k",
-    # News (default 0.0 at inference — no catalyst info at AI-filter time)
-    "catalyst_flag",
+    # News features (fetched by AI filter via fetch_news_features; default 0/lookback_hours when absent)
+    "catalyst_flag",       # 1.0 if keyword/LLM catalyst matched, else 0.0
+    "news_article_count",  # number of articles in lookback window (0 = no news)
+    "news_recency_hours",  # hours since most recent article (capped at lookback; lower = fresher)
 ]
 
 WINDOW = 20          # bars used for feature extraction
 N_FEATURE = len(FEATURE_NAMES)
+NEWS_LOOKBACK_HOURS = 12.0   # default recency cap when no news fetched
 
 
 # ---------------------------------------------------------------------------
@@ -92,13 +95,20 @@ def compute_return_ranker_signals(
     insamples: int = WINDOW,
     device: str = "auto",
     catalyst: bool = False,
+    news_features: dict | None = None,
 ) -> KerasReturnSignals | None:
     """Score a symbol's bar frame and return return-signal estimates.
 
     Drop-in replacement for compute_keras_return_signals.  `device` is
     accepted for interface compatibility but ignored (sklearn runs on CPU).
+
+    Args:
+        news_features: dict with keys {catalyst, article_count, recency_hours}
+                       as returned by fetch_news_features().  When provided,
+                       takes precedence over the `catalyst` bool argument.
     """
-    features = extract_features(frame, window=insamples, interval=interval, catalyst=catalyst)
+    features = extract_features(frame, window=insamples, interval=interval,
+                                catalyst=catalyst, news_features=news_features)
     if features is None:
         return None
     model = _load_model(model_path)
@@ -142,6 +152,7 @@ def extract_features(
     window: int = WINDOW,
     interval: str = "5m",
     catalyst: bool = False,
+    news_features: dict | None = None,
 ) -> np.ndarray | None:
     """Extract the FEATURE_NAMES vector from an OHLCV DataFrame.
 
@@ -202,6 +213,12 @@ def extract_features(
     atr_p = _atr_pct(w_high, w_low, w_close, 14) if w_high is not None and w_low is not None else 0.0
     stoch_k = _stoch_k(w_high, w_low, w_close, 14) if w_high is not None and w_low is not None else 50.0
 
+    # Resolve news features — news_features dict takes precedence over catalyst bool
+    nf = news_features or {}
+    catalyst_val = float(nf.get("catalyst", catalyst))
+    article_count = float(nf.get("article_count", 0))
+    recency_hours = float(nf.get("recency_hours", NEWS_LOOKBACK_HOURS))
+
     vec = np.array([
         mean_ret, std_ret, momentum, last_ret,
         vol_z,
@@ -216,7 +233,9 @@ def extract_features(
         adx_v, plus_di, minus_di, trend_str,
         rsi_14, rsi_9,
         bb_pct_b, atr_p, stoch_k,
-        1.0 if catalyst else 0.0,
+        catalyst_val,
+        article_count,
+        recency_hours,
     ], dtype=np.float64)
 
     if np.any(~np.isfinite(vec)):

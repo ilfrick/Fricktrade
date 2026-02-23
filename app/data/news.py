@@ -159,6 +159,82 @@ def _fetch_alpaca_news(
     return catalysts
 
 
+def fetch_news_features(
+    symbols: list[str],
+    provider: str,
+    base_url: str,
+    api_key: str,
+    api_secret: str,
+    lookback_hours: int = 12,
+    keywords: list[str] | None = None,
+    timeout_seconds: int = 10,
+    retries: int = 2,
+) -> dict[str, dict]:
+    """Return per-symbol news features for model training and inference.
+
+    Returns a dict keyed by symbol:
+      {
+        "catalyst": bool,          # keyword/LLM matched catalyst
+        "article_count": int,      # number of articles in lookback window
+        "recency_hours": float,    # hours since most recent article (capped at lookback_hours)
+      }
+
+    Falls back to zero-valued dicts if the provider is unsupported or fetch fails.
+    """
+    symbols = [s for s in symbols if s]
+    default = {"catalyst": False, "article_count": 0, "recency_hours": float(lookback_hours)}
+    if not symbols:
+        return {}
+    if provider != "alpaca" or not api_key or not api_secret:
+        return {s: dict(default) for s in symbols}
+    try:
+        url = f"{base_url.rstrip('/')}/v1beta1/news"
+        params = {"symbols": ",".join(symbols), "limit": 50}
+        headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret}
+        payload = None
+        for attempt in range(retries + 1):
+            try:
+                resp = requests.get(url, params=params, headers=headers, timeout=timeout_seconds)
+                resp.raise_for_status()
+                payload = resp.json()
+                break
+            except requests.RequestException:
+                if attempt >= retries:
+                    raise
+        if payload is None:
+            return {s: dict(default) for s in symbols}
+
+        items = payload.get("news", payload if isinstance(payload, list) else [])
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=lookback_hours)
+        keywords_lower = [k.lower() for k in (keywords or [])]
+
+        result: dict[str, dict] = {s: {"catalyst": False, "article_count": 0, "recency_hours": float(lookback_hours)} for s in symbols}
+
+        for item in items:
+            created_at = _parse_time(item.get("created_at") or item.get("updated_at"))
+            if created_at and created_at < cutoff:
+                continue
+            headline_text = (item.get("headline") or item.get("summary") or "").lower()
+            is_catalyst = bool(keywords_lower and any(k in headline_text for k in keywords_lower))
+            age_hours = float((now - created_at).total_seconds() / 3600.0) if created_at else float(lookback_hours)
+            age_hours = min(age_hours, float(lookback_hours))
+            for sym in item.get("symbols", []) or []:
+                if sym not in result:
+                    continue
+                result[sym]["article_count"] += 1
+                if is_catalyst:
+                    result[sym]["catalyst"] = True
+                # Track the most recent article per symbol
+                if age_hours < result[sym]["recency_hours"]:
+                    result[sym]["recency_hours"] = age_hours
+
+        return result
+    except Exception as exc:
+        logging.warning("fetch_news_features failed for %d symbols: %s", len(symbols), exc)
+        return {s: dict(default) for s in symbols}
+
+
 def _llm_catalyst_decision(text: str, llm_cfg: dict) -> bool:
     if not text:
         return False

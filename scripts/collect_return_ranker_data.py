@@ -64,6 +64,8 @@ def main() -> None:
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
     parser.add_argument("--lookback-days", type=int, default=5,
                         help="Days of 5m bars to fetch from yfinance (covers intraday window)")
+    parser.add_argument("--news-lookback-hours", type=int, default=12,
+                        help="Hours of news history to fetch for catalyst/recency features")
     args = parser.parse_args()
 
     tz_date = datetime.now(ET).strftime("%Y-%m-%d") if not args.date else args.date
@@ -96,6 +98,13 @@ def main() -> None:
     bars_by_symbol = _fetch_bars(symbols, lookback_days=args.lookback_days)
     log.info("Got bars for %d / %d symbols", len(bars_by_symbol), len(symbols))
 
+    # Step 2b: fetch news features (catalyst, article_count, recency_hours)
+    # Uses the same Alpaca news API as the live system; falls back to zeros on error.
+    news_features_map = _fetch_news(symbols, args.news_lookback_hours)
+    log.info("News features fetched for %d symbols (catalyst=%d)",
+             len(news_features_map),
+             sum(1 for v in news_features_map.values() if v.get("catalyst")))
+
     # Step 3 + 4: extract features and compute forward-return labels
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -117,9 +126,10 @@ def main() -> None:
 
             frame = _normalize_frame(frame)
             timestamps = sorted(symbol_timestamps[symbol])
+            nf = news_features_map.get(symbol)
 
             for ts in timestamps:
-                row = _make_row(symbol, ts, frame)
+                row = _make_row(symbol, ts, frame, news_features=nf)
                 if row is None:
                     rows_skipped += 1
                     continue
@@ -176,6 +186,41 @@ def _read_trace(
     return result
 
 
+def _fetch_news(symbols: list[str], lookback_hours: int = 12) -> dict[str, dict]:
+    """Fetch per-symbol news features from Alpaca using the live system's config."""
+    try:
+        import yaml
+        cfg_path = Path(__file__).parent.parent / "config" / "config.yaml"
+        with cfg_path.open() as f:
+            cfg = yaml.safe_load(f)
+        news_cfg = (cfg.get("data", {}).get("dynamic_symbols", {})
+                      .get("ai_filter", {}).get("news", {}))
+        if not news_cfg.get("enabled", False):
+            log.info("News disabled in config — using zero news features")
+            default = {"catalyst": False, "article_count": 0, "recency_hours": float(lookback_hours)}
+            return {s: dict(default) for s in symbols}
+        from app.brokers.config_utils import get_alpaca_account_cfg
+        alpaca_cfg = get_alpaca_account_cfg(cfg.get("brokers", {}))
+        api_key = alpaca_cfg.get("api_key", "")
+        api_secret = alpaca_cfg.get("api_secret", "")
+        from app.data.news import fetch_news_features
+        return fetch_news_features(
+            symbols,
+            provider=str(news_cfg.get("provider", "alpaca")),
+            base_url=str(news_cfg.get("base_url", "https://data.alpaca.markets")),
+            api_key=api_key,
+            api_secret=api_secret,
+            lookback_hours=lookback_hours,
+            keywords=list(news_cfg.get("keywords", [])),
+            timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
+            retries=int(news_cfg.get("retries", 2)),
+        )
+    except Exception as exc:
+        log.warning("News feature fetch failed: %s — using zeros", exc)
+        default = {"catalyst": False, "article_count": 0, "recency_hours": float(lookback_hours)}
+        return {s: dict(default) for s in symbols}
+
+
 def _fetch_bars(symbols: list[str], lookback_days: int = 5) -> dict:
     """Fetch 5m OHLCV bars from yfinance — same call as ai_filter._fetch_bars_yfinance."""
     try:
@@ -210,7 +255,7 @@ def _normalize_frame(frame) -> "pd.DataFrame":
     return frame.sort_index()
 
 
-def _make_row(symbol: str, ts: datetime, frame) -> dict | None:
+def _make_row(symbol: str, ts: datetime, frame, news_features: dict | None = None) -> dict | None:
     """Extract feature vector and forward-return label for one (symbol, ts) pair."""
     import pandas as pd
 
@@ -225,8 +270,8 @@ def _make_row(symbol: str, ts: datetime, frame) -> dict | None:
     if len(past) < MIN_BARS_BEFORE_TS:
         return None
 
-    # Feature extraction from the past-bar window
-    features = extract_features(past, window=20, interval="5m", catalyst=False)
+    # Feature extraction — same function as inference, with live news features
+    features = extract_features(past, window=20, interval="5m", news_features=news_features)
     if features is None:
         return None
 

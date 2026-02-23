@@ -163,6 +163,25 @@ def score_symbols(
             bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
             scores = {}
             signal_map: dict[str, dict[str, float]] = {}
+            # Fetch rich news features for return ranker (article count + recency + catalyst)
+            news_features_map: dict[str, dict] = {}
+            if config.return_ranker_enabled and config.news_enabled:
+                try:
+                    from app.data.news import fetch_news_features as _fetch_news_features
+                    news_features_map = _fetch_news_features(
+                        list(bars.keys()),
+                        provider=config.news_provider,
+                        base_url=config.news_base_url,
+                        api_key=api_key,
+                        api_secret=api_secret,
+                        lookback_hours=config.news_lookback_hours,
+                        keywords=config.news_keywords,
+                        timeout_seconds=config.news_timeout_seconds,
+                        retries=config.news_retries,
+                    )
+                    logging.info("return_ranker: fetched news features for %d symbols", len(news_features_map))
+                except Exception as _news_exc:
+                    logging.warning("return_ranker: news feature fetch failed: %s", _news_exc)
             keras_score_fn = None
             # Return ranker takes priority over Keras when enabled
             if config.return_ranker_enabled:
@@ -209,7 +228,11 @@ def score_symbols(
                         )
                         _extra_kwargs: dict = {}
                         if config.return_ranker_enabled:
-                            _extra_kwargs["catalyst"] = catalyst_map.get(symbol, False)
+                            _nf = news_features_map.get(symbol)
+                            if _nf:
+                                _extra_kwargs["news_features"] = _nf
+                            else:
+                                _extra_kwargs["catalyst"] = catalyst_map.get(symbol, False)
                         keras_signals = keras_score_fn(
                             frame,
                             model_path=_overlay_model_path,
