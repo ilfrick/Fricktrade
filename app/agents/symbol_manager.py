@@ -304,16 +304,6 @@ class SymbolManager:
 
         universe_cfg = dyn_cfg.get("universe", self._symbols)
         max_universe = int(dyn_cfg.get("max_universe", 500))
-        # Dynamically cap universe by buying power so smaller accounts score fewer symbols
-        bp_cap = self.buying_power_universe_cap(portfolio, dyn_cfg)
-        if bp_cap > 0:
-            effective_max_universe = min(max_universe, bp_cap)
-            if effective_max_universe != max_universe:
-                logging.info(
-                    "Universe capped by buying power: %d → %d (max_universe=%d)",
-                    max_universe, effective_max_universe, max_universe,
-                )
-            max_universe = effective_max_universe
         universe = self.resolve_universe(universe_cfg, api_key, api_secret, max_universe, portfolio, dyn_cfg)
         if not universe:
             return
@@ -553,42 +543,6 @@ class SymbolManager:
             return 0
         return min(max_symbols, affordable)
 
-    def buying_power_universe_cap(self, portfolio: dict, dyn_cfg: dict) -> int:
-        """Dynamically cap the universe size based on account equity.
-
-        Uses risk.max_positions as the anchor: the universe should be a
-        multiplier of max_positions so the AI filter has enough breadth to
-        pick from, but not the entire market.
-
-        Formula: cap = max(max_positions × multiplier, floor)
-        The cap scales with equity tier so very small accounts don't waste
-        time scoring hundreds of symbols they can't trade.
-
-        Equity tiers:
-          < $1k    → floor (50)
-          $1k-$25k → max_positions × multiplier (default 10)
-          > $25k   → max_positions × multiplier × 2
-        """
-        if not dyn_cfg.get("cash_aware", True):
-            return 0  # 0 = no cap, use max_universe from config
-
-        risk_cfg = self._cfg.get("risk", {})
-        config_max_positions = int(risk_cfg.get("max_positions", 30))
-        multiplier = int(dyn_cfg.get("universe_multiplier", 10))
-        floor = int(dyn_cfg.get("universe_floor", 50))
-
-        try:
-            equity = float(portfolio.get("equity", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            return 0
-
-        if equity < 1_000:
-            return floor
-        base = config_max_positions * multiplier
-        if equity >= 25_000:
-            base *= 2
-        return max(base, floor)
-
     def merge_with_positions_for_broker(
         self,
         candidates: list[str],
@@ -663,6 +617,15 @@ class SymbolManager:
             filters_cfg = dyn_cfg.get("filters", {}) or {}
             price_min = float(filters_cfg.get("price_min", 0.0))
             price_max = float(filters_cfg.get("price_max", float("inf")))
+            # Cap price_max at buying power: no point scoring symbols you can't buy
+            if dyn_cfg.get("cash_aware", True):
+                try:
+                    buying_power = float(portfolio.get("buying_power", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    buying_power = 0.0
+                if buying_power > 0:
+                    price_max = min(price_max, buying_power)
+                    logging.info("Universe price_max capped at buying_power=%.2f", buying_power)
             filtered = filter_universe_by_price(
                 universe,
                 api_key=api_key,
