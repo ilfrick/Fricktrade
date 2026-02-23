@@ -101,7 +101,7 @@ def main() -> None:
 
     # Step 2b: fetch news features (catalyst, article_count, recency_hours)
     # Uses the same Alpaca news API as the live system; falls back to zeros on error.
-    news_features_map = _fetch_news(symbols, args.news_lookback_hours)
+    news_features_map = _fetch_news(symbols, args.news_lookback_hours, as_of=market_close)
     log.info("News features fetched for %d symbols (catalyst=%d)",
              len(news_features_map),
              sum(1 for v in news_features_map.values() if v.get("catalyst")))
@@ -187,7 +187,7 @@ def _read_trace(
     return result
 
 
-def _fetch_news(symbols: list[str], lookback_hours: int = 12) -> dict[str, dict]:
+def _fetch_news(symbols: list[str], lookback_hours: int = 12, as_of: datetime | None = None) -> dict[str, dict]:
     """Fetch per-symbol news features from Alpaca using the live system's config."""
     try:
         import os, re, yaml
@@ -224,6 +224,7 @@ def _fetch_news(symbols: list[str], lookback_hours: int = 12) -> dict[str, dict]
             keywords=list(news_cfg.get("keywords", [])),
             timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
             retries=int(news_cfg.get("retries", 2)),
+            as_of=as_of,
         )
     except Exception as exc:
         log.warning("News feature fetch failed: %s — using zeros", exc)

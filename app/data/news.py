@@ -169,6 +169,7 @@ def fetch_news_features(
     keywords: list[str] | None = None,
     timeout_seconds: int = 10,
     retries: int = 2,
+    as_of: "datetime | None" = None,
 ) -> dict[str, dict]:
     """Return per-symbol news features for model training and inference.
 
@@ -189,7 +190,12 @@ def fetch_news_features(
         return {s: dict(default) for s in symbols}
     try:
         url = f"{base_url.rstrip('/')}/v1beta1/news"
-        params = {"symbols": ",".join(symbols), "limit": 50}
+        params: dict = {"symbols": ",".join(symbols), "limit": 50}
+        if as_of is not None:
+            end_dt = as_of if as_of.tzinfo else as_of.replace(tzinfo=timezone.utc)
+            start_dt = end_dt - timedelta(hours=lookback_hours)
+            params["start"] = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            params["end"] = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret}
         payload = None
         for attempt in range(retries + 1):
@@ -205,8 +211,10 @@ def fetch_news_features(
             return {s: dict(default) for s in symbols}
 
         items = payload.get("news", payload if isinstance(payload, list) else [])
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(hours=lookback_hours)
+        ref_time = as_of if as_of is not None else datetime.now(timezone.utc)
+        if ref_time.tzinfo is None:
+            ref_time = ref_time.replace(tzinfo=timezone.utc)
+        cutoff = ref_time - timedelta(hours=lookback_hours)
         keywords_lower = [k.lower() for k in (keywords or [])]
 
         result: dict[str, dict] = {s: {"catalyst": False, "article_count": 0, "recency_hours": float(lookback_hours)} for s in symbols}
@@ -217,7 +225,7 @@ def fetch_news_features(
                 continue
             headline_text = (item.get("headline") or item.get("summary") or "").lower()
             is_catalyst = bool(keywords_lower and any(k in headline_text for k in keywords_lower))
-            age_hours = float((now - created_at).total_seconds() / 3600.0) if created_at else float(lookback_hours)
+            age_hours = float((ref_time - created_at).total_seconds() / 3600.0) if created_at else float(lookback_hours)
             age_hours = min(age_hours, float(lookback_hours))
             for sym in item.get("symbols", []) or []:
                 if sym not in result:
