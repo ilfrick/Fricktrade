@@ -1952,7 +1952,7 @@ class TradingAgent:
         # Ensure per-broker partition exists (may be empty when market is closed
         # or AI filter hasn't completed yet)
         if not self._symbol_mgr.symbols_by_broker and len(self._broker_map) > 1:
-            dyn_cfg = self._cfg.get("data", {}).get("dynamic_symbols", {})
+            dyn_cfg = self.cfg.get("data", {}).get("dynamic_symbols", {})
             self._symbol_mgr.symbols_by_broker = self._symbol_mgr.build_symbols_by_broker(
                 symbols, portfolio, dyn_cfg,
             )
