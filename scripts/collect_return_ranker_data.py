@@ -51,8 +51,9 @@ MARKET_OPEN_H, MARKET_OPEN_M = 9, 30
 MARKET_CLOSE_H, MARKET_CLOSE_M = 16, 0
 FORWARD_BARS = 12          # 12 × 5m = 60-minute forward return
 MIN_BARS_BEFORE_TS = 20    # minimum history needed to compute features
-TRACE_DIR = Path("data/reports/decision_trace")
-OUTPUT_DIR = Path("data/training")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+TRACE_DIR = _PROJECT_ROOT / "data" / "reports" / "decision_trace"
+OUTPUT_DIR = _PROJECT_ROOT / "data" / "training"
 # Decimate trace: sample at most one record per symbol per SAMPLE_EVERY_SECONDS
 SAMPLE_EVERY_SECONDS = 300   # 5-minute grid matches bar frequency
 
@@ -189,10 +190,19 @@ def _read_trace(
 def _fetch_news(symbols: list[str], lookback_hours: int = 12) -> dict[str, dict]:
     """Fetch per-symbol news features from Alpaca using the live system's config."""
     try:
-        import yaml
+        import os, re, yaml
         cfg_path = Path(__file__).parent.parent / "config" / "config.yaml"
-        with cfg_path.open() as f:
-            cfg = yaml.safe_load(f)
+        # Load .env so ${VAR} references in config.yaml resolve
+        env_path = Path(__file__).parent.parent / ".env"
+        if env_path.exists():
+            for line in env_path.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+        raw = cfg_path.read_text()
+        raw = re.sub(r"\$\{(\w+)\}", lambda m: os.environ.get(m.group(1), m.group(0)), raw)
+        cfg = yaml.safe_load(raw)
         news_cfg = (cfg.get("data", {}).get("dynamic_symbols", {})
                       .get("ai_filter", {}).get("news", {}))
         if not news_cfg.get("enabled", False):
