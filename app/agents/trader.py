@@ -1843,7 +1843,14 @@ class TradingAgent:
         broker_names = list(self._broker_map.keys())
 
         if routing_mode == "parallel" and len(broker_names) > 1:
-            # Parallel mode: each broker gets symbols based on buying power
+            # Use pre-built partition (includes held positions per broker)
+            if self._symbol_mgr.symbols_by_broker:
+                return [
+                    ("parallel", broker, batch)
+                    for broker, batch in self._symbol_mgr.symbols_by_broker.items()
+                    if batch
+                ]
+            # Fallback: partition by buying power (no held-position merge)
             broker_buying_power = self._get_broker_buying_power()
             buckets = routing_utils.parallel_partition_symbols(
                 symbols,
@@ -1852,7 +1859,6 @@ class TradingAgent:
                 self._routing_cfg,
                 min_symbols=1,
             )
-            # Cache for active symbol labels
             self._symbol_mgr.symbols_by_broker = buckets
             return [
                 ("parallel", broker, batch)
