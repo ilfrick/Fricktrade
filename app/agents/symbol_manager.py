@@ -579,25 +579,40 @@ class SymbolManager:
         return portfolio
 
     def build_symbols_by_broker(self, ordered: list[str], portfolio: dict, dyn_cfg: dict) -> dict[str, list[str]]:
+        from app.execution import routing as routing_utils
+
         exec_cfg = self._cfg.get("execution", {}).get("brokers", {}) or {}
         multi_enabled = bool(exec_cfg.get("enabled", False)) and len(self._broker_map) > 1
         if not multi_enabled:
             return {}
+        routing_cfg = exec_cfg.get("routing", {})
+        broker_names = list(self._broker_map.keys())
+
+        # Collect per-broker buying power and held/open-order symbols
+        broker_buying_power: dict[str, float] = {}
+        broker_extras: dict[str, list[str]] = {}
+        all_extras: set[str] = set()
+        for broker_name in broker_names:
+            bp = self.portfolio_snapshot_for_broker_symbols(portfolio, broker_name)
+            broker_buying_power[broker_name] = float(bp.get("buying_power", 0.0) or 0.0)
+            held = [s for s in bp.get("positions", {}).keys() if s]
+            oo = self._open_order_mgr.symbols_for_broker(broker_name, self._broker_map)
+            extras = list(dict.fromkeys(held + oo))
+            broker_extras[broker_name] = extras
+            all_extras.update(extras)
+
+        # Partition non-held candidates across brokers proportional to buying power
+        candidates = [s for s in ordered if s not in all_extras]
+        partitioned = routing_utils.parallel_partition_symbols(
+            candidates, broker_names, broker_buying_power, routing_cfg, min_symbols=0,
+        )
+
+        # Merge: held/open-order symbols first, then partitioned candidates
         symbols_by_broker: dict[str, list[str]] = {}
-        for broker_name in self._broker_map.keys():
-            broker_portfolio = self.portfolio_snapshot_for_broker_symbols(portfolio, broker_name)
-            max_symbols = self.resolve_max_symbols_for_broker(
-                dyn_cfg,
-                ordered,
-                broker_portfolio,
-                broker_name,
-            )
-            symbols_by_broker[broker_name] = self.merge_with_positions_for_broker(
-                ordered,
-                broker_portfolio,
-                broker_name,
-                max_symbols,
-            )
+        for broker_name in broker_names:
+            extras = broker_extras.get(broker_name, [])
+            part = partitioned.get(broker_name, [])
+            symbols_by_broker[broker_name] = list(dict.fromkeys(extras + part))
         return symbols_by_broker
 
     def resolve_universe(
