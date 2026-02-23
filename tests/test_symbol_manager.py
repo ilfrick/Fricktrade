@@ -137,6 +137,47 @@ class TestCapSymbolsByCash:
         assert result == 50
 
 
+class TestSymbolsByBrokerPreservedDuringAiFilterInflight:
+    """Verify _symbols_by_broker is NOT cleared while AI filter is in-flight."""
+
+    def test_symbols_by_broker_preserved_on_early_return(self):
+        """When refresh_dynamic_symbols returns early (AI filter in-flight),
+        the previous _symbols_by_broker must be preserved so per-broker
+        metrics remain correct."""
+        mgr = _make_mgr(cfg={
+            "data": {"dynamic_symbols": {"enabled": True, "provider": "alpaca",
+                                          "refresh_minutes": 0}},
+            "brokers": {"alpaca": {"enabled": True, "api_key": "k", "api_secret": "s"}},
+            "execution": {"brokers": {"enabled": True}},
+            "market": {"trading_venues": ["NYSE"]},
+        }, broker_map={"alpaca:Realistic": None, "alpaca:Higher": None})
+        # Simulate a previous successful AI filter run that set _symbols_by_broker
+        previous = {
+            "alpaca:Realistic": ["AAPL", "HELD1", "HELD2"],
+            "alpaca:Higher": ["MSFT", "GOOG"],
+        }
+        mgr.symbols_by_broker = dict(previous)
+        mgr.symbols_by_strategy = {"__global__": ["AAPL", "MSFT", "GOOG", "HELD1", "HELD2"]}
+        mgr.symbols = ["AAPL", "MSFT", "GOOG", "HELD1", "HELD2"]
+
+        # refresh_dynamic_symbols will return early because market is closed
+        # (no trading venues open) — simulates any early-return path
+        mgr.refresh_dynamic_symbols({}, ["trend_following"])
+
+        # _symbols_by_broker should still be the previous value, not {}
+        assert mgr.symbols_by_broker == previous
+
+    def test_symbols_by_broker_not_cleared_before_ai_filter_completes(self):
+        """The old _symbols_by_broker dict must survive until the new one is built."""
+        mgr = _make_mgr(broker_map={"alpaca:A": None, "alpaca:B": None})
+        old_broker_syms = {"alpaca:A": ["X", "Y"], "alpaca:B": ["Z"]}
+        mgr.symbols_by_broker = dict(old_broker_syms)
+
+        # resolve_active_symbols should use the old broker list
+        result = mgr.resolve_active_symbols()
+        assert set(result) == {"X", "Y", "Z"}
+
+
 class TestCashLimitsRemovedFromSymbolSelection:
     def test_resolve_max_symbols_for_broker_ignores_cash_cap(self):
         mgr = _make_mgr()

@@ -309,8 +309,6 @@ class SymbolManager:
             return
         max_symbols = self.resolve_max_symbols(dyn_cfg, universe, portfolio)
 
-        self._symbols_by_strategy = {}
-        self._symbols_by_broker = {}
         ai_cfg = dyn_cfg.get("ai_filter", {})
         if (
             ai_cfg.get("enabled", False)
@@ -325,6 +323,7 @@ class SymbolManager:
             cached_symbols = self._market_cache.get_filtered_symbols(cache_interval, max_age_seconds=max_age)
             if cached_symbols:
                 ordered = self.merge_with_positions(cached_symbols, portfolio, max_symbols)
+                self._symbols_by_strategy = {}
                 self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)
                 self._symbols_by_strategy["__global__"] = ordered
                 for name in strategy_names:
@@ -426,6 +425,7 @@ class SymbolManager:
                         if removed > 0:
                             logging.info("AI filter coverage removed %d symbols without bars.", removed)
                 ordered = self.merge_with_positions(ordered, portfolio, max_symbols)
+                self._symbols_by_strategy = {}
                 self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)
                 self._symbols_by_strategy["__global__"] = ordered
                 for name in strategy_names:
@@ -445,6 +445,8 @@ class SymbolManager:
                 return
         if ai_cfg.get("enabled", False) and score_symbols is None:
             logging.warning("AI filter enabled but module unavailable; falling back to scanner filters.")
+        self._symbols_by_strategy = {}
+        self._symbols_by_broker = {}
         filters_cfg_default = dyn_cfg.get("filters", {})
         global_candidates = self.scan_with_filters(
             portfolio,
