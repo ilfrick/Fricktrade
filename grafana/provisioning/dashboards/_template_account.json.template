@@ -53,8 +53,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (broker) (trades_by_broker_total)",
-          "legendFormat": "{{broker}}",
+          "expr": "sum(trades_by_broker_total{broker=\"{{BROKER_LABEL}}\"})",
+          "legendFormat": "{{BROKER_LABEL}}",
           "refId": "A"
         }
       ],
@@ -163,7 +163,7 @@
       },
       "targets": [
         {
-          "expr": "account_invested_by_broker{broker=\"{{BROKER_LABEL}}\"}",
+          "expr": "clamp_min(account_invested_by_broker{broker=\"{{BROKER_LABEL}}\"}, 0)",
           "refId": "A"
         }
       ],
@@ -286,7 +286,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (broker, symbol, side) (trades_by_broker_total)",
+          "expr": "sum by (symbol, side) (trades_by_broker_total{broker=\"{{BROKER_LABEL}}\"})",
           "refId": "A"
         }
       ]
@@ -302,7 +302,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (broker, symbol, side) (rate(trades_by_broker_total[5m]))",
+          "expr": "sum by (symbol, side) (rate(trades_by_broker_total{broker=\"{{BROKER_LABEL}}\"}[5m]))",
           "refId": "A"
         }
       ],
@@ -327,7 +327,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (broker, symbol) (trades_by_broker_total)",
+          "expr": "sum by (symbol) (trades_by_broker_total{broker=\"{{BROKER_LABEL}}\"})",
           "refId": "A"
         }
       ],
@@ -352,13 +352,13 @@
       },
       "targets": [
         {
-          "expr": "pnl_percent_by_broker",
-          "legendFormat": "PnL% {{broker}}",
+          "expr": "pnl_percent_by_broker{broker=\"{{BROKER_LABEL}}\"}",
+          "legendFormat": "PnL%",
           "refId": "A"
         },
         {
-          "expr": "drawdown_percent_by_broker",
-          "legendFormat": "Drawdown% {{broker}}",
+          "expr": "drawdown_percent_by_broker{broker=\"{{BROKER_LABEL}}\"}",
+          "legendFormat": "Drawdown%",
           "refId": "B"
         }
       ],

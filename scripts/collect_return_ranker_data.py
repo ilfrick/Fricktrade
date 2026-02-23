@@ -297,9 +297,20 @@ def _make_row(symbol: str, ts: datetime, frame, news_features: dict | None = Non
 def _maybe_retrain(data_dir: str) -> None:
     """Trigger model retraining now that new data is available."""
     try:
+        import yaml
+        cfg_path = Path(__file__).parent.parent / "config" / "config.yaml"
+        model_path = "data/return_ranker.pkl"  # default
+        try:
+            with cfg_path.open() as f:
+                cfg = yaml.safe_load(f)
+            rr_cfg = (cfg.get("data", {}).get("dynamic_symbols", {})
+                        .get("ai_filter", {}).get("return_ranker", {}))
+            model_path = str(rr_cfg.get("model_path", model_path))
+        except Exception:
+            pass
         from app.signals.return_ranker_train import train_return_ranker
-        log.info("Triggering return_ranker retraining ...")
-        ok = train_return_ranker(data_dir, "data/return_ranker.pkl")
+        log.info("Triggering return_ranker retraining → %s", model_path)
+        ok = train_return_ranker(data_dir, model_path)
         log.info("Retraining %s", "succeeded" if ok else "failed (insufficient data?)")
     except Exception as exc:
         log.warning("Retraining skipped: %s", exc)

@@ -175,144 +175,104 @@ order_flow_out="$run_dir/order_flow.jsonl"
 ) &
 PIDS+=($!)
 
-# 6. Strategy signal + risk block extractor (from decision traces)
+# 6. Strategy signal + risk block extractor (incremental, from decision traces)
 (
     signals_out="$run_dir/strategy_signals.jsonl"
     risk_out="$run_dir/risk_blocks.jsonl"
     positions_out="$run_dir/position_changes.jsonl"
+    decisions_full_out="$run_dir/decisions_full.jsonl"
+    offset_file="$run_dir/.extractor_offset"
+    echo "0" > "$offset_file"
     while [ $(TZ="$TZ_LOCAL" date +%s) -lt "$end_ts" ]; do
         sleep 30
         if [ -f "$trace_out" ] && [ -s "$trace_out" ]; then
-            # Extract buy/sell signals — full parameters that led to each trade
             python3 -c "
-import json, sys
-seen = set()
-with open('$trace_out') as f:
-    for line in f:
-        try:
-            d = json.loads(line)
-            decision = d.get('decision','')
-            action = d.get('action','')
-            key = (d.get('symbol',''), d.get('ts',''), decision)
-            if key in seen:
-                continue
-            seen.add(key)
-            if decision == 'order_enqueued' and action in ('buy', 'sell'):
-                print(json.dumps({
-                    'ts': d.get('ts'),
-                    'symbol': d.get('symbol'),
-                    'action': action,
-                    'stage': d.get('stage'),
-                    'action_strategy': d.get('action_strategy'),
-                    'confidence': d.get('confidence'),
-                    'signals': d.get('signals'),
-                    'effective_weights': d.get('effective_weights'),
-                    'orchestrator_weights': d.get('orchestrator_weights'),
-                    'regime_name': d.get('regime_name'),
-                    'regime_probability': d.get('regime_probability'),
-                    'signal_inputs': d.get('signal_inputs'),
-                    'guardrail_action': d.get('guardrail_action'),
-                    'broker': d.get('broker'),
-                    'venue': d.get('venue'),
-                }, default=str), flush=True)
-        except Exception:
-            pass
-" > "$signals_out.tmp" 2>/dev/null || true
-            [ -f "$signals_out.tmp" ] && mv "$signals_out.tmp" "$signals_out"
+import json, sys, os
 
-            # decisions_full: every decision (buy/sell/skip/exit) with all parameters
-            decisions_full_out="$run_dir/decisions_full.jsonl"
-            python3 -c "
-import json
-seen = set()
-with open('$trace_out') as f:
-    for line in f:
-        try:
-            d = json.loads(line)
-            decision = d.get('decision','')
-            action = d.get('action','')
-            key = (d.get('symbol',''), d.get('ts',''), decision, action)
-            if key in seen:
-                continue
-            seen.add(key)
-            if decision in ('order_enqueued', 'skip', 'exit') or action == 'exit':
-                print(json.dumps({
-                    'ts': d.get('ts'),
-                    'symbol': d.get('symbol'),
-                    'decision': decision,
-                    'action': action,
-                    'stage': d.get('stage'),
-                    'action_strategy': d.get('action_strategy'),
-                    'confidence': d.get('confidence'),
-                    'reason': d.get('reason'),
-                    'signals': d.get('signals'),
-                    'effective_weights': d.get('effective_weights'),
-                    'orchestrator_weights': d.get('orchestrator_weights'),
-                    'regime_name': d.get('regime_name'),
-                    'regime_probability': d.get('regime_probability'),
-                    'signal_inputs': d.get('signal_inputs'),
-                    'guardrail_action': d.get('guardrail_action'),
-                    'broker': d.get('broker'),
-                    'venue': d.get('venue'),
-                }, default=str), flush=True)
-        except Exception:
-            pass
-" > "$decisions_full_out.tmp" 2>/dev/null || true
-            [ -f "$decisions_full_out.tmp" ] && mv "$decisions_full_out.tmp" "$decisions_full_out"
+trace_path = '$trace_out'
+offset_file = '$offset_file'
+signals_out = '$signals_out'
+risk_out = '$risk_out'
+positions_out = '$positions_out'
+decisions_full_out = '$decisions_full_out'
 
-            # Extract risk blocks / skips
-            python3 -c "
-import json
-seen = set()
-with open('$trace_out') as f:
-    for line in f:
-        try:
-            d = json.loads(line)
-            decision = d.get('decision','')
-            key = (d.get('symbol',''), d.get('ts',''), decision)
-            if key in seen:
-                continue
-            seen.add(key)
-            if decision == 'skip':
-                print(json.dumps({
-                    'ts': d.get('ts'),
-                    'symbol': d.get('symbol'),
-                    'reason': d.get('reason'),
-                    'stage': d.get('stage'),
-                }, default=str), flush=True)
-        except Exception:
-            pass
-" > "$risk_out.tmp" 2>/dev/null || true
-            [ -f "$risk_out.tmp" ] && mv "$risk_out.tmp" "$risk_out"
+# Read byte offset from last run
+try:
+    with open(offset_file) as f:
+        offset = int(f.read().strip())
+except Exception:
+    offset = 0
 
-            # Extract position changes
-            python3 -c "
-import json
-seen = set()
-with open('$trace_out') as f:
-    for line in f:
+file_size = os.path.getsize(trace_path)
+if offset >= file_size:
+    sys.exit(0)
+
+f_sig = open(signals_out, 'a')
+f_risk = open(risk_out, 'a')
+f_pos = open(positions_out, 'a')
+f_dec = open(decisions_full_out, 'a')
+
+with open(trace_path, 'rb') as f:
+    f.seek(offset)
+    for raw_line in f:
         try:
-            d = json.loads(line)
-            decision = d.get('decision','')
-            action = d.get('action','')
-            key = (d.get('symbol',''), d.get('ts',''), decision)
-            if key in seen:
-                continue
-            seen.add(key)
-            if decision == 'order_enqueued' and action in ('buy', 'sell'):
-                print(json.dumps({
-                    'ts': d.get('ts'),
-                    'symbol': d.get('symbol'),
-                    'action': action,
-                    'price': d.get('price'),
-                    'qty': d.get('qty'),
-                    'broker': d.get('broker'),
-                    'action_strategy': d.get('action_strategy'),
-                }, default=str), flush=True)
+            d = json.loads(raw_line)
         except Exception:
-            pass
-" > "$positions_out.tmp" 2>/dev/null || true
-            [ -f "$positions_out.tmp" ] && mv "$positions_out.tmp" "$positions_out"
+            continue
+        decision = d.get('decision', '')
+        action = d.get('action', '')
+
+        # Strategy signals (buy/sell orders)
+        if decision == 'order_enqueued' and action in ('buy', 'sell'):
+            f_sig.write(json.dumps({
+                'ts': d.get('ts'), 'symbol': d.get('symbol'), 'action': action,
+                'stage': d.get('stage'), 'action_strategy': d.get('action_strategy'),
+                'confidence': d.get('confidence'), 'signals': d.get('signals'),
+                'effective_weights': d.get('effective_weights'),
+                'orchestrator_weights': d.get('orchestrator_weights'),
+                'regime_name': d.get('regime_name'),
+                'regime_probability': d.get('regime_probability'),
+                'signal_inputs': d.get('signal_inputs'),
+                'guardrail_action': d.get('guardrail_action'),
+                'broker': d.get('broker'), 'venue': d.get('venue'),
+            }, default=str) + '\n')
+            # Position changes (same set)
+            f_pos.write(json.dumps({
+                'ts': d.get('ts'), 'symbol': d.get('symbol'), 'action': action,
+                'price': d.get('price'), 'qty': d.get('qty'),
+                'broker': d.get('broker'), 'action_strategy': d.get('action_strategy'),
+            }, default=str) + '\n')
+
+        # Risk blocks / skips
+        if decision == 'skip':
+            f_risk.write(json.dumps({
+                'ts': d.get('ts'), 'symbol': d.get('symbol'),
+                'reason': d.get('reason'), 'stage': d.get('stage'),
+            }, default=str) + '\n')
+
+        # Full decisions (non-hold)
+        if decision in ('order_enqueued', 'skip', 'exit') or action == 'exit':
+            f_dec.write(json.dumps({
+                'ts': d.get('ts'), 'symbol': d.get('symbol'),
+                'decision': decision, 'action': action,
+                'stage': d.get('stage'), 'action_strategy': d.get('action_strategy'),
+                'confidence': d.get('confidence'), 'reason': d.get('reason'),
+                'signals': d.get('signals'), 'effective_weights': d.get('effective_weights'),
+                'orchestrator_weights': d.get('orchestrator_weights'),
+                'regime_name': d.get('regime_name'),
+                'regime_probability': d.get('regime_probability'),
+                'signal_inputs': d.get('signal_inputs'),
+                'guardrail_action': d.get('guardrail_action'),
+                'broker': d.get('broker'), 'venue': d.get('venue'),
+            }, default=str) + '\n')
+
+    new_offset = f.tell()
+
+f_sig.close(); f_risk.close(); f_pos.close(); f_dec.close()
+
+with open(offset_file, 'w') as f:
+    f.write(str(new_offset))
+" 2>/dev/null || true
         fi
     done
 ) &

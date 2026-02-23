@@ -233,27 +233,33 @@ def score_symbols(
                                 _extra_kwargs["news_features"] = _nf
                             else:
                                 _extra_kwargs["catalyst"] = catalyst_map.get(symbol, False)
+                        _interval = (
+                            config.interval
+                            if config.return_ranker_enabled
+                            else config.keras_interval
+                        )
                         keras_signals = keras_score_fn(
                             frame,
                             model_path=_overlay_model_path,
-                            interval=config.keras_interval,
+                            interval=_interval,
                             device=current_device,
                             **_extra_kwargs,
                         )
-                    except tf.errors.ResourceExhaustedError as exc:
-                        if current_device != "cpu":
-                            logging.warning(
-                                "CUDA out of memory during Keras scoring for %s: %s. Disabling GPU and switching to CPU.",
-                                symbol,
-                                exc,
-                            )
-                            current_device = _downgrade_device(current_device, model)
-                            keras_score_fn = None # Disable Keras for the rest of this run
-                        else:
-                            logging.error("Keras overlay failed on CPU for %s after GPU error: %s", symbol, exc)
-                            keras_score_fn = None
                     except Exception as exc:
-                        logging.warning("Unknown error during Keras scoring for %s: %s", symbol, exc)
+                        if not config.return_ranker_enabled:
+                            # TF/Keras GPU OOM — downgrade to CPU
+                            try:
+                                if isinstance(exc, tf.errors.ResourceExhaustedError) and current_device != "cpu":
+                                    logging.warning(
+                                        "CUDA out of memory during Keras scoring for %s: %s. Disabling GPU.",
+                                        symbol, exc,
+                                    )
+                                    current_device = _downgrade_device(current_device, model)
+                                    keras_score_fn = None
+                                    continue
+                            except Exception:
+                                pass
+                        logging.warning("Overlay scoring failed for %s: %s", symbol, exc)
                         keras_score_fn = None
                         
                 if keras_signals is not None:
