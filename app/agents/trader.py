@@ -1949,6 +1949,13 @@ class TradingAgent:
         self._maybe_reload_active_model()
         symbols = self._symbol_mgr.resolve_active_symbols()
         symbols = self._symbol_mgr.merge_symbols_with_positions(symbols, portfolio)
+        # Ensure per-broker partition exists (may be empty when market is closed
+        # or AI filter hasn't completed yet)
+        if not self._symbol_mgr.symbols_by_broker and len(self._broker_map) > 1:
+            dyn_cfg = self._cfg.get("data", {}).get("dynamic_symbols", {})
+            self._symbol_mgr.symbols_by_broker = self._symbol_mgr.build_symbols_by_broker(
+                symbols, portfolio, dyn_cfg,
+            )
         self._symbol_mgr.update_active_symbol_metrics(symbols, self._routing_cfg, self._get_broker_buying_power)
         self._open_order_mgr.refresh(self.broker, self._broker_map, symbols)
         self._maybe_force_liquidation(portfolio)
