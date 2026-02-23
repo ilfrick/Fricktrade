@@ -80,6 +80,10 @@ class AISymbolFilterConfig:
     keras_weight: float
     keras_score_mode: str
     device: str # New field for device
+    return_ranker_enabled: bool
+    return_ranker_model_path: str
+    return_ranker_data_dir: str
+    return_ranker_retrain_hours: int
 
 
 def score_symbols(
@@ -160,7 +164,24 @@ def score_symbols(
             scores = {}
             signal_map: dict[str, dict[str, float]] = {}
             keras_score_fn = None
-            if config.keras_enabled:
+            # Return ranker takes priority over Keras when enabled
+            if config.return_ranker_enabled:
+                try:
+                    from app.signals.return_ranker import compute_return_ranker_signals, model_needs_training
+                    # Auto-retrain if model is stale or missing
+                    if model_needs_training(config.return_ranker_model_path, config.return_ranker_retrain_hours):
+                        logging.info("return_ranker: model stale/absent — triggering training from %s", config.return_ranker_data_dir)
+                        try:
+                            from app.signals.return_ranker_train import train_return_ranker
+                            train_return_ranker(config.return_ranker_data_dir, config.return_ranker_model_path)
+                        except Exception as train_exc:
+                            logging.warning("return_ranker: auto-training failed: %s", train_exc)
+                    keras_score_fn = compute_return_ranker_signals
+                    logging.info("return_ranker: using return ranker as overlay scorer")
+                except Exception as exc:
+                    logging.warning("return_ranker overlay import failed: %s", exc)
+                    keras_score_fn = None
+            elif config.keras_enabled:
                 try:
                     from app.signals.keras_returns import compute_keras_return_signals
                     keras_score_fn = compute_keras_return_signals
@@ -181,11 +202,20 @@ def score_symbols(
                 keras_signals = None
                 if keras_score_fn is not None:
                     try:
+                        _overlay_model_path = (
+                            config.return_ranker_model_path
+                            if config.return_ranker_enabled
+                            else config.keras_model_path
+                        )
+                        _extra_kwargs: dict = {}
+                        if config.return_ranker_enabled:
+                            _extra_kwargs["catalyst"] = catalyst_map.get(symbol, False)
                         keras_signals = keras_score_fn(
                             frame,
-                            model_path=config.keras_model_path,
+                            model_path=_overlay_model_path,
                             interval=config.keras_interval,
-                            device=current_device, # Pass device to Keras function
+                            device=current_device,
+                            **_extra_kwargs,
                         )
                     except tf.errors.ResourceExhaustedError as exc:
                         if current_device != "cpu":
@@ -312,6 +342,11 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     keras_weight = float(keras_cfg.get("weight", 0.5))
     keras_score_mode = str(keras_cfg.get("score_mode", "expected_return"))
     device = _resolve_device(str(cfg.get("device", "auto")))
+    rr_cfg = cfg.get("return_ranker", {}) or {}
+    return_ranker_enabled = bool(rr_cfg.get("enabled", False))
+    return_ranker_model_path = str(rr_cfg.get("model_path", "/data/return_ranker.pkl"))
+    return_ranker_data_dir = str(rr_cfg.get("data_dir", "/data/training"))
+    return_ranker_retrain_hours = int(rr_cfg.get("retrain_hours", 24))
     return AISymbolFilterConfig(
         interval=interval,
         lookback_days=lookback_days,
@@ -360,6 +395,10 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         keras_weight=keras_weight,
         keras_score_mode=keras_score_mode,
         device=device, # Pass device to config
+        return_ranker_enabled=return_ranker_enabled,
+        return_ranker_model_path=return_ranker_model_path,
+        return_ranker_data_dir=return_ranker_data_dir,
+        return_ranker_retrain_hours=return_ranker_retrain_hours,
     )
 
 

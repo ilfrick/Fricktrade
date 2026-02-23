@@ -108,7 +108,7 @@ touch "$trace_out"
         sleep 5
     done
     if [ -f "$trace_src" ]; then
-        tail -F "$trace_src" >> "$trace_out" 2>/dev/null
+        tail -n +1 -F "$trace_src" >> "$trace_out" 2>/dev/null
     fi
 ) &
 PIDS+=($!)
@@ -183,7 +183,7 @@ PIDS+=($!)
     while [ $(TZ="$TZ_LOCAL" date +%s) -lt "$end_ts" ]; do
         sleep 30
         if [ -f "$trace_out" ] && [ -s "$trace_out" ]; then
-            # Extract buy/sell signals
+            # Extract buy/sell signals — full parameters that led to each trade
             python3 -c "
 import json, sys
 seen = set()
@@ -205,12 +205,60 @@ with open('$trace_out') as f:
                     'stage': d.get('stage'),
                     'action_strategy': d.get('action_strategy'),
                     'confidence': d.get('confidence'),
-                    'signal': d.get('signal'),
+                    'signals': d.get('signals'),
+                    'effective_weights': d.get('effective_weights'),
+                    'orchestrator_weights': d.get('orchestrator_weights'),
+                    'regime_name': d.get('regime_name'),
+                    'regime_probability': d.get('regime_probability'),
+                    'signal_inputs': d.get('signal_inputs'),
+                    'guardrail_action': d.get('guardrail_action'),
+                    'broker': d.get('broker'),
+                    'venue': d.get('venue'),
                 }, default=str), flush=True)
         except Exception:
             pass
 " > "$signals_out.tmp" 2>/dev/null || true
             [ -f "$signals_out.tmp" ] && mv "$signals_out.tmp" "$signals_out"
+
+            # decisions_full: every decision (buy/sell/skip/exit) with all parameters
+            decisions_full_out="$run_dir/decisions_full.jsonl"
+            python3 -c "
+import json
+seen = set()
+with open('$trace_out') as f:
+    for line in f:
+        try:
+            d = json.loads(line)
+            decision = d.get('decision','')
+            action = d.get('action','')
+            key = (d.get('symbol',''), d.get('ts',''), decision, action)
+            if key in seen:
+                continue
+            seen.add(key)
+            if decision in ('order_enqueued', 'skip', 'exit') or action == 'exit':
+                print(json.dumps({
+                    'ts': d.get('ts'),
+                    'symbol': d.get('symbol'),
+                    'decision': decision,
+                    'action': action,
+                    'stage': d.get('stage'),
+                    'action_strategy': d.get('action_strategy'),
+                    'confidence': d.get('confidence'),
+                    'reason': d.get('reason'),
+                    'signals': d.get('signals'),
+                    'effective_weights': d.get('effective_weights'),
+                    'orchestrator_weights': d.get('orchestrator_weights'),
+                    'regime_name': d.get('regime_name'),
+                    'regime_probability': d.get('regime_probability'),
+                    'signal_inputs': d.get('signal_inputs'),
+                    'guardrail_action': d.get('guardrail_action'),
+                    'broker': d.get('broker'),
+                    'venue': d.get('venue'),
+                }, default=str), flush=True)
+        except Exception:
+            pass
+" > "$decisions_full_out.tmp" 2>/dev/null || true
+            [ -f "$decisions_full_out.tmp" ] && mv "$decisions_full_out.tmp" "$decisions_full_out"
 
             # Extract risk blocks / skips
             python3 -c "

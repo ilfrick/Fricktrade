@@ -631,6 +631,14 @@ data:
         interval: 5m
         score_mode: expected_return
         weight: 0.5
+      # Return ranker: sklearn GBM trained on collected 5m bar data.
+      # Set enabled: true after 5+ sessions of training data are collected.
+      # When enabled, replaces keras_returns as the per-symbol overlay scorer.
+      return_ranker:
+        enabled: false
+        model_path: /data/return_ranker.pkl
+        data_dir: /data/training
+        retrain_hours: 24
     filters:
       price_min: 2.0
       relative_volume_min: 2.0
