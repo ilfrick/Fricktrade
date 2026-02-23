@@ -304,6 +304,16 @@ class SymbolManager:
 
         universe_cfg = dyn_cfg.get("universe", self._symbols)
         max_universe = int(dyn_cfg.get("max_universe", 500))
+        # Dynamically cap universe by buying power so smaller accounts score fewer symbols
+        bp_cap = self.buying_power_universe_cap(portfolio, dyn_cfg)
+        if bp_cap > 0:
+            effective_max_universe = min(max_universe, bp_cap)
+            if effective_max_universe != max_universe:
+                logging.info(
+                    "Universe capped by buying power: %d → %d (max_universe=%d)",
+                    max_universe, effective_max_universe, max_universe,
+                )
+            max_universe = effective_max_universe
         universe = self.resolve_universe(universe_cfg, api_key, api_secret, max_universe, portfolio, dyn_cfg)
         if not universe:
             return
@@ -542,6 +552,47 @@ class SymbolManager:
         if affordable <= 0:
             return 0
         return min(max_symbols, affordable)
+
+    def buying_power_universe_cap(self, portfolio: dict, dyn_cfg: dict) -> int:
+        """Dynamically cap the universe size based on account buying power.
+
+        Uses risk config (max_positions, max_position_size_pct) and buying power
+        to determine how many symbols are worth scoring. Returns a multiplier of
+        the effective max positions the account can hold.
+
+        Formula: cap = min(max_positions, buying_power / avg_position_size) × multiplier
+        Multiplier (default 10×) gives the AI filter enough breadth to pick from.
+        Hard floor of 50 ensures tiny accounts still get some universe.
+        """
+        if not dyn_cfg.get("cash_aware", True):
+            return 0  # 0 = no cap, use max_universe from config
+
+        risk_cfg = self._cfg.get("risk", {})
+        config_max_positions = int(risk_cfg.get("max_positions", 30))
+        max_pos_size_pct = float(risk_cfg.get("max_position_size_pct", 10.0))
+        multiplier = int(dyn_cfg.get("universe_multiplier", 10))
+        floor = int(dyn_cfg.get("universe_floor", 50))
+
+        try:
+            buying_power = float(portfolio.get("buying_power", 0.0) or 0.0)
+            equity = float(portfolio.get("equity", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0
+
+        funds = buying_power if buying_power > 0 else equity
+        if funds <= 0:
+            return floor
+
+        # How many positions can this account realistically hold?
+        if max_pos_size_pct > 0 and equity > 0:
+            avg_position_value = equity * (max_pos_size_pct / 100.0)
+            affordable_positions = int(funds / avg_position_value) if avg_position_value > 0 else config_max_positions
+        else:
+            affordable_positions = config_max_positions
+
+        effective_max_positions = min(config_max_positions, affordable_positions)
+        cap = max(effective_max_positions * multiplier, floor)
+        return cap
 
     def merge_with_positions_for_broker(
         self,
