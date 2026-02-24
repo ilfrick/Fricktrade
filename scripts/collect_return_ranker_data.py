@@ -63,8 +63,8 @@ def main() -> None:
     parser.add_argument("--date", default=None, help="Session date YYYY-MM-DD (ET). Default: today.")
     parser.add_argument("--trace-dir", default=str(TRACE_DIR))
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
-    parser.add_argument("--lookback-days", type=int, default=5,
-                        help="Days of 5m bars to fetch from yfinance (covers intraday window)")
+    parser.add_argument("--lookback-days", type=int, default=10,
+                        help="Days of 5m bars to fetch from yfinance (10d covers weekends)")
     parser.add_argument("--news-lookback-hours", type=int, default=12,
                         help="Hours of news history to fetch for catalyst/recency features")
     args = parser.parse_args()
@@ -361,7 +361,13 @@ def _maybe_retrain(data_dir: str) -> None:
                 cfg = yaml.safe_load(f)
             rr_cfg = (cfg.get("data", {}).get("dynamic_symbols", {})
                         .get("ai_filter", {}).get("return_ranker", {}))
-            model_path = str(rr_cfg.get("model_path", model_path))
+            raw_path = str(rr_cfg.get("model_path", model_path))
+            # Resolve Docker-absolute paths (/data/...) to host-relative when
+            # running outside Docker.
+            if raw_path.startswith("/data/"):
+                model_path = str(_PROJECT_ROOT / raw_path.lstrip("/"))
+            else:
+                model_path = raw_path
         except Exception:
             pass
         # Remove empty training CSVs (header-only, < 500 bytes)

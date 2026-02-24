@@ -635,10 +635,11 @@ data:
       # Set enabled: true after 5+ sessions of training data are collected.
       # When enabled, replaces keras_returns as the per-symbol overlay scorer.
       return_ranker:
-        enabled: false
+        enabled: true
         model_path: /data/return_ranker.pkl
         data_dir: /data/training
         retrain_hours: 24
+        max_age_days: 3
     filters:
       price_min: 2.0
       relative_volume_min: 2.0
