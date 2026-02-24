@@ -102,6 +102,15 @@ def main() -> None:
     # Step 2b: fetch news features (catalyst, article_count, recency_hours)
     # Uses the same Alpaca news API as the live system; falls back to zeros on error.
     news_features_map = _fetch_news(symbols, args.news_lookback_hours, as_of=market_close)
+
+    # Merge trace-extracted catalyst flags (ground truth from live LLM decisions)
+    trace_news = _extract_news_from_trace(trace_path, market_open, market_close)
+    for sym, tn in trace_news.items():
+        if sym not in news_features_map:
+            news_features_map[sym] = tn
+        elif tn.get("catalyst") and not news_features_map[sym].get("catalyst"):
+            news_features_map[sym]["catalyst"] = True
+
     log.info("News features fetched for %d symbols (catalyst=%d)",
              len(news_features_map),
              sum(1 for v in news_features_map.values() if v.get("catalyst")))
@@ -187,6 +196,34 @@ def _read_trace(
     return result
 
 
+def _extract_news_from_trace(
+    trace_path: Path,
+    market_open: datetime,
+    market_close: datetime,
+) -> dict[str, dict]:
+    """Extract {symbol: {catalyst: bool, ...}} from trace signal_inputs."""
+    result: dict[str, dict] = {}
+    with trace_path.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            symbol = rec.get("symbol")
+            si = rec.get("signal_inputs", {})
+            catalyst = si.get("catalyst", False)
+            if symbol and catalyst and symbol not in result:
+                result[symbol] = {
+                    "catalyst": True,
+                    "article_count": 0,
+                    "recency_hours": 12.0,
+                }
+    return result
+
+
 def _fetch_news(symbols: list[str], lookback_hours: int = 12, as_of: datetime | None = None) -> dict[str, dict]:
     """Fetch per-symbol news features from Alpaca using the live system's config."""
     try:
@@ -214,6 +251,13 @@ def _fetch_news(symbols: list[str], lookback_hours: int = 12, as_of: datetime | 
         api_key = alpaca_cfg.get("api_key", "")
         api_secret = alpaca_cfg.get("api_secret", "")
         from app.data.news import fetch_news_features
+        # Build llm_cfg; when running on host (not Docker), replace
+        # Docker-internal hostname (ollama) with localhost.
+        llm_raw = dict(news_cfg.get("llm", {}) or {})
+        if llm_raw.get("enabled"):
+            llm_url = str(llm_raw.get("base_url", "http://localhost:11434"))
+            llm_url = llm_url.replace("://ollama:", "://localhost:")
+            llm_raw["base_url"] = llm_url
         return fetch_news_features(
             symbols,
             provider=str(news_cfg.get("provider", "alpaca")),
@@ -222,6 +266,7 @@ def _fetch_news(symbols: list[str], lookback_hours: int = 12, as_of: datetime | 
             api_secret=api_secret,
             lookback_hours=lookback_hours,
             keywords=list(news_cfg.get("keywords", [])),
+            llm_cfg=llm_raw,
             timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
             retries=int(news_cfg.get("retries", 2)),
             as_of=as_of,
@@ -319,9 +364,16 @@ def _maybe_retrain(data_dir: str) -> None:
             model_path = str(rr_cfg.get("model_path", model_path))
         except Exception:
             pass
+        # Remove empty training CSVs (header-only, < 500 bytes)
+        for f in Path(data_dir).glob("return_ranker_*.csv"):
+            if f.stat().st_size < 500:
+                f.unlink()
+                log.info("Removed empty training file: %s", f.name)
+
         from app.signals.return_ranker_train import train_return_ranker
-        log.info("Triggering return_ranker retraining → %s", model_path)
-        ok = train_return_ranker(data_dir, model_path)
+        max_age_days = int(rr_cfg.get("max_age_days", 3))
+        log.info("Triggering return_ranker retraining → %s (max_age_days=%d)", model_path, max_age_days)
+        ok = train_return_ranker(data_dir, model_path, max_age_days=max_age_days)
         log.info("Retraining %s", "succeeded" if ok else "failed (insufficient data?)")
     except Exception as exc:
         log.warning("Retraining skipped: %s", exc)

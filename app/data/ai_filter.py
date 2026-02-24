@@ -84,6 +84,7 @@ class AISymbolFilterConfig:
     return_ranker_model_path: str
     return_ranker_data_dir: str
     return_ranker_retrain_hours: int
+    return_ranker_max_age_days: int
 
 
 def score_symbols(
@@ -192,7 +193,7 @@ def score_symbols(
                         logging.info("return_ranker: model stale/absent — triggering training from %s", config.return_ranker_data_dir)
                         try:
                             from app.signals.return_ranker_train import train_return_ranker
-                            train_return_ranker(config.return_ranker_data_dir, config.return_ranker_model_path)
+                            train_return_ranker(config.return_ranker_data_dir, config.return_ranker_model_path, max_age_days=config.return_ranker_max_age_days)
                         except Exception as train_exc:
                             logging.warning("return_ranker: auto-training failed: %s", train_exc)
                     keras_score_fn = compute_return_ranker_signals
@@ -376,6 +377,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
     return_ranker_model_path = str(rr_cfg.get("model_path", "/data/return_ranker.pkl"))
     return_ranker_data_dir = str(rr_cfg.get("data_dir", "/data/training"))
     return_ranker_retrain_hours = int(rr_cfg.get("retrain_hours", 24))
+    return_ranker_max_age_days = int(rr_cfg.get("max_age_days", 3))
     return AISymbolFilterConfig(
         interval=interval,
         lookback_days=lookback_days,
@@ -428,6 +430,7 @@ def _read_config(cfg: dict) -> AISymbolFilterConfig:
         return_ranker_model_path=return_ranker_model_path,
         return_ranker_data_dir=return_ranker_data_dir,
         return_ranker_retrain_hours=return_ranker_retrain_hours,
+        return_ranker_max_age_days=return_ranker_max_age_days,
     )
 
 

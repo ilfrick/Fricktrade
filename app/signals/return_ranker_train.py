@@ -32,6 +32,7 @@ def train_return_ranker(
     data_dir: str,
     model_path: str,
     *,
+    max_age_days: int = 3,
     n_estimators: int = 200,
     max_depth: int = 4,
     learning_rate: float = 0.05,
@@ -52,7 +53,7 @@ def train_return_ranker(
         logger.error("sklearn / joblib not available — cannot train return ranker")
         return False
 
-    X, y, file_stats = _load_training_data(data_dir)
+    X, y, file_stats = _load_training_data(data_dir, max_age_days=max_age_days)
     if X is None or len(X) < MIN_ROWS:
         logger.warning(
             "return_ranker: insufficient training data (%d rows, need %d)",
@@ -195,12 +196,29 @@ def train_return_ranker(
     return True
 
 
-def _load_training_data(data_dir: str) -> tuple[np.ndarray, np.ndarray, dict] | tuple[None, None, dict]:
-    """Read all return_ranker_*.csv files, return (X, y, file_stats) numpy arrays."""
+def _date_from_filename(path: str) -> str:
+    """Extract YYYY-MM-DD from return_ranker_YYYY-MM-DD.csv."""
+    import re
+    m = re.search(r"(\d{4}-\d{2}-\d{2})", Path(path).name)
+    return m.group(1) if m else ""
+
+
+def _load_training_data(data_dir: str, max_age_days: int = 0) -> tuple[np.ndarray, np.ndarray, dict] | tuple[None, None, dict]:
+    """Read return_ranker_*.csv files, return (X, y, file_stats) numpy arrays.
+
+    When *max_age_days* > 0, only files whose date suffix is within the
+    last *max_age_days* days are included (rolling window).
+    """
     import csv
 
     pattern = str(Path(data_dir) / "return_ranker_*.csv")
     files = sorted(glob.glob(pattern))
+
+    if max_age_days > 0:
+        from datetime import datetime as _dt, timedelta as _td
+        cutoff = (_dt.now() - _td(days=max_age_days)).strftime("%Y-%m-%d")
+        files = [f for f in files if _date_from_filename(f) >= cutoff]
+
     file_stats: dict = {"n_files": 0, "rows_per_file": {}}
     if not files:
         logger.warning("return_ranker: no training files found in %s", data_dir)
@@ -451,6 +469,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Train return ranker model")
     p.add_argument("--data-dir", default="data/training", help="Directory with return_ranker_*.csv files")
     p.add_argument("--model-path", default="data/return_ranker.pkl", help="Output model path")
+    p.add_argument("--max-age-days", type=int, default=3, help="Only use last N days of data (0 = all)")
     p.add_argument("--n-estimators", type=int, default=200)
     p.add_argument("--max-depth", type=int, default=4)
     p.add_argument("--learning-rate", type=float, default=0.05)
@@ -459,6 +478,7 @@ if __name__ == "__main__":
     ok = train_return_ranker(
         args.data_dir,
         args.model_path,
+        max_age_days=args.max_age_days,
         n_estimators=args.n_estimators,
         max_depth=args.max_depth,
         learning_rate=args.learning_rate,

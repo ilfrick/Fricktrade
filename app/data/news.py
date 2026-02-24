@@ -167,6 +167,7 @@ def fetch_news_features(
     api_secret: str,
     lookback_hours: int = 12,
     keywords: list[str] | None = None,
+    llm_cfg: dict | None = None,
     timeout_seconds: int = 10,
     retries: int = 2,
     as_of: "datetime | None" = None,
@@ -188,54 +189,72 @@ def fetch_news_features(
         return {}
     if provider != "alpaca" or not api_key or not api_secret:
         return {s: dict(default) for s in symbols}
+
+    llm_cfg = llm_cfg or {}
+    llm_enabled = bool(llm_cfg.get("enabled", False))
+    llm_max_items = int(llm_cfg.get("max_items", 25))
+    llm_checked = 0
+
     try:
         url = f"{base_url.rstrip('/')}/v1beta1/news"
-        params: dict = {"symbols": ",".join(symbols), "limit": 50}
-        if as_of is not None:
-            end_dt = as_of if as_of.tzinfo else as_of.replace(tzinfo=timezone.utc)
-            start_dt = end_dt - timedelta(hours=lookback_hours)
-            params["start"] = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            params["end"] = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-        headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret}
-        payload = None
-        for attempt in range(retries + 1):
-            try:
-                resp = requests.get(url, params=params, headers=headers, timeout=timeout_seconds)
-                resp.raise_for_status()
-                payload = resp.json()
-                break
-            except requests.RequestException:
-                if attempt >= retries:
-                    raise
-        if payload is None:
-            return {s: dict(default) for s in symbols}
-
-        items = payload.get("news", payload if isinstance(payload, list) else [])
         ref_time = as_of if as_of is not None else datetime.now(timezone.utc)
         if ref_time.tzinfo is None:
             ref_time = ref_time.replace(tzinfo=timezone.utc)
         cutoff = ref_time - timedelta(hours=lookback_hours)
         keywords_lower = [k.lower() for k in (keywords or [])]
+        headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret}
 
         result: dict[str, dict] = {s: {"catalyst": False, "article_count": 0, "recency_hours": float(lookback_hours)} for s in symbols}
 
-        for item in items:
-            created_at = _parse_time(item.get("created_at") or item.get("updated_at"))
-            if created_at and created_at < cutoff:
+        # Chunk symbols so each group gets a fair share of API results
+        chunk_size = 50
+        for chunk_start in range(0, len(symbols), chunk_size):
+            chunk = symbols[chunk_start : chunk_start + chunk_size]
+            params: dict = {"symbols": ",".join(chunk), "limit": 50}
+            if as_of is not None:
+                end_dt = as_of if as_of.tzinfo else as_of.replace(tzinfo=timezone.utc)
+                start_dt = end_dt - timedelta(hours=lookback_hours)
+                params["start"] = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                params["end"] = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            payload = None
+            for attempt in range(retries + 1):
+                try:
+                    resp = requests.get(url, params=params, headers=headers, timeout=timeout_seconds)
+                    resp.raise_for_status()
+                    payload = resp.json()
+                    break
+                except requests.RequestException:
+                    if attempt >= retries:
+                        raise
+            if payload is None:
                 continue
-            headline_text = (item.get("headline") or item.get("summary") or "").lower()
-            is_catalyst = bool(keywords_lower and any(k in headline_text for k in keywords_lower))
-            age_hours = float((ref_time - created_at).total_seconds() / 3600.0) if created_at else float(lookback_hours)
-            age_hours = min(age_hours, float(lookback_hours))
-            for sym in item.get("symbols", []) or []:
-                if sym not in result:
+
+            items = payload.get("news", payload if isinstance(payload, list) else [])
+
+            for item in items:
+                created_at = _parse_time(item.get("created_at") or item.get("updated_at"))
+                if created_at and created_at < cutoff:
                     continue
-                result[sym]["article_count"] += 1
-                if is_catalyst:
-                    result[sym]["catalyst"] = True
-                # Track the most recent article per symbol
-                if age_hours < result[sym]["recency_hours"]:
-                    result[sym]["recency_hours"] = age_hours
+                headline_text = item.get("headline") or item.get("summary") or ""
+                if llm_enabled:
+                    if llm_checked >= llm_max_items:
+                        is_catalyst = False
+                    else:
+                        llm_checked += 1
+                        is_catalyst = _llm_catalyst_decision(headline_text, llm_cfg)
+                else:
+                    is_catalyst = bool(keywords_lower and any(k in headline_text.lower() for k in keywords_lower))
+                age_hours = float((ref_time - created_at).total_seconds() / 3600.0) if created_at else float(lookback_hours)
+                age_hours = min(age_hours, float(lookback_hours))
+                for sym in item.get("symbols", []) or []:
+                    if sym not in result:
+                        continue
+                    result[sym]["article_count"] += 1
+                    if is_catalyst:
+                        result[sym]["catalyst"] = True
+                    if age_hours < result[sym]["recency_hours"]:
+                        result[sym]["recency_hours"] = age_hours
 
         return result
     except Exception as exc:

@@ -677,6 +677,7 @@ class TradingAgent:
             "abs_move": market_state.get("signal_abs_move"),
             "runup_abs": market_state.get("signal_runup_abs"),
             "drawdown_abs": market_state.get("signal_drawdown_abs"),
+            "catalyst": market_state.get("catalyst", False),
         }
 
     def _market_state_snapshot(self, market_state: dict) -> dict:
