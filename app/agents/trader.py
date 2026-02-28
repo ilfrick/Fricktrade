@@ -60,6 +60,9 @@ from app.strategies.stat_arb_pairs import StatArbPairsStrategy
 from app.strategies.market_maker import MarketMakerStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.strategies.top_movers_rf import TopMoversRFStrategy
+from app.strategies.crypto_momentum import CryptoMomentumStrategy
+from app.strategies.crypto_mean_reversion import CryptoMeanReversionStrategy
+from app.strategies.gap_reversal import GapReversalStrategy
 from app.data.news import fetch_catalyst_symbols_for_config, fetch_raw_articles_for_config
 from app.data.market_cache import build_market_cache, build_market_cache_config
 from app.learning.drift import DriftMonitor
@@ -439,6 +442,12 @@ class TradingAgent:
             return StatArbPairsStrategy(params)
         if name == "market_maker":
             return MarketMakerStrategy(params)
+        if name == "crypto_momentum":
+            return CryptoMomentumStrategy(params)
+        if name == "crypto_mean_reversion":
+            return CryptoMeanReversionStrategy(params)
+        if name == "gap_reversal":
+            return GapReversalStrategy(params)
         if name == "top_movers_rf":
             strategy_cfg = dict(params.get("top_movers_rf", {}) or {})
             interval = str(self.cfg.get("data", {}).get("interval", "1m"))
@@ -2406,11 +2415,16 @@ class TradingAgent:
             if self._ops_state_blocks_run():
                 time.sleep(interval_seconds)
                 continue
-            # Market open check is also done in reporting loop, but we need it here for logic control
-            market_open = is_market_open(self.cfg)
-            if not market_open:
-                time.sleep(interval_seconds)
-                continue
+            # Market open check — filter symbols by active asset class
+            # Crypto trades 24/7; equities only when equity market is open
+            equity_open = is_market_open(self.cfg)
+            if not equity_open:
+                crypto_symbols = [s for s in symbols if "/" in s]
+                if not crypto_symbols:
+                    time.sleep(interval_seconds)
+                    continue
+                symbols = crypto_symbols
+                logging.info("Equity market closed; processing %d crypto symbols", len(symbols))
             self._prepare_market_data(market_data_provider, symbols)
             symbol_batches = self._build_symbol_batches(symbols)
             for _, broker_override, batch in symbol_batches:
@@ -2421,11 +2435,12 @@ class TradingAgent:
         ms_cfg = self.cfg.get("healthwatch", {}).get("market_shutdown", {}) or {}
         if not ms_cfg.get("write_state", False):
             return False
+        # In partial mode the trader is kept alive for crypto 24/7 — never block
+        if ms_cfg.get("mode", "full") == "partial":
+            return False
         ops_state = load_ops_state(ms_cfg.get("state_path", "/data/system_state.json"))
         if ops_state_is_sleeping(ops_state):
             return True
-        if ops_state and not ops_state_is_running(ops_state):
-            return False
         return False
 
     def _log_broker_missing(self) -> None:

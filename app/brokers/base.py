@@ -32,3 +32,11 @@ class Broker(ABC):
     @abstractmethod
     def cancel_order(self, order_id: str) -> None:
         raise NotImplementedError
+
+    def get_asset_class(self, symbol: str) -> str:
+        """Return 'crypto' or 'equities' based on symbol format."""
+        return "crypto" if "/" in symbol else "equities"
+
+    def supports_short(self, symbol: str) -> bool:
+        """Crypto cannot be shorted on Alpaca."""
+        return self.get_asset_class(symbol) != "crypto"

@@ -31,6 +31,7 @@ market:
   trading_venues:
     - NYSE
     - Nasdaq
+    - Crypto
   extended_hours:
     enabled: false
   holiday_update:
@@ -38,6 +39,27 @@ market:
     interval_days: 7
     years_ahead: 1
   venues:
+  - name: Crypto
+    timezone: UTC
+    trading_hours:
+      open: "00:00"
+      close: "23:59"
+    holidays: []
+  asset_classes:
+    equities:
+      venues: [NYSE, Nasdaq]
+      min_price: 2.0
+      order_types: [market, limit, stop, stop_limit]
+      time_in_force: [day, gtc, ioc]
+      shortable: true
+      marginable: true
+    crypto:
+      venues: [Crypto]
+      min_price: 0.0
+      order_types: [market, limit, stop_limit]
+      time_in_force: [gtc, ioc]
+      shortable: false
+      marginable: false
   - name: BorsaItaliana
     timezone: Europe/Rome
     trading_hours:
@@ -151,6 +173,16 @@ brokers:
 risk:
   enabled: true
   max_daily_loss_pct: 3.0
+  crypto:
+    max_daily_loss_pct: 5.0
+    max_position_size_pct: 15.0
+    max_crypto_exposure_pct: 40.0
+    hard_stop_pct: 3.0
+    trailing_stop_pct: 5.0
+    take_profit_pct: 4.0
+    circuit_breaker_drawdown_pct: 8.0
+    vol_targeting:
+      target_vol_pct: 4.0
   max_position_size_pct: 10.0
   max_portfolio_leverage: 1.5
   max_short_exposure_pct: 30.0
@@ -218,6 +250,9 @@ strategy:
   - pattern_trading
   - stat_arb_pairs
   - top_movers_rf
+  - crypto_momentum
+  - crypto_mean_reversion
+  - gap_reversal
   combine: vote
   min_conviction: 0.12
   single_sided_conviction_multiplier: 0.4
@@ -267,6 +302,29 @@ strategy:
       inventory_target_pct: 0.0
       skew_pct: 0.15
       min_qty: 1
+    crypto_momentum:
+      fast_window: 5
+      medium_window: 15
+      slow_window: 60
+      volume_mult: 2.0
+      min_return_pct: 0.3
+      trailing_stop_pct: 2.0
+    crypto_mean_reversion:
+      bb_period: 20
+      bb_std: 2.0
+      rsi_period: 14
+      rsi_oversold: 25.0
+      drop_window_bars: 15
+      hard_stop_pct: 3.0
+    gap_reversal:
+      min_gap_pct: 2.0
+      target_fill_pct: 50.0
+      stop_pct: 0.5
+      volume_confirm_mult: 2.0
+      max_trade_window_minutes: 60
+      rsi_period: 5
+      rsi_oversold: 30.0
+      rsi_overbought: 70.0
     top_movers_rf:
       data_dir: /data
       model_path: /data/models/top_movers_rf/top_movers_rf.pkl
@@ -556,6 +614,13 @@ data:
   prefetch_after_filter: false
   process_on_new_bar_only: false
   symbols: []
+  crypto_symbols:
+    - BTC/USD
+    - ETH/USD
+    - SOL/USD
+    - AVAX/USD
+    - LINK/USD
+    - DOGE/USD
   interval: 5m
   lookback_days: 7
   session_gain_mode: gap
@@ -721,6 +786,7 @@ healthwatch:
     alertmanager: http://alertmanager:9093/-/healthy
   market_shutdown:
     enabled: true
+    mode: partial  # 'full' stops trader; 'partial' keeps it running for crypto 24/7
     project_name: fricktrade
     check_interval_seconds: 60
     start_before_minutes: 15
@@ -734,7 +800,15 @@ healthwatch:
     - daily-report
     - prometheus
     - tests-when-closed
-    stop_services: []
+    - trader          # Always on — crypto trades 24/7
+    - api             # Always on — monitoring
+    - market-cache    # Always on — crypto data
+    - redis           # Always on — cache backend
+    - learner         # Always on — crypto data trains 24/7
+    - grafana         # Always on — 24/7 monitoring
+    - alertmanager    # Always on — 24/7 alerts
+    stop_services:
+    - ollama          # Shut down outside equity hours (saves GPU)
 kill_switch:
   armed: false
   confirm_code: ''

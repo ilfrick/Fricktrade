@@ -165,12 +165,28 @@ def _run_checks(state: HealthState, targets: dict[str, str], interval: int, time
         time.sleep(interval)
 
 
-def _write_ops_state(path: Path, state: str, now: datetime, next_open: datetime | None, force_sleep: bool) -> None:
+def _write_ops_state(
+    path: Path,
+    state: str,
+    now: datetime,
+    next_open: datetime | None,
+    force_sleep: bool,
+    equity_market_open: bool = False,
+    crypto_market_open: bool = True,
+) -> None:
+    active_classes = []
+    if equity_market_open:
+        active_classes.append("equities")
+    if crypto_market_open:
+        active_classes.append("crypto")
     payload = {
         "state": state,
         "updated_at": now.isoformat(),
         "next_open": next_open.isoformat() if next_open else None,
         "force_sleep": bool(force_sleep),
+        "equity_market_open": equity_market_open,
+        "crypto_market_open": crypto_market_open,
+        "active_asset_classes": active_classes,
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -244,16 +260,21 @@ def _run_market_scheduler(cfg: dict) -> None:
     docker_host = os.environ.get("DOCKER_HOST", "unix://var/run/docker.sock")
     client = docker.DockerClient(base_url=docker_host)
 
+    mode = str(ms_cfg.get("mode", "full")).lower()  # 'full' | 'partial'
     last_state: str | None = None
     last_heartbeat: datetime | None = None
     while True:
         now = datetime.now(timezone.utc)
-        market_open = is_market_open(cfg, now=now)
+        equity_open = is_market_open(cfg, now=now)
         next_open = next_market_open(cfg, now=now)
-        should_run = market_open
-        if not should_run and next_open is not None:
-            delta = (next_open - now).total_seconds()
-            should_run = delta <= start_before * 60
+        # In partial mode the trader stays up for crypto 24/7; we only manage optional services
+        if mode == "partial":
+            should_run = True  # Always running in partial mode
+        else:
+            should_run = equity_open
+            if not should_run and next_open is not None:
+                delta = (next_open - now).total_seconds()
+                should_run = delta <= start_before * 60
         force_sleep = bool(_kill_switch_cfg(cfg).get("force_sleep", False))
         if force_sleep:
             if _kill_switch_armed(cfg):
@@ -268,7 +289,13 @@ def _run_market_scheduler(cfg: dict) -> None:
         else:
             stop_services = services - keep
         if should_run:
-            if last_state != "running":
+            if mode == "partial" and not equity_open:
+                # Partial mode: stop optional services (e.g. ollama) when equity closes
+                if last_state != "partial":
+                    logging.info("Healthwatch partial: equity closed, stopping optional services=%s", sorted(stop_services))
+                    _stop_services(client, project, stop_services)
+                    last_state = "partial"
+            elif last_state not in ("running",):
                 logging.info("Healthwatch market wake: starting services=%s", sorted(stop_services))
                 _start_services(client, project, stop_services)
                 last_state = "running"
@@ -283,7 +310,15 @@ def _run_market_scheduler(cfg: dict) -> None:
                 _stop_services(client, project, stop_services)
                 last_state = "stopped"
         if write_state:
-            _write_ops_state(state_path, last_state or "unknown", now, next_open, force_sleep)
+            _write_ops_state(
+                state_path,
+                last_state or "unknown",
+                now,
+                next_open,
+                force_sleep,
+                equity_market_open=equity_open,
+                crypto_market_open=True,  # Crypto is always open
+            )
         if heartbeat_minutes > 0:
             if last_heartbeat is None or (now - last_heartbeat).total_seconds() >= heartbeat_minutes * 60:
                 next_open_str = next_open.isoformat() if next_open else "unknown"

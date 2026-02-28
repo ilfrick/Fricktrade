@@ -95,7 +95,10 @@ class AlpacaBroker(Broker):
 
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
-        extended_hours = bool(kwargs.get("extended_hours", False))
+        is_crypto = "/" in symbol
+        # Crypto requires GTC (no DAY orders); equities use DAY by default
+        tif = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+        extended_hours = bool(kwargs.get("extended_hours", False)) and not is_crypto
         order_kwargs: dict = {}
         if extended_hours:
             order_kwargs["extended_hours"] = True
@@ -108,7 +111,7 @@ class AlpacaBroker(Broker):
                     symbol=symbol,
                     qty=qty,
                     side=order_side,
-                    time_in_force=TimeInForce.DAY,
+                    time_in_force=tif,
                     limit_price=float(limit_price),
                     **order_kwargs,
                 )
@@ -119,7 +122,7 @@ class AlpacaBroker(Broker):
                         symbol=symbol,
                         qty=qty,
                         side=order_side,
-                        time_in_force=TimeInForce.DAY,
+                        time_in_force=tif,
                         limit_price=float(limit_price),
                     )
                 else:
@@ -130,7 +133,7 @@ class AlpacaBroker(Broker):
                     symbol=symbol,
                     qty=qty,
                     side=order_side,
-                    time_in_force=TimeInForce.DAY,
+                    time_in_force=tif,
                     **order_kwargs,
                 )
             except TypeError as exc:
@@ -140,7 +143,7 @@ class AlpacaBroker(Broker):
                         symbol=symbol,
                         qty=qty,
                         side=order_side,
-                        time_in_force=TimeInForce.DAY,
+                        time_in_force=tif,
                     )
                 else:
                     raise

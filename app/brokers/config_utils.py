@@ -213,6 +213,21 @@ def _load_ibkr_env_accounts(ibkr_cfg: dict[str, Any]) -> list[dict[str, Any]]:
     return accounts
 
 
+def is_crypto_symbol(symbol: str) -> bool:
+    """Return True if symbol is a crypto pair (contains '/')."""
+    return "/" in symbol
+
+
+def get_asset_class(symbol: str) -> str:
+    """Return 'crypto' or 'equities' based on symbol format."""
+    return "crypto" if is_crypto_symbol(symbol) else "equities"
+
+
+def get_venue_for_symbol(symbol: str) -> str:
+    """Return the trading venue name for a symbol."""
+    return "Crypto" if is_crypto_symbol(symbol) else "NYSE"
+
+
 def _split_env_list(key: str) -> list[str]:
     raw = os.getenv(key, "")
     if not raw:
