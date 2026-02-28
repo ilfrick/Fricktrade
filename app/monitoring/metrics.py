@@ -104,6 +104,21 @@ STRATEGY_DISABLED = Gauge(
     "Strategy disabled by kill switch",
     ["strategy"],
 )
+STRATEGY_SHARPE_RATIO = Gauge(
+    "strategy_sharpe_ratio",
+    "Rolling 30-day Sharpe ratio for strategy",
+    ["strategy", "asset_class"],
+)
+STRATEGY_PROFIT_FACTOR = Gauge(
+    "strategy_profit_factor",
+    "Rolling 30-day profit factor (gross_win / gross_loss) for strategy",
+    ["strategy", "asset_class"],
+)
+TRADE_COST_BPS = Gauge(
+    "trade_cost_bps",
+    "Average effective trade cost in basis points",
+    ["broker", "asset_class"],
+)
 OPEN_ORDERS = Gauge("open_orders", "Open orders", ["symbol", "side"])
 OPEN_ORDERS_BY_BROKER = Gauge("open_orders_by_broker", "Open orders", ["broker", "symbol", "side"])
 BROKER_ACTIVE = Gauge("broker_active", "Active broker", ["broker"])

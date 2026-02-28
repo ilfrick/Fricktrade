@@ -183,6 +183,44 @@ class RiskManager:
         return False, None
 
     @staticmethod
+    def check_crypto_exposure(
+        symbol: str,
+        action: str,
+        qty: float,
+        last_price: float,
+        portfolio: dict,
+        crypto_risk_cfg: dict,
+    ) -> tuple[bool, str | None]:
+        """Check crypto-specific exposure limits.
+
+        Returns (blocked, reason).
+        """
+        if "/" not in symbol or action != "buy":
+            return False, None
+        max_crypto_pct = float(crypto_risk_cfg.get("max_crypto_exposure_pct", 40.0))
+        max_position_pct = float(crypto_risk_cfg.get("max_position_size_pct", 15.0))
+        equity = float(portfolio.get("equity", 0.0) or 0.0)
+        if equity <= 0:
+            return False, None
+        positions = portfolio.get("positions", {})
+        # Total crypto exposure across all positions
+        crypto_exposure = sum(
+            abs(float(pos.get("market_value", 0.0) or 0.0))
+            for sym, pos in positions.items()
+            if "/" in sym
+        )
+        order_notional = qty * last_price
+        projected_crypto_pct = (crypto_exposure + order_notional) / equity * 100.0
+        if projected_crypto_pct > max_crypto_pct:
+            return True, f"crypto_exposure_cap ({projected_crypto_pct:.1f}% > {max_crypto_pct}%)"
+        # Per-position size check
+        current_notional = abs(float(positions.get(symbol, {}).get("market_value", 0.0) or 0.0))
+        projected_position_pct = (current_notional + order_notional) / equity * 100.0
+        if projected_position_pct > max_position_pct:
+            return True, f"crypto_position_cap ({projected_position_pct:.1f}% > {max_position_pct}%)"
+        return False, None
+
+    @staticmethod
     def check_exposure_caps(
         symbol: str,
         action: str,

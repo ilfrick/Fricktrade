@@ -193,6 +193,9 @@ class SymbolManager:
                 self._active_symbol_labels_by_broker[broker_name] = set(active_syms)
 
     def symbol_venue(self, symbol: str) -> str | None:
+        # Crypto symbols are always on the Crypto venue
+        if "/" in symbol:
+            return "Crypto"
         venue = self._symbol_venues.get(symbol)
         if venue:
             return venue

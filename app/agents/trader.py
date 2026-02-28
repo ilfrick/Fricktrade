@@ -559,12 +559,12 @@ class TradingAgent:
         return action
 
     def _check_position_exit(
-        self, symbol: str, last_price: float, broker_state
+        self, symbol: str, last_price: float, broker_state, market_state: dict | None = None
     ) -> tuple[bool, str]:
         """Check if a held long position should be exited based on risk rules.
 
         Returns (should_exit, reason) where reason is one of:
-            hard_stop, trailing_stop, time_exit, take_profit,
+            hard_stop, atr_stop, trailing_stop, time_exit, take_profit,
             partial_take_profit, or empty string.
         """
         pos = broker_state.position_state.get(symbol)
@@ -576,7 +576,18 @@ class TradingAgent:
         avg_entry = float(avg_entry)
         risk_cfg = broker_state.risk.cfg
 
-        # Hard stop: price dropped X% from entry
+        # ATR-based stop: supersedes hard_stop when ATR is available
+        if market_state is not None:
+            indicators = market_state.get("indicators") or {}
+            atr = float(indicators.get("atr", 0.0) or 0.0)
+            if atr > 0 and avg_entry > 0:
+                is_crypto = "/" in symbol
+                atr_mult = 2.5 if is_crypto else 1.5
+                atr_stop_price = avg_entry - atr * atr_mult
+                if last_price <= atr_stop_price:
+                    return True, "atr_stop"
+
+        # Hard stop: price dropped X% from entry (fallback when ATR unavailable)
         hard_stop = float(risk_cfg.get("hard_stop_pct", 0) or 0)
         if hard_stop > 0 and last_price <= avg_entry * (1 - hard_stop / 100.0):
             return True, "hard_stop"
@@ -1082,7 +1093,7 @@ class TradingAgent:
                             _lp = _pp[-1] if _pp else None
                         if _lp is not None:
                             _should_exit, _exit_reason = self._check_position_exit(
-                                symbol, float(_lp), broker_state
+                                symbol, float(_lp), broker_state, market_state=market_state
                             )
                             if _should_exit:
                                 action = "sell_to_close"
@@ -1241,6 +1252,17 @@ class TradingAgent:
                     logging.info("Skipping %s for %s: exposure caps exceeded", action, symbol)
                     self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
                     return None
+                crypto_cfg = self.cfg.get("risk", {}).get("crypto", {}) or {}
+                if crypto_cfg:
+                    blocked_crypto, crypto_reason = RiskManager.check_crypto_exposure(
+                        symbol, action, qty, last_price, portfolio, crypto_cfg,
+                    )
+                    if blocked_crypto:
+                        self._record_risk_outcome(symbol, action, False, crypto_reason, broker_name)
+                        self._record_skip(symbol, action, "crypto_exposure_cap", broker_name)
+                        logging.info("Skipping %s for %s: %s", action, symbol, crypto_reason)
+                        self._emit_decision_trace(trace, "skip", "crypto_exposure_cap", "risk")
+                        return None
                 blocked, reason = broker_state.risk.risk_preflight(
                     qty, last_price,
                     self.cfg.get("trading_limits", {}),
@@ -1271,11 +1293,21 @@ class TradingAgent:
             order_type = str(order_meta.get("order_type") or "market").lower()
             limit_price = order_meta.get("limit_price")
             algo_name = order_meta.get("algo")
-            # Auto-upgrade market orders to limit at mid-price when spread data available
+            # Auto-upgrade market orders to limit at mid-price (Phase 4.1)
             if order_type == "market" and limit_price is None:
-                spread_pct = market_state.get("spread_pct")
-                if spread_pct is not None and last_price > 0:
-                    half_spread = last_price * float(spread_pct) / 200.0
+                _lo_cfg = self.cfg.get("execution", {}).get("limit_orders", {})
+                _lo_enabled = bool(_lo_cfg.get("enabled", False))
+                _high_urgency = float(_lo_cfg.get("high_urgency_threshold", 0.8))
+                _win_prob = float(market_state.get("kelly_win_prob", 0.0) or 0.0)
+                # Skip upgrade for very high-confidence signals (market order preferred)
+                if _lo_enabled and _win_prob < _high_urgency and last_price > 0:
+                    spread_pct = market_state.get("spread_pct")
+                    if spread_pct is not None:
+                        half_spread = last_price * float(spread_pct) / 200.0
+                    else:
+                        # Fallback: use configured default offset
+                        offset_bps = float(_lo_cfg.get("default_offset_bps", 3.0))
+                        half_spread = last_price * offset_bps / 10000.0
                     if action == "buy":
                         limit_price = round(last_price + half_spread, 2)
                     else:
@@ -1602,6 +1634,36 @@ class TradingAgent:
                     except (AttributeError, TypeError, ValueError, KeyError) as exc:
                         logging.warning("Airbag check failed for %s: %s", response.symbol, exc)
 
+    @staticmethod
+    def _time_of_day_scale(symbol: str, action: str) -> float:
+        """Return a position-size multiplier based on time of day.
+
+        Returns 0.0 to block the order entirely (equity open 5-min noise window).
+        Returns 0.5 for low-liquidity periods. Returns 1.0 normally.
+        """
+        now_utc = datetime.now(timezone.utc)
+        is_crypto = "/" in symbol
+        if is_crypto:
+            # Crypto: Asia night (00:00-04:00 UTC) — lower volume, widen spreads
+            if now_utc.hour < 4:
+                return 0.7
+            return 1.0
+        # Equities (US Eastern = UTC-4 or UTC-5)
+        # Approximate ET from UTC (ignoring DST edge case — good enough for this filter)
+        et_hour = (now_utc.hour - 4) % 24
+        et_minute = now_utc.minute
+        et_total = et_hour * 60 + et_minute
+        # 9:30 ET = open; 9:30-9:35 (570-575 ET minutes) — no new entries (noise)
+        if 570 <= et_total < 575 and action == "buy":
+            return 0.0
+        # 12:00-13:00 ET (720-780) — lunch hour, reduce size
+        if 720 <= et_total < 780:
+            return 0.5
+        # 15:55-16:00 ET (955-960) — exit-only, no new entries
+        if 955 <= et_total < 960 and action == "buy":
+            return 0.0
+        return 1.0
+
     def _size_order(
         self,
         action: str,
@@ -1613,6 +1675,10 @@ class TradingAgent:
     ) -> tuple[int, str | None]:
         if last_price <= 0:
             return 0, "no_price"
+        # Time-of-day size scaling
+        tod_scale = self._time_of_day_scale(symbol, action)
+        if tod_scale == 0.0:
+            return 0, "time_of_day_block"
         equity = float(portfolio.get("equity", 0.0) or 0.0)
         cash = float(portfolio.get("cash", 0.0) or 0.0)
         positions = portfolio.get("positions", {})
@@ -1621,9 +1687,16 @@ class TradingAgent:
         max_pos_pct = float(self.cfg["risk"]["max_position_size_pct"])
         vol_scale = self._vol_target_scale(market_state)
         portfolio_scale = self._portfolio_position_scale(symbol, market_state, portfolio)
-        max_pos_pct *= vol_scale * portfolio_scale
+        max_pos_pct *= vol_scale * portfolio_scale * tod_scale
         max_short_pct = float(self.cfg["risk"]["max_short_exposure_pct"])
-        max_short_pct *= vol_scale * portfolio_scale
+        max_short_pct *= vol_scale * portfolio_scale * tod_scale
+        # Half-Kelly position sizing using calibrated win probability
+        if action == "buy":
+            win_prob = float(market_state.get("kelly_win_prob", 0.0) or 0.0)
+            if win_prob > 0.5:
+                kelly_scale = (2.0 * win_prob - 1.0) * 0.5  # half-Kelly fraction
+                kelly_scale = max(0.1, min(1.0, kelly_scale))  # clamp [0.1, 1.0]
+                max_pos_pct *= kelly_scale
         allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
         limits = self.cfg.get("trading_limits", {})
         if limits.get("enabled") and not limits.get("allow_shorts", True):
@@ -2216,6 +2289,7 @@ class TradingAgent:
         top_weight = None
         top_buy = None
         top_buy_weight = None
+        top_buy_calibrated_conf = 0.0
         top_sell = None
         top_sell_weight = None
 
@@ -2246,6 +2320,7 @@ class TradingAgent:
                 if top_buy_weight is None or effective_weight > top_buy_weight:
                     top_buy_weight = effective_weight
                     top_buy = signal
+                    top_buy_calibrated_conf = confidence
             elif action == "sell":
                 sell_score += effective_weight
                 sells.append(signal)
@@ -2268,6 +2343,9 @@ class TradingAgent:
             return "hold", 1.0, _hold_strategy_name()
         if buy_score > sell_score:
             chosen = top_buy or top_signal
+            # Expose calibrated win probability for Kelly sizing in _size_order
+            if market_state is not None and top_buy_calibrated_conf > 0:
+                market_state["kelly_win_prob"] = top_buy_calibrated_conf
             return "buy", 1.0, chosen.get("name") if chosen else None
         reduce_pct = max(float(s.get("reduce_pct", 1.0)) for s in sells) if sells else 1.0
         chosen = top_sell or top_signal

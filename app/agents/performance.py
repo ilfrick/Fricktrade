@@ -12,6 +12,8 @@ from app.monitoring.metrics import (
     STRATEGY_AVG_PNL_PCT,
     STRATEGY_DRAWDOWN_PCT,
     STRATEGY_DISABLED,
+    STRATEGY_SHARPE_RATIO,
+    STRATEGY_PROFIT_FACTOR,
 )
 
 
@@ -89,16 +91,19 @@ class PerformanceTracker:
     @staticmethod
     def compute_trade_stats(records: list[dict]) -> dict:
         if not records:
-            return {"trades": 0, "win_rate": 0.0, "avg_pnl_pct": 0.0, "drawdown_pct": 0.0}
+            return {
+                "trades": 0, "win_rate": 0.0, "avg_pnl_pct": 0.0,
+                "drawdown_pct": 0.0, "sharpe": 0.0, "profit_factor": 0.0,
+            }
         ordered = sorted(records, key=lambda r: r.get("ts") or datetime.min)
         total = len(ordered)
-        wins = sum(1 for r in ordered if float(r.get("pnl_pct", 0.0) or 0.0) > 0.0)
-        avg_pnl = sum(float(r.get("pnl_pct", 0.0) or 0.0) for r in ordered) / total
+        pnls = [float(r.get("pnl_pct", 0.0) or 0.0) for r in ordered]
+        wins = sum(1 for p in pnls if p > 0.0)
+        avg_pnl = sum(pnls) / total
         equity = 100.0
         peak = 100.0
         max_dd = 0.0
-        for record in ordered:
-            pnl_pct = float(record.get("pnl_pct", 0.0) or 0.0)
+        for pnl_pct in pnls:
             equity *= 1.0 + pnl_pct / 100.0
             if equity > peak:
                 peak = equity
@@ -106,11 +111,25 @@ class PerformanceTracker:
                 drawdown = (peak - equity) / peak * 100.0
                 if drawdown > max_dd:
                     max_dd = drawdown
+        # Sharpe ratio (annualised, assuming daily trades ~252 trading days)
+        import math
+        if total > 1:
+            variance = sum((p - avg_pnl) ** 2 for p in pnls) / (total - 1)
+            std_dev = math.sqrt(variance) if variance > 0 else 0.0
+            sharpe = (avg_pnl / std_dev * math.sqrt(252)) if std_dev > 0 else 0.0
+        else:
+            sharpe = 0.0
+        # Profit factor = gross_win / gross_loss
+        gross_win = sum(p for p in pnls if p > 0.0)
+        gross_loss = sum(-p for p in pnls if p < 0.0)
+        profit_factor = (gross_win / gross_loss) if gross_loss > 0 else (gross_win if gross_win > 0 else 0.0)
         return {
             "trades": total,
             "win_rate": wins / total,
             "avg_pnl_pct": avg_pnl,
             "drawdown_pct": max_dd,
+            "sharpe": sharpe,
+            "profit_factor": profit_factor,
         }
 
     def update_from_positions(
@@ -258,6 +277,19 @@ class PerformanceTracker:
             STRATEGY_DISABLED.labels(strategy=name).set(
                 1 if strategy_disabled_globally_fn(name) else 0
             )
+            # Asset-class breakdown for new metrics
+            crypto_records = [r for r in records if "/" in str(r.get("symbol", ""))]
+            equity_records = [r for r in records if "/" not in str(r.get("symbol", ""))]
+            for asset_class, ac_records in (("equities", equity_records), ("crypto", crypto_records)):
+                ac_stats = self.compute_trade_stats(ac_records) if ac_records else {"sharpe": 0.0, "profit_factor": 0.0}
+                STRATEGY_SHARPE_RATIO.labels(strategy=name, asset_class=asset_class).set(ac_stats["sharpe"])
+                STRATEGY_PROFIT_FACTOR.labels(strategy=name, asset_class=asset_class).set(ac_stats["profit_factor"])
+            # Sharpe > 0 check — warn if consistently negative (5-session check happens at report level)
+            if stats["trades"] >= 5 and stats["sharpe"] < 0:
+                logging.warning(
+                    "Strategy %s Sharpe < 0 (sharpe=%.2f trades=%d) — consider disabling",
+                    name, stats["sharpe"], stats["trades"],
+                )
             strategy_report[name] = stats | {
                 "disabled": strategy_disabled_globally_fn(name)
             }

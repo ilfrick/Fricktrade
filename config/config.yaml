@@ -215,9 +215,17 @@ risk:
     max_var_pct: 3.0
     max_cvar_pct: 5.0
   exposure_caps:
-    enabled: false
-    venues: {}
-    sectors: {}
+    enabled: true
+    venues:
+      NYSE: 60.0      # max 60% in NYSE-listed equities
+      Nasdaq: 60.0    # max 60% in Nasdaq-listed equities
+      Crypto: 40.0    # max 40% in crypto (also enforced by risk.crypto)
+    sectors:
+      Technology: 35.0
+      Healthcare: 25.0
+      Financials: 25.0
+      Energy: 20.0
+      Consumer Discretionary: 20.0
   kill_switch_profiles:
     enabled: false
     mode: static
@@ -609,7 +617,7 @@ benchmarking:
   plot_dir: /data/reports/benchmark_plots
   pdf_path: /data/reports/benchmark_report.pdf
 data:
-  provider: yfinance
+  provider: alpaca
   prefetch_enabled: true
   prefetch_after_filter: false
   process_on_new_bar_only: false
@@ -759,7 +767,7 @@ market_cache:
   file_dir: /data/market_cache
   batch_size: 50
   delay_seconds: 3.0
-  max_age_multiplier: 6  # 5m * 6 = 30 min TTL
+  max_age_multiplier: 3  # 5m * 3 = 15 min TTL (Alpaca data is more timely)
   cache_only: false
   ignore_staleness: false
   allow_pickle: false
@@ -899,6 +907,10 @@ pattern_trading:
     trailing_stop_pct: 0.02
 execution:
   symbol_executor_workers: 4
+  limit_orders:
+    enabled: true             # Use limit orders by default; market orders only for high urgency
+    default_offset_bps: 3.0   # Fallback offset when spread_pct unavailable (3 bps)
+    high_urgency_threshold: 0.8  # calibrated_confidence > this → market order
   open_orders:
     enabled: true
     interval_seconds: 30
