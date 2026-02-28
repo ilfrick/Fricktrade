@@ -305,7 +305,38 @@ class TradingAgent:
                 self._strategy_params,
                 cfg.get("data", {}),
             )
+        # LLM integration — initialised lazily; missing API keys don't crash startup
+        self._llm_client = None
+        self._llm_sentiment = None
+        self._raw_news_cache: dict[str, list[dict]] = {}  # populated when news enrichment is added
+        self._init_llm()
         self._load_checkpoint()
+
+    def _init_llm(self) -> None:
+        """Initialise LLM client and sub-modules if llm.enabled is true in config."""
+        llm_cfg = self.cfg.get("llm", {})
+        if not llm_cfg.get("enabled", False):
+            return
+        try:
+            from app.llm.client import LLMClient
+            from app.llm.sentiment import NewsSentimentAnalyzer
+            cost_cfg = llm_cfg.get("cost", {})
+            self._llm_client = LLMClient(
+                daily_budget_usd=float(cost_cfg.get("daily_budget_usd", 5.0)),
+                alert_threshold_usd=float(cost_cfg.get("alert_threshold_usd", 4.0)),
+            )
+            sent_cfg = llm_cfg.get("sentiment", {})
+            if sent_cfg.get("enabled", False):
+                backend = llm_cfg.get("backends", {}).get("sentiment", "claude")
+                self._llm_sentiment = NewsSentimentAnalyzer(
+                    self._llm_client,
+                    backend=backend,
+                    cache_ttl_seconds=int(sent_cfg.get("cache_ttl_seconds", 900)),
+                    min_confidence_to_inject=float(sent_cfg.get("min_confidence_to_inject", 0.3)),
+                )
+            logging.info("LLM client initialised (sentiment=%s)", self._llm_sentiment is not None)
+        except Exception as exc:
+            logging.warning("LLM init failed (check API keys): %s", exc)
 
     def _record_skip(self, symbol: str, action: str, reason: str, broker_name: str | None = None) -> None:
         SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=reason).inc()
@@ -2627,6 +2658,23 @@ class TradingAgent:
             market_state["market_extended"] = is_venue_extended(self.cfg, venue)
         else:
             market_state["market_extended"] = False
+        # LLM sentiment injection — only fires when raw news articles are available
+        if self._llm_sentiment is not None:
+            raw_articles = self._raw_news_cache.get(symbol)
+            if raw_articles:
+                try:
+                    prices = market_state.get("prices") or []
+                    price = float(prices[-1]) if prices else 0.0
+                    sentiment = self._llm_sentiment.analyze(
+                        symbol=symbol,
+                        news_items=raw_articles,
+                        price=price,
+                        change_pct=0.0,
+                    )
+                    if sentiment:
+                        self._llm_sentiment.inject_into_market_state(market_state, sentiment)
+                except Exception as _llm_exc:
+                    logging.debug("LLM sentiment skipped for %s: %s", symbol, _llm_exc)
 
     def _recalculate_exposure(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         self._calc_exposure_metrics(market_state, portfolio, symbol)

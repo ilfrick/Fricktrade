@@ -873,6 +873,59 @@ execution:
       symbols: {}
       strategies: {}
       fallback_enabled: false
+llm:
+  enabled: false  # Set to true once API keys are configured
+
+  # Backend assignment per module
+  backends:
+    sentiment: claude        # Quality-critical
+    symbols_filter: gemini   # High volume, large context
+    post_session: gemini     # Large trade logs
+    meta_orchestrator: claude # Complex reasoning
+    risk_interpreter: claude  # Safety-critical
+
+  # Sentiment analyzer (Claude) — per-symbol news analysis
+  sentiment:
+    enabled: false
+    cache_ttl_seconds: 900
+    max_news_items: 10
+    min_confidence_to_inject: 0.3
+
+  # Daily symbol selection (Gemini) — replaces PPO filter
+  symbols_filter:
+    enabled: false
+    run_time: pre_market   # pre_market | manual
+    select_count: 20
+    fallback_to_rules: true  # Use rule-based filter if LLM fails
+
+  # Post-session analyst (Gemini) — automated daily review
+  post_session:
+    enabled: false
+    auto_run: true           # Run automatically at session end
+    output_dir: data/session_reports
+    max_trades_in_context: 100
+    auto_apply_weights: false  # If true, apply weight changes without confirmation
+
+  # Meta-orchestrator (Claude) — weekly weight rebalancing
+  meta_orchestrator:
+    enabled: false
+    run_day: sunday          # Day of week for weekly review
+    auto_apply: false        # Require human confirmation
+    max_weight_change: 0.15  # Max change per strategy per week
+    min_sessions_required: 3 # Minimum sessions before adjusting
+
+  # Risk event interpreter (Claude) — replaces simple auto-rollback
+  risk_interpreter:
+    enabled: false
+    min_severity: high       # Only interpret high/critical alerts
+    timeout_seconds: 10      # Max wait for LLM response
+
+  # Cost management
+  cost:
+    daily_budget_usd: 5.00
+    alert_threshold_usd: 4.00
+    log_all_costs: true
+
 monitoring:
   prometheus_port: 8001
   metrics_path: /metrics
