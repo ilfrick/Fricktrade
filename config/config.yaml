@@ -45,21 +45,6 @@ market:
       open: "00:00"
       close: "23:59"
     holidays: []
-  asset_classes:
-    equities:
-      venues: [NYSE, Nasdaq]
-      min_price: 2.0
-      order_types: [market, limit, stop, stop_limit]
-      time_in_force: [day, gtc, ioc]
-      shortable: true
-      marginable: true
-    crypto:
-      venues: [Crypto]
-      min_price: 0.0
-      order_types: [market, limit, stop_limit]
-      time_in_force: [gtc, ioc]
-      shortable: false
-      marginable: false
   - name: BorsaItaliana
     timezone: Europe/Rome
     trading_hours:
@@ -135,6 +120,21 @@ market:
     - '2026-09-07'
     - '2026-11-26'
     - '2026-12-25'
+  asset_classes:
+    equities:
+      venues: [NYSE, Nasdaq]
+      min_price: 2.0
+      order_types: [market, limit, stop, stop_limit]
+      time_in_force: [day, gtc, ioc]
+      shortable: true
+      marginable: true
+    crypto:
+      venues: [Crypto]
+      min_price: 0.0
+      order_types: [market, limit, stop_limit]
+      time_in_force: [gtc, ioc]
+      shortable: false
+      marginable: false
 brokers:
   alpaca:
     enabled: true

@@ -3,7 +3,7 @@
 
 ## Fricktrade Agent Guide
 
-This repo contains a Python intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana), with broker adapters, risk controls, backtesting, data download, and metrics/monitoring.
+This repo contains a Python intraday trading agent for US/EU equities and 24/7 crypto (NYSE, Nasdaq, Borsa Italiana, Alpaca Crypto), with broker adapters, risk controls, backtesting, data download, and metrics/monitoring.
 
 ## Quick Orientation
 
@@ -25,7 +25,12 @@ This repo contains a Python intraday trading agent for US and EU equities (NYSE,
 - API: `app/api/server.py` (FastAPI) with `/health`, `/config`, `/config/raw`, `/config/update`, `/restart`, and `/ui`.
 - Metrics: `app/monitoring/metrics.py` exposes Prometheus counters/gauges.
 - Runtime config: `config/config.yaml` (supports `${ENV_VAR}` interpolation).
-- Market-hours gating: `app/utils/market.py` checks NYSE, Nasdaq, and Borsa Italiana based on `market.venues`. The `market.trading_venues` filter restricts which venues count for the coarse `is_market_open()` / `next_market_open()` gate.
+- Market-hours gating: `app/utils/market.py` checks NYSE, Nasdaq, Borsa Italiana, and Crypto (24/7) based on `market.venues`. The `market.trading_venues` filter restricts which venues count for the coarse `is_market_open()` / `next_market_open()` gate.
+- Crypto trading: `data.crypto_symbols` lists always-on pairs (BTC/USD etc.); when equity markets are closed the trading loop filters to crypto-only symbols; healthwatch `mode: partial` keeps trader/redis/market-cache running 24/7.
+- Position sizing: `_size_order()` combines vol scale, portfolio scale, time-of-day scale, and half-Kelly (from calibrated win probability) into `max_pos_pct`.
+- Stop losses: ATR-based (1.5× equities, 2.5× crypto) when `market_state["indicators"]["atr"]` is available, falling back to `hard_stop_pct`; trailing stop applies once price moves in our favour.
+- Limit orders: `execution.limit_orders.enabled: true` auto-upgrades market → limit at mid-price (or 3 bps offset when no spread data); high-confidence signals (win_prob ≥ 0.8) keep market orders.
+- Exposure caps: `risk.exposure_caps` enforces per-venue (NYSE/Nasdaq/Crypto) and per-sector limits; `risk.crypto` enforces per-asset and portfolio crypto concentration limits.
 
 ## Running (Docker-first)
 
@@ -194,8 +199,8 @@ docker compose run --rm api
 
 ## Behavior Details
 
-- Trading loop pulls live data via `data.provider` (brokers/alpaca/yfinance) and iterates over the active symbol set (static list or dynamic scanner/AI filter).
-- Trading is paused when all configured markets are closed.
+- Trading loop pulls live data via `data.provider` (alpaca primary; yfinance fallback) and iterates over the active symbol set (static list or dynamic scanner/AI filter).
+- Equity trading is paused when equity markets are closed; crypto symbols continue 24/7.
 - Strategy emits `buy`, `sell`, `exit`, or `hold`; `exit` closes the position.
 - Risk checks are threshold-based and order sizing is cash-aware using broker equity/cash plus exposure caps.
 - RL feature vectors now include risk parameters (limits, vol/VAR haircuts, kill switches) and the latest per-symbol risk decision (allow/block + reason + action); changing risk feature shape requires retraining affected RL models.
@@ -245,6 +250,8 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- **Implementation plan phases 4-7 (partial): position sizing, stops, execution, data, risk.** Half-Kelly position sizing from calibrated win probability (`_combine_signals` tracks `kelly_win_prob`, `_size_order` applies half-Kelly with 0.1 floor). ATR-based stops (1.5× equities, 2.5× crypto) supersede `hard_stop_pct` when `indicators.atr` available. Limit orders default (`execution.limit_orders`): market→limit auto-upgrade at mid-price or 3 bps fallback; high-confidence signals stay market. Time-of-day scale applied to `max_pos_pct`. Exposure caps enabled (venue: NYSE/Nasdaq/Crypto, sector: Tech/Healthcare/etc.). `risk.crypto` enforces portfolio/per-asset concentration. Data provider switched to Alpaca, TTL reduced 30→15 min. Strategies added: `crypto_momentum`, `crypto_mean_reversion`, `gap_reversal`. (2026-02-28)
+- **LLM integration (sentiment, post-session); raw articles pipeline; 24/7 crypto trading.** Alpaca GTC orders for crypto. CryptoMomentum + CryptoMeanReversion strategies. 24/7 trading loop (equity-closed gate filters to crypto-only). Healthwatch partial mode. Strategy performance metrics (Sharpe, profit factor). Crypto risk checks in RiskManager. (2026-02-28)
 - **Reward System Enhancement: Comprehensive improvements to RL reward calculation for increased profitable trade frequency.** Implemented win-rate shaping (+0.5 bonus per win, -0.2 per loss), consecutive streak tracking (capped bonuses/penalties), Sharpe-like risk adjustment (100-trade rolling window), trade frequency incentives (10% target), time-aware penalties (dynamic based on minutes since last trade), and global account-level activity tracker (30-min idle threshold with exponential penalty). Added 13 new reward parameters under `learning.*` and 4 global time penalty parameters under `orchestrator.rl.global_time_penalty.*`. All changes backward compatible with sensible defaults. Expected impact: +15-25% win rate, -20% loss streaks, +10% capital efficiency. (2026-01-25)
 - **Fix: Resolve all remaining Docker build and runtime dependency issues.** Corrected backtrader version to 1.9.78.123 in requirements.txt. Added DEBIAN_FRONTEND=noninteractive to Dockerfiles to prevent interactive apt-get prompts. Upgraded pip in Dockerfiles to ensure robust dependency resolution. These changes resolve ModuleNotFoundError for backtrader and allow all core services (api, trader, learner) to start and run correctly. (2026-01-21)
 - Fixed Keras model deserialization errors by adding `tf_keras` dependency and restoring `TF_USE_LEGACY_KERAS=1` in Dockerfiles. Ensures the 'Keras return overlay' in the AI symbol filter can load and use pre-trained models. (2026-01-21)
