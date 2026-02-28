@@ -66,6 +66,24 @@ prom_query() {
 }
 
 prom_value() {
+    # Return a single numeric value (first result, no labels).
+    local expr="$1"
+    prom_query "$expr" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    results = data.get('data', {}).get('result', [])
+    if results:
+        print(results[0]['value'][1])
+    else:
+        print('N/A')
+except Exception:
+    print('N/A')
+" 2>/dev/null
+}
+
+prom_labeled() {
+    # Return labeled values as 'label=value' pairs separated by '|'.
     local expr="$1"
     prom_query "$expr" | python3 -c "
 import sys, json
@@ -76,8 +94,8 @@ try:
     for r in results:
         labels = r.get('metric', {})
         v = r['value'][1]
-        lbl = ','.join(f'{k}={v2}' for k,v2 in labels.items() if k != '__name__')
-        vals.append(f'{lbl}:{v}' if lbl else v)
+        lbl = labels.get('job', labels.get('broker', labels.get('instance', '')))
+        vals.append(f'{lbl}={v}' if lbl else v)
     print('|'.join(vals) if vals else 'N/A')
 except Exception:
     print('N/A')
@@ -139,9 +157,9 @@ mkdir -p "$metrics_dir"
 ) &
 PIDS+=($!)
 
-# 4. PnL/equity/leverage snapshots (CSV for easy analysis)
+# 4. PnL/equity/leverage/exposure snapshots (CSV for easy analysis)
 pnl_out="$run_dir/pnl_snapshots.csv"
-echo "timestamp,pnl_pct,drawdown_pct,equity,cash,leverage,open_positions,trades_total" > "$pnl_out"
+echo "timestamp,pnl_pct,drawdown_pct,equity,cash,leverage,gross_exposure,open_positions,trades_total,rss_mb" > "$pnl_out"
 (
     while [ $(TZ="$TZ_LOCAL" date +%s) -lt "$end_ts" ]; do
         ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -150,9 +168,13 @@ echo "timestamp,pnl_pct,drawdown_pct,equity,cash,leverage,open_positions,trades_
         equity=$(prom_value 'account_total')
         cash=$(prom_value 'account_cash')
         leverage=$(prom_value 'portfolio_leverage')
+        exposure=$(prom_value 'gross_exposure')
         positions=$(prom_value 'count(position_qty > 0)')
         trades=$(prom_value 'sum(trades_total)')
-        echo "${ts},${pnl},${dd},${equity},${cash},${leverage},${positions},${trades}" >> "$pnl_out"
+        rss=$(prom_value 'process_resident_memory_bytes')
+        # Convert RSS from bytes to MB
+        rss_mb=$(python3 -c "v='$rss'; print(f'{float(v)/1048576:.0f}') if v != 'N/A' else print('N/A')" 2>/dev/null || echo "N/A")
+        echo "${ts},${pnl},${dd},${equity},${cash},${leverage},${exposure},${positions},${trades},${rss_mb}" >> "$pnl_out"
         sleep "$PNL_INTERVAL"
     done
 ) &
@@ -264,6 +286,8 @@ with open(trace_path, 'rb') as f:
                 'signal_inputs': d.get('signal_inputs'),
                 'guardrail_action': d.get('guardrail_action'),
                 'broker': d.get('broker'), 'venue': d.get('venue'),
+                'decision_latency_seconds': d.get('decision_latency_seconds'),
+                'portfolio': d.get('portfolio'),
             }, default=str) + '\n')
 
     new_offset = f.tell()
@@ -443,10 +467,10 @@ else:
     print(f'  Peak:  {peak_mb:.0f} MB')
     print(f'  Growth: {growth_rate:+.1f} MB/min')
     flags = []
-    if growth_rate > 50:
-        flags.append('ALERT: growth_rate > 50 MB/min — possible memory leak')
-    if peak_mb > 8000:
-        flags.append('ALERT: peak RSS > 8000 MB — OOM risk')
+    if growth_rate > 5:
+        flags.append(f'ALERT: growth_rate {growth_rate:.1f} MB/min — possible memory leak')
+    if peak_mb > 4000:
+        flags.append(f'ALERT: peak RSS {peak_mb:.0f} MB — OOM risk')
     for flag in flags:
         print(f'  *** {flag} ***')
     if not flags:

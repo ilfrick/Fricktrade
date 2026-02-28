@@ -41,8 +41,9 @@ ET = ZoneInfo("US/Eastern")
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", default=None, help="Session date YYYY-MM-DD (ET)")
-    parser.add_argument("--monitoring-dir", default="data/monitoring")
-    parser.add_argument("--trace-dir", default="data/reports/decision_trace")
+    _project_root = str(Path(__file__).resolve().parent.parent)
+    parser.add_argument("--monitoring-dir", default=f"{_project_root}/data/monitoring")
+    parser.add_argument("--trace-dir", default=f"{_project_root}/data/reports/decision_trace")
     args = parser.parse_args()
 
     date_str = args.date or datetime.now(ET).strftime("%Y-%m-%d")
@@ -79,6 +80,8 @@ def main() -> None:
     _section_skip_reasons(report_lines, risk_blocks)
     _section_confidence_correlation(report_lines, decisions)
     _section_regime(report_lines, decisions)
+    _section_leverage_deep_dive(report_lines, risk_blocks, decisions)
+    _section_latency(report_lines, decisions)
     _section_pnl(report_lines, pnl_rows)
     _section_memory(report_lines, metrics_files)
     _section_anomalies(report_lines, decisions, signals, risk_blocks, pnl_rows)
@@ -230,6 +233,17 @@ def _section_confidence_correlation(lines: list, decisions: list[dict]) -> None:
     buckets: dict[str, list[float]] = defaultdict(list)
     for d in decisions:
         conf = d.get("confidence")
+        # Fallback: extract max confidence from individual strategy signals
+        if conf is None:
+            sigs = d.get("signals") or []
+            for sig in sigs:
+                c = sig.get("confidence")
+                if c is not None:
+                    try:
+                        c = float(c)
+                        conf = max(conf or 0.0, c)
+                    except (TypeError, ValueError):
+                        pass
         action = d.get("action", "")
         if conf is None:
             continue
@@ -309,7 +323,7 @@ def _section_pnl(lines: list, pnl_rows: list[dict]) -> None:
         lines.append("")
         lines.append("| Metric | Open | Close |")
         lines.append("|--------|------|-------|")
-        for key in ("pnl_pct", "drawdown_pct", "equity", "cash", "leverage", "open_positions", "trades_total"):
+        for key in ("pnl_pct", "drawdown_pct", "equity", "cash", "leverage", "gross_exposure", "open_positions", "trades_total", "rss_mb"):
             lines.append(f"| {key} | {first.get(key, '—')} | {last.get(key, '—')} |")
     lines.append("")
 
@@ -343,10 +357,108 @@ def _section_memory(lines: list, metrics_files: list[Path]) -> None:
         f"- Peak: **{max(snapshots):.0f} MB**",
         f"- Growth rate: **{growth:+.1f} MB/min**",
     ]
-    if growth > 50:
-        lines.append("⚠️ **ALERT: growth > 50 MB/min — possible memory leak**")
-    if max(snapshots) > 8000:
-        lines.append("⚠️ **ALERT: peak > 8 GB — OOM risk**")
+    if growth > 5:
+        lines.append(f"⚠️ **ALERT: growth {growth:.1f} MB/min — possible memory leak**")
+    if max(snapshots) > 4000:
+        lines.append(f"⚠️ **ALERT: peak {max(snapshots):.0f} MB — OOM risk**")
+    lines.append("")
+
+
+def _section_leverage_deep_dive(lines: list, risk_blocks: list[dict], decisions: list[dict]) -> None:
+    """Investigate pending_leverage_cap — the dominant skip reason from Feb 23."""
+    lines.append("## Leverage Cap Deep Dive")
+
+    lev_blocks = [r for r in risk_blocks if r.get("reason") == "pending_leverage_cap"]
+    if not lev_blocks:
+        lines += ["_No `pending_leverage_cap` skips this session._", ""]
+        return
+
+    total_skips = len(risk_blocks)
+    n = len(lev_blocks)
+    lines.append(f"`pending_leverage_cap` blocked **{n:,}** of **{total_skips:,}** skips ({n/total_skips*100:.1f}%)")
+    lines.append("")
+
+    # Time distribution — are they clustered or spread throughout the session?
+    hourly: Counter = Counter()
+    for r in lev_blocks:
+        ts_str = r.get("ts", "")
+        try:
+            ts = datetime.fromisoformat(ts_str)
+            hourly[ts.strftime("%H:00")] += 1
+        except (TypeError, ValueError):
+            pass
+    if hourly:
+        lines.append("**Hourly distribution:**")
+        lines.append("")
+        lines.append("| Hour (UTC) | Blocks |")
+        lines.append("|------------|--------|")
+        for hour in sorted(hourly):
+            lines.append(f"| {hour} | {hourly[hour]:,} |")
+        lines.append("")
+
+    # Which symbols are most affected?
+    sym_blocks: Counter = Counter(r.get("symbol", "?") for r in lev_blocks)
+    lines.append("**Top 10 symbols blocked by leverage cap:**")
+    lines.append("")
+    lines.append("| Symbol | Blocks |")
+    lines.append("|--------|--------|")
+    for sym, cnt in sym_blocks.most_common(10):
+        lines.append(f"| {sym} | {cnt:,} |")
+    lines.append("")
+
+    # How many unique symbols wanted to buy but were blocked?
+    blocked_syms = set(r.get("symbol") for r in lev_blocks if r.get("symbol"))
+    bought_syms = set(d.get("symbol") for d in decisions if d.get("action") == "buy")
+    only_blocked = blocked_syms - bought_syms
+    lines.append(f"- Unique symbols blocked: **{len(blocked_syms)}**")
+    lines.append(f"- Of those, never got to buy: **{len(only_blocked)}**")
+    lines.append(f"- Symbols that were both blocked and bought: **{len(blocked_syms & bought_syms)}**")
+    lines.append("")
+
+
+def _section_latency(lines: list, decisions: list[dict]) -> None:
+    lines.append("## Decision Latency")
+
+    latencies = []
+    for d in decisions:
+        lat = d.get("decision_latency_seconds")
+        if lat is not None:
+            try:
+                latencies.append(float(lat))
+            except (TypeError, ValueError):
+                pass
+
+    if not latencies:
+        lines += ["_No latency data available._", ""]
+        return
+
+    latencies.sort()
+    n = len(latencies)
+    p50 = latencies[int(n * 0.50)]
+    p90 = latencies[int(n * 0.90)]
+    p95 = latencies[int(n * 0.95)]
+    p99 = latencies[min(int(n * 0.99), n - 1)]
+    mean = sum(latencies) / n
+
+    lines += [
+        "",
+        f"| Percentile | Seconds |",
+        f"|------------|---------|",
+        f"| Mean | {mean:.3f} |",
+        f"| p50 | {p50:.3f} |",
+        f"| p90 | {p90:.3f} |",
+        f"| p95 | {p95:.3f} |",
+        f"| p99 | {p99:.3f} |",
+        f"| Max | {latencies[-1]:.3f} |",
+        "",
+    ]
+
+    if p95 > 2.0:
+        lines.append(f"⚠️ **High latency**: p95 = {p95:.2f}s — may miss 5m bar windows")
+    elif p95 > 1.0:
+        lines.append(f"Note: p95 = {p95:.2f}s — acceptable but monitor for growth")
+    else:
+        lines.append(f"Latency OK: p95 = {p95:.2f}s")
     lines.append("")
 
 
@@ -471,6 +583,24 @@ def _section_improvements(
                 f"**Top skip reason `{top_reason}`**: shorten `cooldown_seconds` or "
                 "track per-strategy cooldowns instead of per-symbol."
             )
+
+    # top_movers_rf check
+    tm_buy = sum(1 for d in decisions for sig in (d.get("signals") or [])
+                 if sig.get("name") == "top_movers_rf" and str(sig.get("action", "")).lower() == "buy")
+    if tm_buy < 50:
+        suggestions.append(
+            f"**`top_movers_rf`** generated only {tm_buy} buy signals — investigate "
+            "whether its RF model is loaded and feature inputs are being computed correctly."
+        )
+
+    # stat_arb_pairs check
+    sa_buy = sum(1 for d in decisions for sig in (d.get("signals") or [])
+                 if sig.get("name") == "stat_arb_pairs" and str(sig.get("action", "")).lower() == "buy")
+    if sa_buy == 0 and decisions:
+        suggestions.append(
+            "**`stat_arb_pairs`** produced zero buy signals — check ADF cointegration "
+            "passing rate and active pair count in logs."
+        )
 
     suggestions.append(
         "**Investigation**: cross-join `decisions_full.jsonl` with actual trade P&L "
