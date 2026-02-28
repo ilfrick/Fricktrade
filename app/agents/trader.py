@@ -60,7 +60,7 @@ from app.strategies.stat_arb_pairs import StatArbPairsStrategy
 from app.strategies.market_maker import MarketMakerStrategy
 from app.strategies.pattern_trading import PatternTradingStrategy
 from app.strategies.top_movers_rf import TopMoversRFStrategy
-from app.data.news import fetch_catalyst_symbols_for_config
+from app.data.news import fetch_catalyst_symbols_for_config, fetch_raw_articles_for_config
 from app.data.market_cache import build_market_cache, build_market_cache_config
 from app.learning.drift import DriftMonitor
 from app.learning.registry import load_active_model, load_latest_feature_stats
@@ -2573,22 +2573,35 @@ class TradingAgent:
                     except Exception as exc:
                         logging.warning("News catalyst refresh failed: %s", exc)
                     else:
-                        if isinstance(result, dict):
+                        if isinstance(result, tuple):
+                            catalyst_dict, raw_articles = result
+                            self._news_cache = catalyst_dict
+                            self._raw_news_cache = raw_articles
+                        elif isinstance(result, dict):
                             self._news_cache = result
+                        if self._news_cache:
                             self._news_cache_at = now
-                            logging.info("News catalyst refresh completed; symbols=%d", len(result))
+                            logging.info(
+                                "News catalyst refresh completed; symbols=%d raw_articles=%d",
+                                len(self._news_cache),
+                                sum(len(v) for v in self._raw_news_cache.values()),
+                            )
                     self._news_future = None
                     self._news_inflight_at = None
                 return
             symbols_snapshot = list(symbols)
             self._news_inflight_at = now
             logging.info("News catalyst refresh started; symbols=%d", len(symbols_snapshot))
-            self._news_future = self._news_executor.submit(
-                fetch_catalyst_symbols_for_config,
-                symbols_snapshot,
-                dict(news_cfg),
-                dict(self.cfg.get("brokers", {})),
-            )
+            _fetch_raw = self._llm_sentiment is not None
+            _news_cfg = dict(news_cfg)
+            _brokers_cfg = dict(self.cfg.get("brokers", {}))
+
+            def _combined_news_fetch() -> tuple[dict, dict]:
+                cats = fetch_catalyst_symbols_for_config(symbols_snapshot, _news_cfg, _brokers_cfg)
+                raw = fetch_raw_articles_for_config(symbols_snapshot, _news_cfg, _brokers_cfg) if _fetch_raw else {}
+                return cats, raw
+
+            self._news_future = self._news_executor.submit(_combined_news_fetch)
 
     def _log_news_cache(self) -> None:
         news_cfg = self.cfg.get("news", {})

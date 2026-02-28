@@ -206,6 +206,29 @@ docker compose run --rm api
 - Per-account dashboards are dynamically generated from `.env` by `scripts/generate_grafana_dashboards.py` (called by `compose_up.sh` before stack start). Template: `grafana/provisioning/dashboards/_template_account.json.template`.
 - Dashboard also shows active symbols, active broker, and account equity/cash/invested from broker account data. Skipped orders are available via `orders_skipped_total` metrics.
 
+## LLM Integration (`app/llm/`)
+
+Claude and Gemini are used on slow, non-critical paths — never in the real-time trade execution loop.
+
+| Module | Backend | Trigger | Purpose |
+|--------|---------|---------|---------|
+| `client.py` | Both | On demand | Unified LLMClient with daily budget circuit breaker ($5/day default), retry/backoff, `critical=True` bypass for risk calls |
+| `sentiment.py` | Claude | Per-symbol, market hours | Scores news sentiment −1.0→+1.0; injects `llm_sentiment`, `llm_sentiment_bias`, `llm_risk_flag` into `market_state` |
+| `symbols_filter.py` | Gemini | Pre-market (optional) | Selects top N symbols from candidates with sector/momentum context |
+| `post_session.py` | Gemini | After market close | Grades session, identifies findings with PnL impact estimates, saves JSON report |
+| `meta_orchestrator.py` | Claude | Weekly (Sunday) | Reviews session reports, recommends strategy weight changes (human confirmation required) |
+| `risk_interpreter.py` | Claude | On risk alert | Triages drift/drawdown alerts: structural break vs noise; recommends action |
+
+**Config keys:** `llm.enabled`, `llm.sentiment.enabled`, `llm.post_session.enabled`, etc.
+
+**Required env vars:** `ANTHROPIC_API_KEY` (Claude), `GOOGLE_GEMINI_API_KEY` (Gemini).
+
+**Sentiment pipeline:** `news.enabled: true` → `_refresh_news_cache()` fetches both catalyst bools AND raw articles → `_enrich_market_state()` calls `NewsSentimentAnalyzer` per symbol (15-min TTL cache) → injects into `market_state` for strategy consumption.
+
+**Standalone scripts:**
+- `scripts/post_session_analyst.py` — run after close: `python3 scripts/post_session_analyst.py --date YYYY-MM-DD`
+- Cron: `30 22 * * 1-5` (22:30 CET = 16:30 ET)
+
 ## Extending the Codebase
 
 - New strategies should extend `app/strategies/base.py` and be wired in `app/agents/trader.py`.

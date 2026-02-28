@@ -302,6 +302,95 @@ def _llm_catalyst_decision(text: str, llm_cfg: dict) -> bool:
     return bool(parsed.get("catalyst", False))
 
 
+def fetch_raw_articles_for_config(
+    symbols: Iterable[str],
+    news_cfg: dict,
+    brokers_cfg: dict,
+    max_per_symbol: int = 10,
+) -> dict[str, list[dict]]:
+    """Fetch raw news article dicts per symbol for LLM sentiment analysis.
+
+    Returns {symbol: [{"headline": ..., "summary": ..., "source": ..., "published_at": ...}]}.
+    Falls back to empty dict on any error — sentiment is non-critical.
+    """
+    symbols = [s for s in symbols if s]
+    if not symbols:
+        return {}
+    provider = str(news_cfg.get("provider", "alpaca"))
+    alpaca_cfg = get_alpaca_account_cfg(brokers_cfg if isinstance(brokers_cfg, dict) else {})
+    api_key = str(news_cfg.get("api_key", "")) or str(alpaca_cfg.get("api_key", ""))
+    api_secret = str(news_cfg.get("api_secret", "")) or str(alpaca_cfg.get("api_secret", ""))
+    if provider not in ("alpaca", "brokers") or not api_key or not api_secret:
+        return {}
+    try:
+        return _fetch_alpaca_raw_articles(
+            symbols=symbols,
+            base_url=str(news_cfg.get("base_url", "https://data.alpaca.markets")),
+            api_key=api_key,
+            api_secret=api_secret,
+            lookback_hours=int(news_cfg.get("lookback_hours", 12)),
+            timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
+            retries=int(news_cfg.get("retries", 2)),
+            max_per_symbol=max_per_symbol,
+        )
+    except Exception as exc:
+        logging.warning("fetch_raw_articles_for_config failed: %s", exc)
+        return {}
+
+
+def _fetch_alpaca_raw_articles(
+    symbols: list[str],
+    base_url: str,
+    api_key: str,
+    api_secret: str,
+    lookback_hours: int,
+    timeout_seconds: int,
+    retries: int,
+    max_per_symbol: int = 10,
+) -> dict[str, list[dict]]:
+    """Fetch raw article dicts per symbol from the Alpaca news v1beta1 endpoint."""
+    url = f"{base_url.rstrip('/')}/v1beta1/news"
+    headers = {
+        "APCA-API-KEY-ID": api_key,
+        "APCA-API-SECRET-KEY": api_secret,
+    }
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+    result: dict[str, list[dict]] = {s: [] for s in symbols}
+
+    chunk_size = 50
+    for idx in range(0, len(symbols), chunk_size):
+        chunk = symbols[idx : idx + chunk_size]
+        params = {"symbols": ",".join(chunk), "limit": 50}
+        payload = None
+        for attempt in range(retries + 1):
+            try:
+                resp = requests.get(url, params=params, headers=headers, timeout=timeout_seconds)
+                resp.raise_for_status()
+                payload = resp.json()
+                break
+            except requests.RequestException:
+                if attempt >= retries:
+                    break
+        if payload is None:
+            continue
+        items = payload.get("news", payload if isinstance(payload, list) else [])
+        for item in items:
+            created_at_str = item.get("created_at") or item.get("updated_at") or ""
+            created_at = _parse_time(created_at_str)
+            if created_at and created_at < cutoff:
+                continue
+            article = {
+                "headline": item.get("headline") or item.get("summary") or "",
+                "summary": item.get("summary") or "",
+                "source": item.get("source") or item.get("author") or "alpaca",
+                "published_at": created_at_str,
+            }
+            for sym in item.get("symbols", []) or []:
+                if sym in result and len(result[sym]) < max_per_symbol:
+                    result[sym].append(article)
+    return result
+
+
 def _parse_time(value: str | None) -> datetime | None:
     if not value:
         return None

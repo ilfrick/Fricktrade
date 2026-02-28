@@ -35,8 +35,20 @@ Operational and development scripts for Fricktrade.
 | `monitor_sell_analysis.sh` | Capture exit triggers, success/failure rates, retry budget usage, pending notional, and order rates by side; schedule via cron at 15:25 CET Mon-Fri |
 | `decision_monitor.py` | Incremental decision trace aggregator: byte-offset reader, P0 fix verification (weights, phantom sells, sell overshoot), periodic JSONL snapshots, session report; schedule via cron at 15:25 CET Mon-Fri |
 | `analyze_top_movers_trade_gap.py` | Diagnose why reported top movers were not traded by streaming decision traces and classifying symbol-level blockers |
-
 | `live_pnl_summary.sh` | Query Prometheus for live PnL, drawdown, trades, win rate, leverage, and risk metrics |
+
+## Return Ranker
+
+| Script | Description |
+|--------|-------------|
+| `collect_return_ranker_data.py` | Collect daily return-ranker training data (market features, news, next-day returns) from decision traces and Alpaca; triggers rolling-window retraining (`max_age_days=3`) |
+| `reset_checkpoints.sh` | Clear all model checkpoints and training state; use before a clean retrain from scratch |
+
+## LLM Analysis
+
+| Script | Description |
+|--------|-------------|
+| `post_session_analyst.py` | Post-session LLM analyst: reads decision monitor JSONL + trace, calls Gemini to produce a structured JSON report in `data/session_reports/report_YYYY-MM-DD.json`; schedule via cron `30 22 * * 1-5` (22:30 CET) |
 
 ## Profiling & Testing
 
@@ -74,6 +86,19 @@ python3 scripts/decision_monitor.py --trace-dir data/reports/decision_trace --ou
 python3 scripts/orchestrator_sweep.py --config config/config.yaml --runs 12
 ```
 
+## Usage Examples (continued)
+
+```bash
+# Run post-session LLM analysis (after market close)
+python3 scripts/post_session_analyst.py --date 2026-02-28 --backend gemini
+
+# Collect return-ranker training data
+python3 scripts/collect_return_ranker_data.py --date 2026-02-28
+
+# Reset all model checkpoints
+./scripts/reset_checkpoints.sh
+```
+
 ## Environment Variables
 
 Most scripts read from `.env` in the project root. Key variables:
@@ -82,3 +107,5 @@ Most scripts read from `.env` in the project root. Key variables:
 - `ALPACA_ACCOUNT_NAMES` — Comma-separated account names (used by dashboard generation)
 - `IBKR_ACCOUNT_NAMES` — IBKR account names (optional)
 - `GRAFANA_ADMIN_PASSWORD` — Grafana password from env
+- `ANTHROPIC_API_KEY` — Claude API key (required for LLM sentiment and risk interpreter)
+- `GOOGLE_GEMINI_API_KEY` — Gemini API key (required for LLM post-session analyst and symbols filter)

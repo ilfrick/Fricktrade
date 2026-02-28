@@ -874,7 +874,7 @@ execution:
       strategies: {}
       fallback_enabled: false
 llm:
-  enabled: false  # Set to true once API keys are configured
+  enabled: true  # Master switch — requires ANTHROPIC_API_KEY and GOOGLE_GEMINI_API_KEY in .env
 
   # Backend assignment per module
   backends:
@@ -885,22 +885,23 @@ llm:
     risk_interpreter: claude  # Safety-critical
 
   # Sentiment analyzer (Claude) — per-symbol news analysis
+  # Fires only when news.enabled: true AND raw articles are fetched from Alpaca
   sentiment:
-    enabled: false
+    enabled: true
     cache_ttl_seconds: 900
     max_news_items: 10
     min_confidence_to_inject: 0.3
 
   # Daily symbol selection (Gemini) — replaces PPO filter
   symbols_filter:
-    enabled: false
+    enabled: false           # Enable manually; runs pre-market, overrides AI filter
     run_time: pre_market   # pre_market | manual
     select_count: 20
     fallback_to_rules: true  # Use rule-based filter if LLM fails
 
   # Post-session analyst (Gemini) — automated daily review
   post_session:
-    enabled: false
+    enabled: true
     auto_run: true           # Run automatically at session end
     output_dir: data/session_reports
     max_trades_in_context: 100
