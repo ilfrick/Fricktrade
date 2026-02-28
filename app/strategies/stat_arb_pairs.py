@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -22,10 +23,14 @@ class PairsParams:
 
 
 class StatArbPairsStrategy(Strategy):
+    # Class-level shared state — all per-symbol instances share the same price cache
+    # and pair list so pair discovery works across symbols (required for cointegration)
+    _shared_price_cache: dict[str, list[float]] = {}
+    _shared_pairs: list[tuple[str, str, float]] = []
+    _shared_last_refresh: datetime | None = None
+    _shared_lock: threading.Lock = threading.Lock()
+
     def __init__(self, params: dict):
-        self._price_cache: dict[str, list[float]] = {}
-        self._pairs: list[tuple[str, str, float]] = []  # (sym_a, sym_b, hedge_ratio)
-        self._last_refresh: datetime | None = None
         cfg = params.get("stat_arb_pairs", {}) if isinstance(params, dict) else {}
         self.params = PairsParams(
             lookback=int(cfg.get("lookback", 50)),
@@ -43,12 +48,14 @@ class StatArbPairsStrategy(Strategy):
         self._update_cache(symbol, prices)
         self._refresh_pairs_if_needed()
         pair_info = self._find_pair(symbol)
+
         if pair_info is None:
             return {"action": "hold", "name": "stat_arb_pairs"}
         sym_a, sym_b, hedge_ratio = pair_info
         other = sym_b if sym_a == symbol else sym_a
-        series_a = self._price_cache.get(sym_a, [])
-        series_b = self._price_cache.get(sym_b, [])
+        with StatArbPairsStrategy._shared_lock:
+            series_a = list(StatArbPairsStrategy._shared_price_cache.get(sym_a, []))
+            series_b = list(StatArbPairsStrategy._shared_price_cache.get(sym_b, []))
         if len(series_a) < self.params.lookback or len(series_b) < self.params.lookback:
             return {"action": "hold", "name": "stat_arb_pairs"}
         a = np.array(series_a[-self.params.lookback :], dtype=float)
@@ -79,24 +86,32 @@ class StatArbPairsStrategy(Strategy):
         return {"action": "hold", "name": "stat_arb_pairs", "pair": other, "z_score": float(z)}
 
     def _update_cache(self, symbol: str, prices: list[float]) -> None:
-        cache = self._price_cache.setdefault(symbol, [])
-        if prices:
-            cache.append(float(prices[-1]))
-        if len(cache) > self.params.lookback * 3:
-            del cache[: len(cache) - self.params.lookback * 2]
+        with StatArbPairsStrategy._shared_lock:
+            cache = StatArbPairsStrategy._shared_price_cache.setdefault(symbol, [])
+            if prices:
+                cache.append(float(prices[-1]))
+            if len(cache) > self.params.lookback * 3:
+                del cache[: len(cache) - self.params.lookback * 2]
 
     def _refresh_pairs_if_needed(self) -> None:
         now = datetime.now(timezone.utc)
-        if self._last_refresh and now - self._last_refresh < timedelta(minutes=self.params.refresh_minutes):
-            return
-        symbols = list(self._price_cache.keys())
+        with StatArbPairsStrategy._shared_lock:
+            last = StatArbPairsStrategy._shared_last_refresh
+            if last and now - last < timedelta(minutes=self.params.refresh_minutes):
+                return
+            symbols = list(StatArbPairsStrategy._shared_price_cache.keys())
+            # Snapshot series under lock, do heavy computation outside
+            snapshots = {
+                s: list(StatArbPairsStrategy._shared_price_cache[s])
+                for s in symbols
+            }
         candidates: list[tuple[str, str, float, float]] = []  # (sym_a, sym_b, hedge_ratio, t_stat)
         n_tested = 0
         n_passed = 0
         for i in range(len(symbols)):
             for j in range(i + 1, len(symbols)):
-                a = self._price_cache.get(symbols[i], [])
-                b = self._price_cache.get(symbols[j], [])
+                a = snapshots.get(symbols[i], [])
+                b = snapshots.get(symbols[j], [])
                 if len(a) < self.params.lookback or len(b) < self.params.lookback:
                     continue
                 a_series = np.array(a[-self.params.lookback :], dtype=float)
@@ -110,15 +125,19 @@ class StatArbPairsStrategy(Strategy):
                     candidates.append((symbols[i], symbols[j], hedge_ratio, t_stat))
         # Rank by most negative t-stat (strongest cointegration)
         candidates.sort(key=lambda p: p[3])
-        self._pairs = [(a, b, hr) for a, b, hr, _ in candidates[: self.params.max_pairs]]
-        self._last_refresh = now
+        new_pairs = [(a, b, hr) for a, b, hr, _ in candidates[: self.params.max_pairs]]
+        with StatArbPairsStrategy._shared_lock:
+            StatArbPairsStrategy._shared_pairs = new_pairs
+            StatArbPairsStrategy._shared_last_refresh = now
         logging.info(
             "stat_arb: %d symbols in cache, %d pairs tested, %d passed ADF, %d active pairs",
-            len(symbols), n_tested, n_passed, len(self._pairs),
+            len(symbols), n_tested, n_passed, len(new_pairs),
         )
 
     def _find_pair(self, symbol: str) -> tuple[str, str, float] | None:
-        for pair in self._pairs:
+        with StatArbPairsStrategy._shared_lock:
+            pairs = StatArbPairsStrategy._shared_pairs
+        for pair in pairs:
             if symbol in (pair[0], pair[1]):
                 return pair
         return None

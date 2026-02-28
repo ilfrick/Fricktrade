@@ -114,6 +114,11 @@ class DecisionAggregator:
         self.phantom_sells_filtered: int = 0
         self.pending_sell_blocks: int = 0
 
+        # risk_block investigation
+        self.risk_block_exposure: list = []
+        self.risk_block_leverage: list = []
+        self.risk_block_daily_loss: list = []
+
         # Regime
         self.regime_counts: Counter = Counter()
         self.regime_prob_sum: float = 0.0
@@ -217,6 +222,13 @@ class DecisionAggregator:
         if reason == "pending_sell_covers_position":
             self.pending_sell_blocks += 1
 
+        # risk_block detail — track what limit is being hit
+        if reason == "risk_block":
+            detail = rec.get("risk_block_detail", {}) or {}
+            self.risk_block_exposure.append(detail.get("exposure_pct"))
+            self.risk_block_leverage.append(detail.get("leverage"))
+            self.risk_block_daily_loss.append(detail.get("daily_loss"))
+
         # Regime
         regime_name = rec.get("regime_name")
         if regime_name:
@@ -256,6 +268,10 @@ class DecisionAggregator:
             "phantom_sells_filtered": self.phantom_sells_filtered,
             "pending_sell_blocks": self.pending_sell_blocks,
             "top_skip_reasons": dict(self.skip_reasons.most_common(15)),
+            "risk_block_count": len(self.risk_block_exposure),
+            "risk_block_exposure_mean": round(sum(x for x in self.risk_block_exposure if x is not None) / max(sum(1 for x in self.risk_block_exposure if x is not None), 1), 2),
+            "risk_block_leverage_mean": round(sum(x for x in self.risk_block_leverage if x is not None) / max(sum(1 for x in self.risk_block_leverage if x is not None), 1), 3),
+            "risk_block_daily_loss_mean": round(sum(x for x in self.risk_block_daily_loss if x is not None) / max(sum(1 for x in self.risk_block_daily_loss if x is not None), 1), 4),
             "regime": dict(self.regime_counts),
             "regime_prob_mean": round(self.regime_prob_sum / self.regime_prob_count, 4) if self.regime_prob_count else None,
             "latency_mean": round(self.latency_sum / self.latency_count, 4) if self.latency_count else 0,
@@ -350,6 +366,28 @@ def write_session_report(agg: DecisionAggregator, path: Path, date_str: str, win
             lines.append(f"  {reason}: {cnt:,}")
         lines.append("")
 
+    # risk_block detail
+    n_rb = len(agg.risk_block_exposure)
+    if n_rb:
+        lines.append("--- Risk Block Investigation ---")
+        lines.append(f"  Total risk_block skips: {n_rb:,}")
+        exp_vals = [x for x in agg.risk_block_exposure if x is not None]
+        lev_vals = [x for x in agg.risk_block_leverage if x is not None]
+        loss_vals = [x for x in agg.risk_block_daily_loss if x is not None]
+        if exp_vals:
+            lines.append(f"  Exposure pct — mean: {sum(exp_vals)/len(exp_vals):.1f}%  max: {max(exp_vals):.1f}%")
+        if lev_vals:
+            lines.append(f"  Leverage     — mean: {sum(lev_vals)/len(lev_vals):.3f}  max: {max(lev_vals):.3f}")
+        if loss_vals:
+            lines.append(f"  Daily loss   — mean: {sum(loss_vals)/len(loss_vals):.4f}%  min: {min(loss_vals):.4f}%")
+        lines.append("  Likely cause: " + (
+            "leverage cap" if lev_vals and sum(lev_vals)/len(lev_vals) > 0.9 else
+            "daily loss limit" if loss_vals and sum(loss_vals)/len(loss_vals) < -0.5 else
+            "exposure cap" if exp_vals and sum(exp_vals)/len(exp_vals) > 80 else
+            "check exposure/leverage/daily_loss values above"
+        ))
+        lines.append("")
+
     # Regime
     if agg.regime_counts:
         lines.append("--- Regime Distribution ---")
@@ -405,6 +443,28 @@ def parse_time(s: str) -> tuple[int, int]:
     return int(parts[0]), int(parts[1])
 
 
+# NYSE holidays for 2025-2026 (YYYY-MM-DD)
+_NYSE_HOLIDAYS = {
+    "2025-01-01", "2025-01-20", "2025-02-17", "2025-04-18",
+    "2025-05-26", "2025-06-19", "2025-07-04", "2025-09-01",
+    "2025-11-27", "2025-12-25",
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03",
+    "2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07",
+    "2026-11-26", "2026-12-25",
+}
+
+
+def is_nyse_trading_day(date_str: str) -> bool:
+    """Return True if date_str (YYYY-MM-DD) is a NYSE trading day."""
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return True  # unknown — proceed anyway
+    if d.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    return date_str not in _NYSE_HOLIDAYS
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Decision Monitor — aggregated trace analysis")
     parser.add_argument("--date", default=None, help="Date YYYY-MM-DD (default: today in --tz)")
@@ -416,6 +476,9 @@ def main() -> None:
     parser.add_argument("--open-hour", default="9:30", help="Market open HH:MM")
     parser.add_argument("--close-hour", default="16:00", help="Market close HH:MM")
     parser.add_argument("--skip-existing", action="store_true", help="Start from end of file")
+    parser.add_argument("--require-market-open", action="store_true", default=True,
+                        help="Exit immediately if today is not a NYSE trading day (default: True)")
+    parser.add_argument("--no-require-market-open", dest="require_market_open", action="store_false")
     args = parser.parse_args()
 
     tz = ZoneInfo(args.tz)
@@ -427,6 +490,11 @@ def main() -> None:
         date_str = args.date
     else:
         date_str = now.strftime("%Y-%m-%d")
+
+    # NYSE trading day guard — exit early on weekends/holidays
+    if args.require_market_open and not is_nyse_trading_day(date_str):
+        print(f"[decision_monitor] {date_str} is not a NYSE trading day — exiting")
+        sys.exit(0)
 
     # Trace file uses UTC date in filename
     # Parse the target date and figure out UTC date

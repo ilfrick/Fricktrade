@@ -925,6 +925,7 @@ class TradingAgent:
                         trace["regime"] = regime_state.regime
                         trace["regime_name"] = regime_state.regime_name
                         trace["regime_probability"] = regime_state.probability
+                        trace["regime_probability"] = regime_state.probability
 
         # UNLOCKED: Orchestrator inference (CPU heavy)
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
@@ -1213,6 +1214,13 @@ class TradingAgent:
                     self._record_risk_outcome(symbol, action, False, reason, broker_name)
                     self._record_skip(symbol, action, reason, broker_name)
                     logging.info("Skipping %s for %s: %s", action, symbol, reason)
+                    if trace and reason == "risk_block":
+                        trace["risk_block_detail"] = {
+                            "exposure_pct": market_state.get("exposure_pct"),
+                            "short_exposure_pct": market_state.get("short_exposure_pct"),
+                            "leverage": market_state.get("leverage"),
+                            "daily_loss": broker_state.risk.daily_loss if hasattr(broker_state.risk, "daily_loss") else None,
+                        }
                     self._emit_decision_trace(trace, "skip", reason, category)
                     return None
                 self._record_risk_outcome(symbol, action, True, "ok", broker_name)
@@ -2121,6 +2129,7 @@ class TradingAgent:
             adjusted["trend_following"] = adjusted.get("trend_following", 0) * 1.3
             adjusted["pattern_trading"] = adjusted.get("pattern_trading", 0) * 1.2
             adjusted["stat_arb_pairs"] = adjusted.get("stat_arb_pairs", 0) * 0.8
+            adjusted["factor_model"] = adjusted.get("factor_model", 0) * 0.9
             adjusted["factor_model"] = adjusted.get("factor_model", 0) * 0.9
         elif regime == 2:  # high_vol_crisis
             adjusted["trend_following"] = adjusted.get("trend_following", 0) * 0.7
