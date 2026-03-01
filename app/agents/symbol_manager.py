@@ -370,9 +370,6 @@ class SymbolManager:
         dyn_cfg = self._cfg.get("data", {}).get("dynamic_symbols", {})
         if not dyn_cfg.get("enabled", False):
             return
-        # Skip dynamic symbol refresh (including AI filter) when market is closed
-        if not is_market_open(self._cfg):
-            return
         now = now or datetime.now(timezone.utc)
         refresh_minutes = int(dyn_cfg.get("refresh_minutes", 15))
         if self._dynamic_symbols_at and (now - self._dynamic_symbols_at).total_seconds() < refresh_minutes * 60:
@@ -398,6 +395,26 @@ class SymbolManager:
         alpaca_cfg = get_alpaca_account_cfg(self._cfg)
         api_key = alpaca_cfg.get("api_key", "")
         api_secret = alpaca_cfg.get("api_secret", "")
+
+        # Equity market closed: load crypto universe directly; skip full equity universe load,
+        # AI filter, and scanner (all equity-focused). Rate limiter above still applies.
+        if not is_market_open(self._cfg):
+            max_universe = int(dyn_cfg.get("max_universe", 500))
+            max_symbols = int(dyn_cfg.get("max_symbols", 50))
+            crypto_syms = load_universe(api_key, api_secret, "alpaca_active_crypto", max_universe=max_universe)
+            if not crypto_syms:
+                return
+            ordered = self.merge_with_positions(crypto_syms, portfolio, max_symbols)
+            self._symbols_by_strategy = {}
+            self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)
+            self._symbols_by_strategy["__global__"] = ordered
+            for name in strategy_names:
+                self._symbols_by_strategy[name] = ordered
+            self._symbols = ordered
+            self._dynamic_symbols = list(ordered)
+            self._dynamic_symbols_at = now
+            logging.info("Equity market closed; dynamic symbols set to %d crypto symbols", len(ordered))
+            return
 
         universe_cfg = dyn_cfg.get("universe", self._symbols)
         max_universe = int(dyn_cfg.get("max_universe", 500))
