@@ -2096,12 +2096,16 @@ class TradingAgent:
         broker_names = list(self._broker_map.keys())
 
         if routing_mode == "parallel" and len(broker_names) > 1:
-            # Use pre-built partition (includes held positions per broker)
+            # Use pre-built partition (includes held positions per broker).
+            # Intersect each broker's batch with the caller-provided symbols so that
+            # any upstream filter (e.g. crypto-only when equity market is closed)
+            # is honoured rather than silently bypassed.
             if self._symbol_mgr.symbols_by_broker:
+                symbols_set = set(symbols)
                 return [
-                    ("parallel", broker, batch)
+                    ("parallel", broker, [s for s in batch if s in symbols_set])
                     for broker, batch in self._symbol_mgr.symbols_by_broker.items()
-                    if batch
+                    if any(s in symbols_set for s in batch)
                 ]
             # Fallback: partition by buying power (no held-position merge)
             broker_buying_power = self._get_broker_buying_power()
@@ -2121,10 +2125,11 @@ class TradingAgent:
 
         if routing_mode == "auto_split" and len(broker_names) > 1:
             if self._symbol_mgr.symbols_by_broker:
+                symbols_set = set(symbols)
                 return [
-                    ("auto_split", broker, batch)
+                    ("auto_split", broker, [s for s in batch if s in symbols_set])
                     for broker, batch in self._symbol_mgr.symbols_by_broker.items()
-                    if batch
+                    if any(s in symbols_set for s in batch)
                 ]
             buckets = routing_utils.partition_symbols(symbols, broker_names, self._routing_cfg)
             return [("auto_split", broker, batch) for broker, batch in buckets.items()]
