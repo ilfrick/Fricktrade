@@ -270,7 +270,7 @@
       },
       "targets": [
         {
-          "expr": "symbol_active == 1",
+          "expr": "symbol_active_by_broker{broker=\"{{BROKER_LABEL}}\"} == 1",
           "refId": "A"
         }
       ]
