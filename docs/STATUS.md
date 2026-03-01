@@ -3,7 +3,7 @@
 
 # Fricktrade — Implementation Status & Roadmap
 
-*Last updated: 2026-03-01 (GPU allocation, alpaca_active_all universe). See `AGENTS.md` for full history.*
+*Last updated: 2026-03-01 (bug fixes: close_position slash, Kelly sizing, stuck-order timeout; risk limits updated). See `AGENTS.md` for full history.*
 
 ---
 
@@ -49,6 +49,7 @@ All core trading, risk, execution, and LLM components are implemented and deploy
 | Fractional share support (`AlgoSlice.qty: float`, `fractional_slice()`) | ✅ |
 | TCA feedback loop (EWMA slippage penalty, −50% max, 0.9×/day decay) | ✅ |
 | Time-of-day scaling (open/close blocks, lunch 50%, crypto 00-04 UTC 70%) | ✅ |
+| Stuck-order timeout (cancel + unblock queue after `max_order_age_seconds: 300`) | ✅ |
 
 ### Risk Management
 | Feature | Status |
@@ -58,7 +59,7 @@ All core trading, risk, execution, and LLM components are implemented and deploy
 | PDT retry suppression (per-broker/symbol, daily reset) | ✅ |
 | Pending notional race prevention (atomic reserve/release) | ✅ |
 | Two-phase dispatch (exits complete before entries) | ✅ |
-| Exposure caps (venue: NYSE/Nasdaq 60%, Crypto 40%; sector: Technology 35%, etc.) | ✅ |
+| Exposure caps (venue: NYSE/Nasdaq 60%, Crypto 50%; sector: Technology 35%, etc.) | ✅ |
 | VaR/CVaR gating | ✅ |
 | RiskEventInterpreter wired into `_handle_drift()` (pause circuit breaker) | ✅ |
 
@@ -134,43 +135,29 @@ Work needed:
 Files: `app/agents/orchestrator.py`, `app/learning/`
 
 #### PDT Force-Swing Mode
-**Status:** PDT tracking implemented; force-swing avoidance not implemented.
+**Status:** ✅ Implemented (2026-03-01).
 
-For accounts under $25k, the system tracks PDT blocks but does not proactively avoid
-triggering day-trade counts. A force-swing mode would detect when a trade would be the
-3rd same-day round-trip and instead hold the position overnight.
-
-Files: `app/agents/trader.py` (`_should_skip_exit`), `app/risk/manager.py`
-
-#### Auto-Disable on Negative Sharpe
-**Status:** Prometheus metrics exist; auto-disable logic not implemented.
-
-Phase 0.2 of the implementation plan calls for automatically disabling a strategy when
-its rolling Sharpe drops below 0 for N consecutive days.
-
-Files: `app/agents/trader.py` (`_adjust_weights_for_regime`), `app/monitoring/metrics.py`
+`_would_trigger_pdt_swing()` checks rolling `daytrade_count` from Alpaca account flags.
+When count ≥ 3 and equity ≤ $2,500 (Alpaca threshold), exits are suppressed for equities
+(crypto symbols with "/" are exempt). Configurable via `risk.pdt` block.
 
 ---
 
 ### P2 — Medium Priority
 
 #### Per-Strategy Kill Switch
-**Status:** Not implemented.
-
-Add a `strategy.params.<name>.enabled: false` flag that the trading loop checks before
-evaluating signals for that strategy. Allows disabling a single strategy in config
-without restarting.
-
-Files: `app/agents/trader.py` (`_build_strategy`, `_check_execution_for_symbol`)
+**Status:** ✅ Implemented (2026-03-01). `strategy.params.<name>.enabled: false` checked
+in `_strategy_disabled_globally()` before signal evaluation.
 
 #### Regime-Aware `min_conviction` Per Strategy
-**Status:** Not implemented. Global `min_conviction: 0.3` applies to all strategies.
+**Status:** ✅ Implemented (2026-03-01). `strategy.params.<name>.min_conviction_by_regime`
+map overrides global `min_conviction` in `_combine_signals()` for the winning strategy
+in the current regime.
 
-Different strategies have different signal reliability by regime — e.g., trend_following
-should require higher conviction in `high_vol_crisis`. Add per-strategy, per-regime
-conviction overrides in `strategy.params.<name>.min_conviction_by_regime`.
-
-Files: `app/agents/trader.py` (`_combine_signals`)
+#### Auto-Disable on Negative Sharpe
+**Status:** ✅ Implemented (2026-03-01). `PerformanceTracker._neg_sharpe_count` tracks
+consecutive negative-Sharpe reports; `get_neg_sharpe_weight_mult()` returns 0.5× after
+N consecutive reports (default 3). Wired into `_adjust_weights_for_regime()`.
 
 #### Factor Risk Pre-Trade Gate
 **Status:** `RiskModel.factor_risk()` exists but is not called before order submission.

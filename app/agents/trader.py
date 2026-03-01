@@ -444,6 +444,10 @@ class TradingAgent:
         return self._broker_states.get(normalized, self._broker_states[self._broker_name])
 
     def _strategy_disabled_globally(self, name: str) -> bool:
+        # Config kill switch: strategy.params.<name>.enabled: false
+        params = (self.cfg.get("strategy", {}).get("params", {}) or {}).get(name, {}) or {}
+        if not params.get("enabled", True):
+            return True
         if not self._broker_states:
             return False
         return all(name in state.disabled_strategies for state in self._broker_states.values())
@@ -1191,6 +1195,10 @@ class TradingAgent:
                     # PDT-blocked symbols: suppress sell retries until next day
                     if (broker_name, symbol) in self._pdt_blocked:
                         _slog.event("debug", "pdt_blocked", symbol=symbol, broker=broker_name)
+                    # PDT force-swing: hold overnight instead of triggering a day-trade violation
+                    elif self._would_trigger_pdt_swing(broker_name, symbol, market_state):
+                        _slog.event("debug", "pdt_swing_hold", symbol=symbol, broker=broker_name,
+                                    daytrade_count=(market_state.get("account_flags") or {}).get("daytrade_count"))
                     # Check exit backoff before evaluating exit
                     elif self._should_skip_exit(broker_name, symbol):
                         _slog.event("debug", "exit_backoff_active", symbol=symbol, broker=broker_name)
@@ -1647,6 +1655,37 @@ class TradingAgent:
         key = (broker, symbol)
         self._exit_fail_counts.pop(key, None)
         self._exit_backoff_until.pop(key, None)
+
+    def _would_trigger_pdt_swing(self, broker: str, symbol: str, market_state: dict) -> bool:
+        """Return True when selling an equity would violate PDT rules — hold overnight instead.
+
+        PDT (Pattern Day Trader) rules apply only to:
+          - Equity symbols (crypto — any symbol with "/" — is exempt)
+          - Accounts with equity below pdt_equity_threshold (Alpaca: $2,500)
+          - When rolling 5-day daytrade_count >= daytrade_count_limit (default 3)
+        """
+        # Crypto symbols (e.g. BTC/USD) are exempt from PDT rules
+        if "/" in symbol:
+            return False
+        pdt_cfg = (self.cfg.get("risk", {}) or {}).get("pdt", {}) or {}
+        if not pdt_cfg.get("force_swing", False):
+            return False
+        threshold = float(pdt_cfg.get("equity_threshold", 2500))
+        equity = float(((market_state.get("portfolio") or {}).get("equity") or 0.0))
+        if equity <= 0.0 or equity > threshold:
+            return False  # large enough account — PDT doesn't restrict it
+        count_limit = int(pdt_cfg.get("daytrade_count_limit", 3))
+        account_flags = market_state.get("account_flags") or {}
+        daytrade_count = account_flags.get("daytrade_count")
+        if daytrade_count is None:
+            return False  # can't determine — allow through
+        if float(daytrade_count) >= count_limit:
+            logging.info(
+                "PDT swing-hold: %s/%s equity=%.0f daytrade_count=%s >= %d — holding overnight",
+                broker, symbol, equity, daytrade_count, count_limit,
+            )
+            return True
+        return False
 
     def _flush_order_responses(self) -> None:
         # Clear PDT blocks daily + decay slippage penalties
@@ -2434,6 +2473,13 @@ class TradingAgent:
             adjusted["trend_following"] = adjusted.get("trend_following", 0) * 0.7
             adjusted["stat_arb_pairs"] = adjusted.get("stat_arb_pairs", 0) * 1.4
             adjusted["factor_model"] = adjusted.get("factor_model", 0) * 1.2
+        # Halve weight for strategies with N consecutive negative-Sharpe reports
+        if self._perf_tracker.enabled:
+            for strat in list(adjusted.keys()):
+                mult = self._perf_tracker.get_neg_sharpe_weight_mult(strat)
+                if mult < 1.0:
+                    adjusted[strat] = adjusted[strat] * mult
+                    logging.debug("Neg-Sharpe weight penalty ×%.1f applied to %s", mult, strat)
         # Macro regime overrides from LLM analyzer (4h TTL, non-blocking)
         if self._macro_regime is not None:
             try:
@@ -2528,6 +2574,21 @@ class TradingAgent:
         if buy_score == sell_score:
             return "hold", 1.0, _hold_strategy_name()
         winning_score = max(buy_score, sell_score)
+        # Per-strategy, per-regime min_conviction override.
+        # strategy.params.<name>.min_conviction_by_regime:
+        #   low_vol_trending: 0.25
+        #   high_vol_crisis: 0.50
+        # When the winning strategy has a regime-specific threshold, it replaces the global one.
+        _winning_signal = top_buy if buy_score > sell_score else top_sell
+        if _winning_signal and market_state:
+            _regime_name = market_state.get("regime_name", "") or ""
+            _strat_name = _winning_signal.get("name", "") or ""
+            _strat_params = (
+                (self.cfg.get("strategy", {}).get("params", {}) or {}).get(_strat_name, {}) or {}
+            )
+            _conv_by_regime = _strat_params.get("min_conviction_by_regime", {}) or {}
+            if _regime_name and _regime_name in _conv_by_regime:
+                min_conviction = float(_conv_by_regime[_regime_name])
         effective_min_conviction = float(min_conviction)
         if min_conviction > 0 and (
             (buy_score > 0 and sell_score == 0) or (sell_score > 0 and buy_score == 0)

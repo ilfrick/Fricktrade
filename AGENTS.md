@@ -250,6 +250,7 @@ Pytest covers core components. For changes, run:
 ## History
 
 Recent changes (newest first):
+- **PDT force-swing mode; per-strategy kill switch; regime-aware min_conviction; auto-disable on negative Sharpe; stuck-order timeout; Kelly fix; close_position slash fix.** PDT force-swing (`risk.pdt.force_swing`) proactively holds equity positions overnight when rolling 5-day `daytrade_count >= 3` on accounts ≤ $2,500 (Alpaca threshold); crypto exempt. Per-strategy kill switch: `strategy.params.<name>.enabled: false`. Regime-aware `min_conviction_by_regime` per strategy. Auto-disable weight penalty (×0.5) after N consecutive negative-Sharpe reports. Stuck-order timeout `max_order_age_seconds: 300` cancels and unblocks queue. Kelly always applied with 0.1 floor. `close_position` strips "/" from crypto symbols before URL path. (2026-03-01)
 - **Implementation plan phases 4-7 (partial): position sizing, stops, execution, data, risk.** Half-Kelly position sizing from calibrated win probability (`_combine_signals` tracks `kelly_win_prob`, `_size_order` applies half-Kelly with 0.1 floor). ATR-based stops (1.5× equities, 2.5× crypto) supersede `hard_stop_pct` when `indicators.atr` available. Limit orders default (`execution.limit_orders`): market→limit auto-upgrade at mid-price or 3 bps fallback; high-confidence signals stay market. Time-of-day scale applied to `max_pos_pct`. Exposure caps enabled (venue: NYSE/Nasdaq/Crypto, sector: Tech/Healthcare/etc.). `risk.crypto` enforces portfolio/per-asset concentration. Data provider switched to Alpaca, TTL reduced 30→15 min. Strategies added: `crypto_momentum`, `crypto_mean_reversion`, `gap_reversal`. (2026-02-28)
 - **LLM integration (sentiment, post-session); raw articles pipeline; 24/7 crypto trading.** Alpaca GTC orders for crypto. CryptoMomentum + CryptoMeanReversion strategies. 24/7 trading loop (equity-closed gate filters to crypto-only). Healthwatch partial mode. Strategy performance metrics (Sharpe, profit factor). Crypto risk checks in RiskManager. (2026-02-28)
 - **Reward System Enhancement: Comprehensive improvements to RL reward calculation for increased profitable trade frequency.** Implemented win-rate shaping (+0.5 bonus per win, -0.2 per loss), consecutive streak tracking (capped bonuses/penalties), Sharpe-like risk adjustment (100-trade rolling window), trade frequency incentives (10% target), time-aware penalties (dynamic based on minutes since last trade), and global account-level activity tracker (30-min idle threshold with exponential penalty). Added 13 new reward parameters under `learning.*` and 4 global time penalty parameters under `orchestrator.rl.global_time_penalty.*`. All changes backward compatible with sensible defaults. Expected impact: +15-25% win rate, -20% loss streaks, +10% capital efficiency. (2026-01-25)
@@ -981,6 +982,18 @@ return `{broker: list(ordered)}` for all brokers immediately, bypassing the held
 partition logic entirely.
 
 **Testing:** 181 passed, 17 skipped. Both broker dashboards now show 33 active symbols.
+
+---
+
+### 2026-03-01 (session 2): Bug fixes — close_position slash, Kelly sizing, stuck-order timeout
+
+**close_position slash bug** (`app/brokers/alpaca.py`): `close_position("LINK/USD")` was embedding the raw symbol into the Alpaca REST URL path `/v2/positions/LINK/USD`, which the HTTP router treated as an invalid path. The SDK returns "not found", silently swallowed by the not-found guard but still counted as a Prometheus error — and the position was never actually closed. All 7 crypto positions (6 on Higher, 1 on Realistic) were stuck for multiple hours. Fix: `api_symbol = symbol.replace("/", "")` before SDK call. Confirmed: 7 successful `close_position` calls on first rebuilt cycle.
+
+**Kelly always-apply** (`app/agents/trader.py`): Kelly scaling was guarded by `if win_prob > 0.5`. The calibrator warm-up returns ~0.375, so Kelly was skipped entirely — leaving the full 90% `max_position_size_pct` active. At 90% of ~$2,587 equity = $2,329 notional, which blew through the 50% Crypto venue cap ($1,293) on every buy → every buy rejected with `exposure_cap`. Fix: always apply Kelly with floor 0.1×, so max position = `90% × 0.5 = 45%` of equity (safely under 50% cap at any calibration level). Applies to both equity and crypto.
+
+**Stuck-order timeout** (`app/execution/order_queue.py`): A limit order staying in open-orders indefinitely kept `self._active` set, blocking all subsequent orders for that broker forever. Fix: `update()` now checks `(now - active.created_at).total_seconds() > max_order_age_seconds` (config: `execution.retry.max_order_age_seconds: 300`). On timeout: calls `broker.cancel_order()` (cancel failure logged but doesn't re-block), emits `status="timed_out"`, clears `_active` so queue advances.
+
+**Risk limits updated**: `risk.crypto.max_crypto_exposure_pct` 40→50%, `risk.exposure_caps.venues.Crypto` 40→50%, `risk.var.max_var_pct` 3→4%, `risk.max_cvar_pct` 5→6%, `risk.max_position_size_pct` 10→90%, `portfolio.constraints.max_position_pct` 0.25→0.90.
 
 ---
 

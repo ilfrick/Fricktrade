@@ -226,6 +226,10 @@ risk:
       Financials: 25.0
       Energy: 20.0
       Consumer Discretionary: 20.0
+  pdt:
+    force_swing: true        # hold overnight instead of triggering PDT violation
+    equity_threshold: 2500   # accounts below this are PDT-restricted (Alpaca threshold)
+    daytrade_count_limit: 3  # block exit when rolling 5-day day-trade count >= this
   kill_switch_profiles:
     enabled: false
     mode: static
@@ -295,6 +299,10 @@ strategy:
       slow_window: 30
       breakout_pct: 0.3
       exit_pct: 0.15
+      # enabled: false   # uncomment to disable this strategy without restart
+      min_conviction_by_regime:
+        low_vol_trending: 0.25   # lower bar — strong trending conditions
+        high_vol_crisis: 0.50    # higher bar — trend signals unreliable in crisis
     factor_model:
       momentum_weight: 0.5
       liquidity_weight: 0.2
@@ -308,6 +316,8 @@ strategy:
       z_exit: 0.5
       refresh_minutes: 30
       max_pairs: 25
+      min_conviction_by_regime:
+        high_vol_crisis: 0.20    # stat_arb thrives in crisis — lower bar
     market_maker:
       base_spread_pct: 0.4
       inventory_target_pct: 0.0
