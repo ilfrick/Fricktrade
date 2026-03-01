@@ -66,7 +66,7 @@ class AlpacaBroker(Broker):
             # position_state keys match trading symbol keys throughout the system.
             asset_class = str(d.get("asset_class", "") or "").lower()
             sym = str(d.get("symbol", "") or "")
-            if asset_class == "crypto" and "/" not in sym and sym.upper().endswith("USD"):
+            if "crypto" in asset_class and "/" not in sym and sym.upper().endswith("USD"):
                 d["symbol"] = sym[:-3] + "/USD"
             result.append(d)
         return result
