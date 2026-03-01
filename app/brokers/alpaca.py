@@ -58,7 +58,18 @@ class AlpacaBroker(Broker):
             _fetch_positions,
             is_success_check=_check_positions_data,
         )
-        return [pos.dict() if hasattr(pos, "dict") else dict(pos) for pos in positions]
+        result = []
+        for pos in positions:
+            d = pos.dict() if hasattr(pos, "dict") else dict(pos)
+            # Alpaca Trading API sometimes returns crypto positions in legacy
+            # no-slash format ("BTCUSD" instead of "BTC/USD"). Normalise so
+            # position_state keys match trading symbol keys throughout the system.
+            asset_class = str(d.get("asset_class", "") or "").lower()
+            sym = str(d.get("symbol", "") or "")
+            if asset_class == "crypto" and "/" not in sym and sym.upper().endswith("USD"):
+                d["symbol"] = sym[:-3] + "/USD"
+            result.append(d)
+        return result
 
     def get_open_orders(self) -> list[dict]:
         def _fetch_orders():

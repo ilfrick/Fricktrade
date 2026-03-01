@@ -422,6 +422,14 @@ class SymbolManager:
                     s for s in crypto_syms
                     if "/" in s and s.split("/", 1)[1].upper() in allowed
                 ]
+            # Exclude stablecoin base currencies (USDC/USD, USDT/USD, USDG/USD …).
+            # These are valid Alpaca pairs but carry no directional signal and
+            # would generate spurious "price below min_price" blocks when priced at ~$1.
+            _stablecoin_bases = {"USDC", "USDT", "USDG", "BUSD", "DAI", "TUSD", "FRAX", "PYUSD", "GUSD"}
+            crypto_syms = [
+                s for s in crypto_syms
+                if "/" not in s or s.split("/", 1)[0].upper() not in _stablecoin_bases
+            ]
             if not crypto_syms:
                 return
             ordered = self.merge_with_positions(crypto_syms, portfolio, max_symbols)
