@@ -3,13 +3,14 @@
 
 # Fricktrade — Implementation Status & Roadmap
 
-*Last updated: 2026-03-01 (bug fixes: close_position slash, Kelly sizing, stuck-order timeout; risk limits updated). See `AGENTS.md` for full history.*
+*Last updated: 2026-03-01 (PDT force-swing; per-strategy kill switch; regime min_conviction; neg-Sharpe weight penalty; Binance broker; stuck-order timeout; Kelly fix; close_position slash fix). See `AGENTS.md` for full history.*
 
 ---
 
 ## Current State (v3.0)
 
 The system is **live on Alpaca paper** trading US equities (intraday) and crypto (24/7).
+Binance Spot adapter is implemented but disabled by default (set `brokers.binance.enabled: true` to activate).
 All core trading, risk, execution, and LLM components are implemented and deployed.
 
 ---
@@ -38,6 +39,9 @@ All core trading, risk, execution, and LLM components are implemented and deploy
 | Regime-aware weight adjustment (`_adjust_weights_for_regime()`) | ✅ |
 | MacroRegimeAnalyzer (FRED VIX/DGS10/DXY + Claude, 4h TTL) | ✅ |
 | Half-Kelly sizing from calibrated win probability | ✅ |
+| Per-strategy kill switch (`strategy.params.<name>.enabled: false`) | ✅ |
+| Regime-aware `min_conviction` per strategy (`min_conviction_by_regime` map) | ✅ |
+| Auto-disable weight penalty on consecutive negative Sharpe (×0.5 after N reports) | ✅ |
 
 ### Execution
 | Feature | Status |
@@ -57,11 +61,19 @@ All core trading, risk, execution, and LLM components are implemented and deploy
 | ATR-based stops (1.5× equity, 2.5× crypto) | ✅ |
 | Per-symbol circuit breaker (5% unrealized loss) | ✅ |
 | PDT retry suppression (per-broker/symbol, daily reset) | ✅ |
+| PDT force-swing mode (equity only; equity ≤ $2,500; daytrade_count ≥ 3 → hold overnight) | ✅ |
 | Pending notional race prevention (atomic reserve/release) | ✅ |
 | Two-phase dispatch (exits complete before entries) | ✅ |
 | Exposure caps (venue: NYSE/Nasdaq 60%, Crypto 50%; sector: Technology 35%, etc.) | ✅ |
 | VaR/CVaR gating | ✅ |
 | RiskEventInterpreter wired into `_handle_drift()` (pause circuit breaker) | ✅ |
+
+### Brokers
+| Broker | Status | Notes |
+|---|---|---|
+| Alpaca | ✅ live | Paper trading; multiple named accounts (`Higher`, `Realistic`) |
+| IBKR | ✅ wired | Disabled (`brokers.ibkr.enabled: false`) |
+| Binance Spot | ✅ wired | Disabled (`brokers.binance.enabled: false`); `python-binance>=1.0.19`; enable + add API keys to `.env` |
 
 ### LLM Integration (`app/llm/`)
 | Component | Status | Config key |
@@ -134,30 +146,9 @@ Work needed:
 
 Files: `app/agents/orchestrator.py`, `app/learning/`
 
-#### PDT Force-Swing Mode
-**Status:** ✅ Implemented (2026-03-01).
-
-`_would_trigger_pdt_swing()` checks rolling `daytrade_count` from Alpaca account flags.
-When count ≥ 3 and equity ≤ $2,500 (Alpaca threshold), exits are suppressed for equities
-(crypto symbols with "/" are exempt). Configurable via `risk.pdt` block.
-
 ---
 
 ### P2 — Medium Priority
-
-#### Per-Strategy Kill Switch
-**Status:** ✅ Implemented (2026-03-01). `strategy.params.<name>.enabled: false` checked
-in `_strategy_disabled_globally()` before signal evaluation.
-
-#### Regime-Aware `min_conviction` Per Strategy
-**Status:** ✅ Implemented (2026-03-01). `strategy.params.<name>.min_conviction_by_regime`
-map overrides global `min_conviction` in `_combine_signals()` for the winning strategy
-in the current regime.
-
-#### Auto-Disable on Negative Sharpe
-**Status:** ✅ Implemented (2026-03-01). `PerformanceTracker._neg_sharpe_count` tracks
-consecutive negative-Sharpe reports; `get_neg_sharpe_weight_mult()` returns 0.5× after
-N consecutive reports (default 3). Wired into `_adjust_weights_for_regime()`.
 
 #### Factor Risk Pre-Trade Gate
 **Status:** `RiskModel.factor_risk()` exists but is not called before order submission.
@@ -210,6 +201,7 @@ layer. Earnings drift signals in particular would benefit from pre-market execut
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | Claude LLM | **Required** | Sentiment, risk_interpreter, macro_regime disabled |
 | `GOOGLE_GEMINI_API_KEY` | Gemini LLM | **Required** | symbols_filter, post_session disabled |
+| `BINANCE_API_KEY` + `BINANCE_API_SECRET` | Binance trading | Optional | Binance broker stays disabled |
 | `FRED_API_KEY` | FRED macro data | Optional | MacroRegimeAnalyzer falls back to yfinance `^VIX` |
 | `ALPHA_VANTAGE_API_KEY` | Earnings calendar | Optional | EarningsDriftStrategy uses no-signal fallback |
 | `COINGLASS_API_KEY` | Crypto OI | Optional | `crypto_oi_change_pct` not injected into market_state |

@@ -18,7 +18,7 @@ This repo contains a Python intraday trading agent for US/EU equities and 24/7 c
   - `app/utils/structured_log.py` (structured JSON logging for trade/risk events)
   - `app/utils/volatility.py` (shared realized volatility calculation)
   - `app/strategies/intraday_momentum.py` + `app/execution/executor.py`.
-- Broker adapters: `app/brokers/alpaca.py`, `app/brokers/ibkr.py`, abstract base in `app/brokers/base.py`.
+- Broker adapters: `app/brokers/alpaca.py`, `app/brokers/ibkr.py`, `app/brokers/binance.py` (Spot), abstract base in `app/brokers/base.py`.
 - Backtesting: `app/backtest/agent_engine.py` runs the real `TradingAgent` loop on CSVs; legacy SMA lives in `app/backtest/engine.py`.
 - Learning (RL): `app/learning/` for env, data loading, training, and online updates; `app/strategies/rl_policy.py` for inference.
 - Data download: `app/data/downloader.py` uses `yfinance` with retry and rate limiting.
