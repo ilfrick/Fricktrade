@@ -24,7 +24,7 @@ services:
       - "0.0.0.0:11434:11434"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/ || exit 1"]
+      test: ["CMD-SHELL", "ollama ps > /dev/null 2>&1"]
       interval: 30s
       timeout: 10s
       retries: 5

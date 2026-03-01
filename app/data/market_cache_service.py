@@ -161,7 +161,7 @@ def _lookbacks_from_cfg(cfg: dict) -> dict[str, int]:
 
 def _resolve_universe(cfg: dict, universe_cfg: object, max_universe: int) -> list[str]:
     universe_cfg = "alpaca_active" if str(universe_cfg) == "brokers_active" else universe_cfg
-    if str(universe_cfg) != "alpaca_active":
+    if not str(universe_cfg).startswith("alpaca_active"):
         return load_universe("", "", universe_cfg, max_universe=max_universe)
     alpaca_cfg = get_alpaca_account_cfg(cfg)
     api_key = alpaca_cfg.get("api_key", "")
