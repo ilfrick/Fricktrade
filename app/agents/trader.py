@@ -1818,13 +1818,14 @@ class TradingAgent:
         max_pos_pct *= vol_scale * portfolio_scale * tod_scale
         max_short_pct = float(self.cfg["risk"]["max_short_exposure_pct"])
         max_short_pct *= vol_scale * portfolio_scale * tod_scale
-        # Half-Kelly position sizing using calibrated win probability
+        # Half-Kelly position sizing using calibrated win probability.
+        # Always applied (floor 0.1×, ceil 1.0×) so that:
+        #   win_prob=0.0 (uncalibrated) → 0.1× → avoids blowing through venue caps
+        #   win_prob=0.8 → 0.3×;  win_prob=1.0 → 0.5× (hard ceiling)
         if action == "buy":
             win_prob = float(market_state.get("kelly_win_prob", 0.0) or 0.0)
-            if win_prob > 0.5:
-                kelly_scale = (2.0 * win_prob - 1.0) * 0.5  # half-Kelly fraction
-                kelly_scale = max(0.1, min(1.0, kelly_scale))  # clamp [0.1, 1.0]
-                max_pos_pct *= kelly_scale
+            kelly_scale = max(0.1, min(1.0, (2.0 * win_prob - 1.0) * 0.5))
+            max_pos_pct *= kelly_scale
         allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
         limits = self.cfg.get("trading_limits", {})
         if limits.get("enabled") and not limits.get("allow_shorts", True):
