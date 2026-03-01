@@ -905,3 +905,24 @@ all new-entry candidates. Local helper `_submit_phase(syms)` avoids repeating th
 ### 2026-03-01 (follow-up): Fix crypto TimeFrame bug in collect script
 
 **Bug fixed:** `scripts/collect_crypto_training_data.py` used `TimeFrame.Minute * 5` which raises `TypeError` with the installed alpaca-py version. Fixed to `TimeFrame(5, TimeFrameUnit.Minute)` (matching the pattern in `app/data/downloader.py` and `app/agents/orchestrator.py`).
+
+### 2026-03-01: Fix fractional trading support
+
+**Problem:** With crypto and fractional equities, `_size_order` always returned `int` quantities via `int(allowed_value // last_price)`. For a $250 account with 3% max position = $7.50, any asset above $7.50 (BTC at $67k, NVDA at $120) returned qty=0 and was never traded. Three separate guards all assumed whole-share pricing.
+
+**Changes:**
+
+- `app/execution/algos.py`: `AlgoSlice.qty: int → float`; added `fractional_slice(qty)` single-slice for sub-integer qty
+- `app/agents/trader.py`:
+  - Added `_is_fractional(symbol) -> bool`: crypto (`"/" in symbol`) always True; equities if `trading_limits.fractional_shares: true`
+  - `_size_order` return type `tuple[int, …] → tuple[float, …]`
+  - `allowed_value < last_price` guard → `allowed_value < min_notional_usd` (default $1, from `trading_limits.min_notional`)
+  - Buy return: fractional → `round(allowed_value / last_price, 8|3)`, whole-share → `int(allowed_value // last_price)`
+  - Sell qty: fractional → `round(float, precision)`, whole-share → `int`
+  - `_plan_execution` accepts `qty: float`; if `qty < 1.0`, returns `fractional_slice(qty)` directly (skip TWAP/VWAP splitting)
+- `app/agents/symbol_manager.py`:
+  - `cap_symbols_by_cash()`: skips cash-based symbol count cap when `fractional_shares: true`
+  - `resolve_universe()`: skips `price_max = buying_power` cap when `fractional_shares: true`
+- `config/config.yaml`: added `trading_limits.fractional_shares: true` and `min_notional: 1.0`
+
+**Result:** BTC/USD on $250 paper account: `$7.50 / $67,000 = 0.00011194 BTC` — now trades correctly.

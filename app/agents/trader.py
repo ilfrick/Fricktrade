@@ -20,7 +20,7 @@ from app.execution.executor import ExecutionEngine
 from app.execution.order_queue import OrderQueue
 from app.execution.smart_router import SmartOrderRouter, OrderContext
 from app.execution.tca import TCAAnalyzer, Fill
-from app.execution.algos import adaptive_slices, pov_slices, twap_slices, vwap_slices
+from app.execution.algos import adaptive_slices, fractional_slice, pov_slices, twap_slices, vwap_slices
 from app.execution.impact import estimate_market_impact
 from app.execution import routing as routing_utils
 from app.monitoring.metrics import (
@@ -725,7 +725,7 @@ class TradingAgent:
                 }
         return {}
 
-    def _plan_execution(self, action: str, qty: int, last_price: float, market_state: dict, algo_name: str | None):
+    def _plan_execution(self, action: str, qty: float, last_price: float, market_state: dict, algo_name: str | None):
         algo_cfg = self._execution_cfg.algos
         if not algo_cfg.get("enabled", False):
             return []
@@ -735,6 +735,9 @@ class TradingAgent:
         min_notional = float(algo_cfg.get("min_notional", 0.0))
         if notional < min_notional:
             return []
+        # Fractional qty < 1 share: skip slicing, submit as a single order
+        if qty < 1.0 and qty > 0:
+            return fractional_slice(qty)
         # Delegate to SmartOrderRouter for algo selection
         try:
             urgency = 0.5
@@ -1769,6 +1772,12 @@ class TradingAgent:
             return 0.0
         return 1.0
 
+    def _is_fractional(self, symbol: str) -> bool:
+        """Crypto is always fractional; equities if fractional_shares: true in config."""
+        if "/" in symbol:
+            return True
+        return bool(self.cfg.get("trading_limits", {}).get("fractional_shares", False))
+
     def _size_order(
         self,
         action: str,
@@ -1777,7 +1786,7 @@ class TradingAgent:
         symbol: str,
         market_state: dict,
         reduce_pct: float = 1.0,
-    ) -> tuple[int, str | None]:
+    ) -> tuple[float, str | None]:
         if last_price <= 0:
             return 0, "no_price"
         # Time-of-day size scaling
@@ -1829,7 +1838,9 @@ class TradingAgent:
             if slippage_bps > 1.0:
                 penalty_factor = max(0.5, 1.0 - slippage_bps / 200.0)
                 allowed_value *= penalty_factor
-            if allowed_value < last_price:
+            # Minimum tradeable notional: $1 default, or configured value
+            min_notional_usd = float(self.cfg.get("trading_limits", {}).get("min_notional", 1.0))
+            if allowed_value < min_notional_usd:
                 if "illiquid_spread" in haircut_reasons:
                     return 0, "illiquid_spread"
                 if "illiquid_volume" in haircut_reasons:
@@ -1837,11 +1848,20 @@ class TradingAgent:
                 if haircut_reasons:
                     return 0, "liquidity_haircut"
                 return 0, "insufficient_cash"
+            if self._is_fractional(symbol):
+                # Crypto: 8 decimals; fractionable equity: 3 decimals
+                precision = 8 if "/" in symbol else 3
+                return round(allowed_value / last_price, precision), None
             return int(allowed_value // last_price), None
 
         if action == "sell":
             if current_qty > 0:
-                qty = int(current_qty * max(min(reduce_pct, 1.0), 0.0))
+                raw_qty = current_qty * max(min(reduce_pct, 1.0), 0.0)
+                if self._is_fractional(symbol):
+                    precision = 8 if "/" in symbol else 3
+                    qty: float = round(raw_qty, precision)
+                else:
+                    qty = int(raw_qty)
                 return (qty, None) if qty > 0 else (0, "position_limit")
             if not allow_shorts or not self._can_short(symbol, portfolio):
                 return 0, "shorting_disabled"
@@ -1864,7 +1884,8 @@ class TradingAgent:
             )
             if haircut_metrics:
                 market_state.update(haircut_metrics)
-            if allowed_value < last_price:
+            min_notional_usd = float(self.cfg.get("trading_limits", {}).get("min_notional", 1.0))
+            if allowed_value < min_notional_usd:
                 if "illiquid_spread" in haircut_reasons:
                     return 0, "illiquid_spread"
                 if "illiquid_volume" in haircut_reasons:
@@ -1872,6 +1893,9 @@ class TradingAgent:
                 if haircut_reasons:
                     return 0, "liquidity_haircut"
                 return 0, "insufficient_buying_power"
+            if self._is_fractional(symbol):
+                precision = 8 if "/" in symbol else 3
+                return round(allowed_value / last_price, precision), None
             return int(allowed_value // last_price), None
 
         return 0, "unsupported"

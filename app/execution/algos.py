@@ -10,8 +10,15 @@ from typing import Iterable
 
 @dataclass
 class AlgoSlice:
-    qty: int
+    qty: float
     earliest_at: datetime
+
+
+def fractional_slice(qty: float) -> list[AlgoSlice]:
+    """Single-slice for fractional qty (crypto or fractionable equity < 1 share)."""
+    if qty <= 0:
+        return []
+    return [AlgoSlice(qty=qty, earliest_at=datetime.now(timezone.utc))]
 
 
 def twap_slices(total_qty: int, duration_seconds: int, slice_count: int) -> list[AlgoSlice]:

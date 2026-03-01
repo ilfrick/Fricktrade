@@ -250,6 +250,8 @@ trading_limits:
   blocked_symbols: []
   blocked_actions: []
   min_price: 2.0
+  fractional_shares: true   # enable fractional qty for crypto (always) and equities
+  min_notional: 1.0          # minimum USD order value (replaces per-share price gate)
 strategy:
   name: trend_following
   names:

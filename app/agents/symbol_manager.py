@@ -626,6 +626,10 @@ class SymbolManager:
     def cap_symbols_by_cash(self, max_symbols: int, portfolio: dict, dyn_cfg: dict) -> int:
         if not dyn_cfg.get("cash_aware", True):
             return max_symbols
+        # Fractional trading: minimum entry is min_notional ($1 default), not price_min
+        # — no meaningful cap on symbol count from cash alone
+        if bool(self._cfg.get("trading_limits", {}).get("fractional_shares", False)):
+            return max_symbols
         filters_cfg = dyn_cfg.get("filters", {}) or {}
         price_min = filters_cfg.get("price_min", self._cfg.get("trading_limits", {}).get("min_price"))
         try:
@@ -731,8 +735,10 @@ class SymbolManager:
             filters_cfg = dyn_cfg.get("filters", {}) or {}
             price_min = float(filters_cfg.get("price_min", 0.0))
             price_max = float(filters_cfg.get("price_max", float("inf")))
-            # Cap price_max at buying power: no point scoring symbols you can't buy
-            if dyn_cfg.get("cash_aware", True):
+            # Cap price_max at buying power only for whole-share trading.
+            # With fractional shares you can buy any price asset with small notional.
+            fractional = bool(self._cfg.get("trading_limits", {}).get("fractional_shares", False))
+            if dyn_cfg.get("cash_aware", True) and not fractional:
                 try:
                     buying_power = float(portfolio.get("buying_power", 0.0) or 0.0)
                 except (TypeError, ValueError):
