@@ -951,6 +951,7 @@ execution:
     max_attempts: 2
     backoff_seconds: 10
     max_notional: 5000
+    max_order_age_seconds: 300   # Cancel + unblock queue if order stuck > 5 min
     reasons:
     - unknown
     - insufficient_funds

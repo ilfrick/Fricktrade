@@ -143,12 +143,44 @@ class OrderQueue:
             if self._active and self._active.order_id:
                 active_id = self._active.order_id
                 if active_id in open_by_id:
-                    self._missing_since = None
-                    snapshot = open_by_id[active_id]
-                    response = self._response_from_snapshot(snapshot, "open")
-                    if response and response != self._active_snapshot:
-                        self._active_snapshot = response
-                        self._responses.append(OrderResponse(**response))
+                    # Stuck-order timeout: if the order has been open longer than
+                    # max_order_age_seconds, cancel it and unblock the queue.
+                    # Default 0 = disabled.
+                    max_age = int(self._retry_cfg.get("max_order_age_seconds", 0))
+                    age = (now - self._active.created_at).total_seconds()
+                    timed_out = max_age > 0 and age > max_age
+                    if timed_out:
+                        try:
+                            self._broker.cancel_order(active_id)
+                        except Exception as _exc:
+                            logging.warning(
+                                "Stuck order cancel failed (%s %s id=%s age=%.0fs): %s",
+                                self._active.side, self._active.symbol, active_id, age, _exc,
+                            )
+                        logging.warning(
+                            "Stuck order timed out after %.0fs — cancelled and unblocked queue "
+                            "(%s %s qty=%s id=%s)",
+                            age, self._active.side, self._active.symbol,
+                            self._active.qty, active_id,
+                        )
+                        self._responses.append(OrderResponse(
+                            symbol=self._active.symbol,
+                            broker=self._broker_name,
+                            status="timed_out",
+                            order_id=active_id,
+                            side=self._active.side,
+                            qty=self._active.qty,
+                        ))
+                        self._cancel_requested.discard(active_id)
+                        self._active = None
+                        self._active_snapshot = None
+                    else:
+                        self._missing_since = None
+                        snapshot = open_by_id[active_id]
+                        response = self._response_from_snapshot(snapshot, "open")
+                        if response and response != self._active_snapshot:
+                            self._active_snapshot = response
+                            self._responses.append(OrderResponse(**response))
                 elif active_id not in open_ids:
                     if self._completion_grace_seconds > 0:
                         if self._missing_since is None:
