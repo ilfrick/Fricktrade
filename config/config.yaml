@@ -964,7 +964,7 @@ execution:
     enabled: true
     routing:
       mode: parallel
-      buying_power_scaling: true
+      buying_power_scaling: false  # fractional: _size_order already scales by equity; both accounts evaluate full universe
       default: alpaca
       symbols: {}
       strategies: {}
