@@ -657,7 +657,7 @@ data:
     cash_buffer_pct: 95
     cash_cap_mode: cash
     cash_max_pct: 100
-    timeout_seconds: 10
+    timeout_seconds: 30    # 30s avoids retry on 33-symbol crypto bulk-fetch (was 10s, causing ~29s latency on retry)
     retries: 2
     ai_filter:
       enabled: true
