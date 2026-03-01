@@ -175,7 +175,7 @@ risk:
   max_daily_loss_pct: 3.0
   crypto:
     max_daily_loss_pct: 5.0
-    max_position_size_pct: 15.0
+    max_position_size_pct: 90.0
     max_crypto_exposure_pct: 50.0
     hard_stop_pct: 3.0
     trailing_stop_pct: 5.0
@@ -183,7 +183,7 @@ risk:
     circuit_breaker_drawdown_pct: 8.0
     vol_targeting:
       target_vol_pct: 4.0
-  max_position_size_pct: 10.0
+  max_position_size_pct: 90.0
   max_portfolio_leverage: 1.5
   max_short_exposure_pct: 30.0
   max_positions: 30
@@ -544,7 +544,7 @@ portfolio:
     method: ledoit_wolf
     window: 60
   constraints:
-    max_position_pct: 0.25
+    max_position_pct: 0.90
     min_position_pct: 0.01
     max_sector_pct: 0.40
   rebalance:
