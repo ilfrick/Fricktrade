@@ -156,6 +156,18 @@ brokers:
       per_share_fee: 0.0
       min_fee: 0.0
       spread_pct: 0.0
+  binance:
+    enabled: false           # set to true and provide API keys to enable
+    testnet: false           # use Binance testnet (requires separate testnet API keys)
+    api_key: ${BINANCE_API_KEY}
+    api_secret: ${BINANCE_API_SECRET}
+    accounts: []             # optional: named sub-accounts (same structure as alpaca.accounts)
+    fees:
+      commission_pct: 0.1   # 0.1% standard; 0.075% with BNB fee discount
+      per_trade_fee: 0.0
+      per_share_fee: 0.0
+      min_fee: 0.0
+      spread_pct: 0.0
   ibkr:
     enabled: false
     host: 127.0.0.1

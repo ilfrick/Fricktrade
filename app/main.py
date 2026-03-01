@@ -18,7 +18,7 @@ from app.agents.trader import TradingAgent
 from app.brokers.alpaca import AlpacaBroker
 from app.brokers.ibkr import IBKRBroker
 from app.brokers.router import BrokerRouter
-from app.brokers.config_utils import get_alpaca_account_cfg, iter_alpaca_accounts, iter_ibkr_accounts
+from app.brokers.config_utils import get_alpaca_account_cfg, iter_alpaca_accounts, iter_ibkr_accounts, iter_binance_accounts
 from app.backtest.engine import run_backtest
 from app.backtest.agent_engine import run_agent_backtest
 from app.data.downloader import download_yfinance
@@ -695,6 +695,30 @@ def _build_broker(cfg: dict):
             account_cfgs[account["name"]] = account
         except Exception as exc:
             logging.warning("IBKR account %s failed to initialize: %s", account.get("name", "unknown"), exc)
+            continue
+    for account in iter_binance_accounts(cfg):
+        try:
+            from app.brokers.binance import BinanceBroker
+            broker = BinanceBroker(
+                api_key=account.get("api_key", ""),
+                api_secret=account.get("api_secret", ""),
+                testnet=bool(account.get("testnet", False)),
+                name=account["name"],
+            )
+            if not broker.is_connected():
+                logging.warning("Binance account %s unavailable; skipping.", account["name"])
+                continue
+            brokers[account["name"]] = broker
+            account_cfgs[account["name"]] = account
+        except ImportError:
+            logging.warning(
+                "Binance account %s: python-binance not installed. "
+                "Run: pip install python-binance",
+                account.get("name", "unknown"),
+            )
+            continue
+        except Exception as exc:
+            logging.warning("Binance account %s failed to initialize: %s", account.get("name", "unknown"), exc)
             continue
     exec_cfg = cfg.get("execution", {}).get("brokers", {})
     if len(brokers) > 1:

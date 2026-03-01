@@ -61,6 +61,38 @@ def iter_alpaca_accounts(cfg: dict) -> Iterable[dict[str, Any]]:
     return results
 
 
+def iter_binance_accounts(cfg: dict) -> Iterable[dict[str, Any]]:
+    brokers_cfg = cfg.get("brokers", {}) if isinstance(cfg, dict) else {}
+    binance_cfg = brokers_cfg.get("binance", {}) or {}
+    if not binance_cfg.get("enabled", False):
+        return []
+    accounts = _enabled_accounts(binance_cfg.get("accounts"))
+    if not accounts:
+        accounts = _load_binance_env_accounts(binance_cfg)
+    if not accounts:
+        api_key = binance_cfg.get("api_key", "")
+        api_secret = binance_cfg.get("api_secret", "")
+        if not api_key and not api_secret:
+            return []
+        return [
+            {
+                "name": "binance",
+                "api_key": api_key,
+                "api_secret": api_secret,
+                "testnet": bool(binance_cfg.get("testnet", False)),
+            }
+        ]
+    use_suffix = len(accounts) > 1
+    results = []
+    for idx, acct in enumerate(accounts):
+        acct_name = str(acct.get("name") or f"account{idx + 1}")
+        broker_name = f"binance:{acct_name}" if use_suffix else "binance"
+        merged = merge_cfg(binance_cfg, acct)
+        merged["name"] = broker_name
+        results.append(merged)
+    return results
+
+
 def iter_ibkr_accounts(cfg: dict) -> Iterable[dict[str, Any]]:
     brokers_cfg = cfg.get("brokers", {}) if isinstance(cfg, dict) else {}
     ibkr_cfg = brokers_cfg.get("ibkr", {}) or {}
@@ -138,6 +170,41 @@ def _enabled_accounts(accounts: Iterable[dict[str, Any]] | None) -> list[dict[st
         if acct.get("enabled", True):
             enabled.append(acct)
     return enabled
+
+
+def _load_binance_env_accounts(binance_cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    keys = _split_env_list("BINANCE_API_KEYS")
+    secrets = _split_env_list("BINANCE_API_SECRETS")
+    names = _split_env_list("BINANCE_ACCOUNT_NAMES")
+    accounts: list[dict[str, Any]] = []
+    if keys and secrets:
+        count = min(len(keys), len(secrets))
+        for idx in range(count):
+            accounts.append(
+                {
+                    "name": names[idx] if idx < len(names) else f"account{idx + 1}",
+                    "api_key": keys[idx],
+                    "api_secret": secrets[idx],
+                    "testnet": bool(binance_cfg.get("testnet", False)),
+                    "enabled": True,
+                }
+            )
+        return accounts
+    for idx in range(1, 21):
+        key = os.getenv(f"BINANCE_API_KEY_{idx}", "").strip()
+        secret = os.getenv(f"BINANCE_API_SECRET_{idx}", "").strip()
+        if not key and not secret:
+            continue
+        accounts.append(
+            {
+                "name": os.getenv(f"BINANCE_ACCOUNT_NAME_{idx}", f"account{idx}").strip(),
+                "api_key": key,
+                "api_secret": secret,
+                "testnet": bool(binance_cfg.get("testnet", False)),
+                "enabled": True,
+            }
+        )
+    return accounts
 
 
 def _load_alpaca_env_accounts(alpaca_cfg: dict[str, Any]) -> list[dict[str, Any]]:
