@@ -20,11 +20,6 @@ services:
       - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
       - /dev/nvidia-caps:/dev/nvidia-caps
 
-  ollama:
-    devices:
-      - /dev/nvidia0:/dev/nvidia0
-      - /dev/nvidiactl:/dev/nvidiactl
-      - /dev/nvidia-modeset:/dev/nvidia-modeset
-      - /dev/nvidia-uvm:/dev/nvidia-uvm
-      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
-      - /dev/nvidia-caps:/dev/nvidia-caps
+  # Ollama intentionally excluded from GPU override: runs CPU-only to avoid
+  # competing with the trader for VRAM. GPU device mounts caused the ollama
+  # runner to try CUDA init with CUDA_VISIBLE_DEVICES="" (ambiguous) and exit.
