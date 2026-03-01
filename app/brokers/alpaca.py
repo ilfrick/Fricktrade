@@ -167,8 +167,10 @@ class AlpacaBroker(Broker):
         return order.id
 
     def close_position(self, symbol: str) -> None:
+        # Alpaca REST path is /v2/positions/{symbol} — a literal "/" breaks URL routing
+        api_symbol = symbol.replace("/", "") if "/" in symbol else symbol
         try:
-            record_broker_call(self._name, "close_position", self.client.close_position, symbol)
+            record_broker_call(self._name, "close_position", self.client.close_position, api_symbol)
         except Exception as exc:
             # Only ignore if position does not exist
             exc_str = str(exc).lower()
