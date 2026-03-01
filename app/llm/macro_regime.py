@@ -94,16 +94,20 @@ class MacroRegimeAnalyzer:
         self._refresh_hours = int(cfg.get("refresh_hours", 4))
         self._backend = str(cfg.get("backend", "claude"))
         self._cache: Optional[MacroRegime] = None
+        self._failed_at: Optional[datetime] = None  # backoff after API failure
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def get_regime(self, news_headlines: list[str] | None = None) -> Optional[MacroRegime]:
-        """Return cached regime (4h TTL). Refresh if stale."""
+        """Return cached regime (4h TTL). Refresh if stale. Backs off 10 min after failure."""
         now = datetime.now(timezone.utc)
         if (self._cache is not None
                 and (now - self._cache.fetched_at) < timedelta(hours=self._refresh_hours)):
+            return self._cache
+        # Back off 10 minutes after a failed attempt to avoid per-symbol retry storms
+        if self._failed_at is not None and (now - self._failed_at) < timedelta(minutes=10):
             return self._cache
 
         try:
@@ -111,8 +115,12 @@ class MacroRegimeAnalyzer:
             regime = self._classify(indicators, news_headlines or [])
             if regime:
                 self._cache = regime
+                self._failed_at = None
+            else:
+                self._failed_at = now
         except Exception as exc:
             logger.warning("MacroRegimeAnalyzer failed: %s", exc)
+            self._failed_at = now
             return self._cache  # return stale cache on failure
 
         return self._cache

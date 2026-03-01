@@ -303,6 +303,8 @@ class SymbolManager:
         return list(merged)
 
     def is_symbol_market_open(self, symbol: str) -> bool:
+        if "/" in symbol:
+            return True  # Crypto trades 24/7
         market_cfg = self._cfg.get("market", {})
         venue_map = market_cfg.get("symbol_venues", {}) or {}
         default_venue = str(market_cfg.get("default_symbol_venue", "")).strip()

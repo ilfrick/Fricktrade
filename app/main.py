@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pandas as pd
 import torch # Added torch import for GPU error handling
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
+from alpaca.data.requests import CryptoBarsRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from ib_insync import IB, Stock, util
 
@@ -246,6 +246,24 @@ def _fetch_bars(client: StockHistoricalDataClient, req: StockBarsRequest, timeou
     return None
 
 
+def _fetch_crypto_bars(client: CryptoHistoricalDataClient, req: CryptoBarsRequest, timeout: int, retries: int):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+    for attempt in range(retries + 1):
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(client.get_crypto_bars, req)
+            try:
+                return future.result(timeout=timeout).df
+            except TimeoutError:
+                if attempt >= retries:
+                    return None
+            except Exception as exc:
+                if attempt >= retries:
+                    logging.warning("Alpaca crypto bars fetch failed: %s", exc)
+                    return None
+    return None
+
+
 def _chunked(items: list[str], size: int) -> list[list[str]]:
     return [items[idx : idx + size] for idx in range(0, len(items), size)]
 
@@ -264,6 +282,7 @@ class AlpacaMarketDataProvider:
         retries: int = 2,
     ):
         self._client = StockHistoricalDataClient(api_key, api_secret)
+        self._crypto_client = CryptoHistoricalDataClient(api_key, api_secret)
         self._lookback = lookback_days
         self._interval = interval
         self._session_gain_mode = session_gain_mode
@@ -284,7 +303,9 @@ class AlpacaMarketDataProvider:
         start = now - timedelta(days=self._lookback)
         timeframe = _alpaca_timeframe(self._interval)
         cache: dict[str, dict] = {}
-        for chunk in _chunked(symbols, self._chunk_size):
+        equity_syms = [s for s in symbols if "/" not in s]
+        crypto_syms = [s for s in symbols if "/" in s]
+        for chunk in _chunked(equity_syms, self._chunk_size):
             req = StockBarsRequest(
                 symbol_or_symbols=chunk,
                 timeframe=timeframe,
@@ -302,20 +323,28 @@ class AlpacaMarketDataProvider:
                         df = data.xs(symbol, level=0)
                     except KeyError:
                         continue
-                    cache[symbol] = _market_state_from_df(
-                        df,
-                        self._lookback,
-                        self._interval,
-                        self._session_gain_mode,
-                    )
+                    cache[symbol] = _market_state_from_df(df, self._lookback, self._interval, self._session_gain_mode)
             else:
-                symbol = chunk[0]
-                cache[symbol] = _market_state_from_df(
-                    data,
-                    self._lookback,
-                    self._interval,
-                    self._session_gain_mode,
-                )
+                cache[chunk[0]] = _market_state_from_df(data, self._lookback, self._interval, self._session_gain_mode)
+        for chunk in _chunked(crypto_syms, self._chunk_size):
+            req = CryptoBarsRequest(
+                symbol_or_symbols=chunk,
+                timeframe=timeframe,
+                start=start,
+                end=now,
+            )
+            data = _fetch_crypto_bars(self._crypto_client, req, self._timeout_seconds, self._retries)
+            if data is None or data.empty:
+                continue
+            if isinstance(data.index, pd.MultiIndex):
+                for symbol in chunk:
+                    try:
+                        df = data.xs(symbol, level=0)
+                    except KeyError:
+                        continue
+                    cache[symbol] = _market_state_from_df(df, self._lookback, self._interval, self._session_gain_mode)
+            else:
+                cache[chunk[0]] = _market_state_from_df(data, self._lookback, self._interval, self._session_gain_mode)
         self._cache = cache
         self._cache_at = now
 
@@ -332,15 +361,15 @@ class AlpacaMarketDataProvider:
         now = datetime.now(timezone.utc)
         start = now - timedelta(days=self._lookback)
         timeframe = _alpaca_timeframe(self._interval)
-        req = StockBarsRequest(
-            symbol_or_symbols=[symbol],
-            timeframe=timeframe,
-            start=start,
-            end=now,
-            feed=self._feed,
-            adjustment="raw",
-        )
-        data = _fetch_bars(self._client, req, self._timeout_seconds, self._retries)
+        if "/" in symbol:
+            req = CryptoBarsRequest(symbol_or_symbols=[symbol], timeframe=timeframe, start=start, end=now)
+            data = _fetch_crypto_bars(self._crypto_client, req, self._timeout_seconds, self._retries)
+        else:
+            req = StockBarsRequest(
+                symbol_or_symbols=[symbol], timeframe=timeframe, start=start, end=now,
+                feed=self._feed, adjustment="raw",
+            )
+            data = _fetch_bars(self._client, req, self._timeout_seconds, self._retries)
         if data is None or data.empty:
             return None
         if isinstance(data.index, pd.MultiIndex):
