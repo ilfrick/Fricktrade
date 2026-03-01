@@ -20,23 +20,28 @@ Fricktrade is an automated trading agent for US equities (NYSE, Nasdaq) and cryp
 - `docker/`: Dockerfiles (CPU + GPU)
 - `grafana/`: Grafana provisioning + dashboards (per-account dashboards auto-generated from `.env`)
 - `prometheus/`: Prometheus scrape + alerting config
-- `scripts/`: helper scripts
-- `docs/`: subsystem documentation
+- `scripts/`: helper scripts (see `scripts/README.md`)
+- `docs/`: subsystem documentation (see `docs/STATUS.md` for current status)
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     subgraph Data["Market Data, Ingestion & Scanning"]
-        YF[yfinance live data]
-        AlpacaBars[Alpaca historical bars]
-        AlpacaAssets[Alpaca assets/universe]
-        BrokerUniverse["Broker universes - enabled brokers - Alpaca today"]
-        Ingest[Ingest pipeline]
-        Scan[Dynamic symbol scanner]
-        AIFilter["AI symbol filter - online updates + news"]
-        News["News catalyst fetcher - broker-backed - Alpaca today"]
-        Ollama[(Ollama LLM Gate)]
+        AlpacaBars[Alpaca 5m bars]
+        AlpacaAssets["Alpaca assets universe\nequities + crypto"]
+        QuoteStream["QuoteStream\nreal-time bid/ask WebSocket"]
+        Scan["Dynamic symbol scanner\nalpaca_active_all"]
+        AIFilter["AI symbol filter\nPPO online updates"]
+        News["News + catalyst fetcher\nAlpaca news API"]
+        AltData["Alt data\nFear&Greed / CoinGlass OI / EDGAR"]
+        EarningsCalendar["Earnings calendar\nAlpha Vantage"]
+        ReturnRanker["Return ranker\nXGBoost rolling 3-day"]
+    end
+    subgraph LLM["LLM Layer (GPU)"]
+        Ollama["Ollama\nllama3.2:3b GPU ~0.4s"]
+        Claude["Claude (claude-sonnet-4-6)\nSentiment / Risk / MacroRegime"]
+        Gemini["Gemini (gemini-2.5-pro)\nSymbolFilter / PostSession"]
     end
     subgraph Cache["Market Cache"]
         MarketCache[Market Cache Service]
@@ -45,33 +50,21 @@ flowchart LR
     end
     subgraph Models["Model Store"]
         ModelStore[/data + /app/models/]
-        ModelRegistry["Model Registry - metadata + artifacts"]
-        ActiveModel["Active Model Pointer - model_active.json"]
+        ModelRegistry["Model Registry"]
+        ActiveModel["Active Model Pointer"]
     end
     subgraph Core["Trading Loop"]
         Trader[TradingAgent]
-        Strat["Strategies - trend_following + RSI - factor_model + mean-reversion - pattern_trading + ATR stop - stat_arb_pairs - rl_policy - market_maker"]
-        Orchestrator[RL Strategy Orchestrator]
-        Drift["Drift Monitor - feature + PnL"]
-        AccountFlags[Account Flags + Trading Limits]
-        Risk["Risk Manager - vol targeting + VaR/CVaR + caps - configurable disable"]
-        Algo["Execution Algos - TWAP / VWAP / POV"]
-        Impact[Market Impact Model]
-        Exec[Execution Engine]
-        Queue["Order Queue - FIFO + feedback"]
-        Orders["Open order tracking - cancel/skip"]
+        Strat["Strategies\ntrend_following · factor_model\npattern_trading · stat_arb_pairs\ntop_movers_rf · crypto_momentum\ncrypto_mean_reversion · gap_reversal\nearnings_drift"]
+        Orchestrator["Weight Orchestrator\nHMM + MacroRegime\nhalf-Kelly sizing"]
+        Risk["Risk Manager\nVaR/CVaR · exposure caps\nATR stops · circuit breaker"]
+        Algo["Execution Algos\nTWAP · VWAP · POV · adaptive_slices\nfractional_slice"]
+        Queue["Order Queue\nFIFO + feedback"]
     end
-    subgraph Features["Feature Feeds"]
-        AIFeatures["AI filter features - latest window stats"]
-    end
-    subgraph Training["Training & Pretrain"]
-        RLTrain[RL training + online updates]
-        OrchPretrain[Orchestrator pretrain]
+    subgraph Training["Learning (GPU)"]
+        RLTrain[RL online updates]
         AIFilterTrain[AI filter training]
         TestsWhenClosed[Tests When Closed]
-    end
-    subgraph Backtest["Backtesting"]
-        AgentBT[Agent backtest engine]
     end
     subgraph Broker["Broker Layer"]
         Router[Broker Router]
@@ -80,79 +73,54 @@ flowchart LR
     end
     subgraph Observability["Monitoring & Control"]
         Metrics[Prometheus Metrics]
-        Grafana["Grafana Dashboards - overview + latency"]
+        Grafana["Grafana Dashboards\nper-account · strategy · latency"]
         Alerting[Alertmanager]
         API[FastAPI Config/UI]
-        Logs[Rotating Logs]
-        Audit[Audit Logs]
-        Compliance[Compliance Exports]
-        OpsState["Ops State File - system_state.json"]
         Healthwatch[Healthwatch Scheduler]
+        OpsState["Ops State\nsystem_state.json"]
     end
 
-    YF --> MarketCache
-    MarketCache --> Redis
-    MarketCache --> FileCache
-    MarketCache --> Trader
-    MarketCache --> AIFilter
+    AlpacaAssets --> Scan --> Trader
+    AlpacaBars --> Cache --> Trader
     AlpacaBars --> RLTrain
-    AlpacaBars --> AgentBT
     AlpacaBars --> AIFilterTrain
-    AlpacaAssets --> Scan
-    AlpacaAssets --> AIFilter
-    BrokerUniverse --> Scan
-    BrokerUniverse --> AIFilter
-    Scan --> Trader
+    QuoteStream --> Trader
     AIFilter --> Trader
-    AIFilter --> MarketCache
-    AIFilter --> AIFeatures --> Orchestrator
-    News --> Ollama
-    Ollama --> Strat
-    Ollama --> AIFilter
-    Ingest --> AlpacaBars
-    RLTrain --> ModelStore
-    RLTrain --> ModelRegistry --> ActiveModel
-    OrchPretrain --> ModelStore
+    News --> Ollama --> Strat
+    News --> Claude --> Trader
+    AltData --> Trader
+    EarningsCalendar --> Trader
+    ReturnRanker --> Trader
+    Gemini --> Trader
+    RLTrain --> ModelStore --> ModelRegistry --> ActiveModel
     AIFilterTrain --> ModelStore
-    Trader --> Strat --> Drift --> Orchestrator --> AccountFlags --> Risk --> Impact --> Algo --> Queue --> Orders --> Exec --> Router
+    Trader --> Strat --> Orchestrator --> Risk --> Algo --> Queue --> Router
     OpsState --> Trader
-    OpsState --> RLTrain
-    OpsState --> TestsWhenClosed
-    Router --> Alpaca
-    Router --> IBKR
-    Alpaca --> BrokerUniverse
-    IBKR --> BrokerUniverse
-    Alpaca --> Queue
-    IBKR --> Queue
-    Queue --> Orchestrator
-    Orchestrator --> ModelStore
-    AgentBT --> Trader
-    Trader --> Metrics --> Grafana
-    Metrics --> Alerting
-    Trader --> Logs
-    Trader --> Audit
-    Trader --> Compliance
+    Router --> Alpaca & IBKR
+    Alpaca & IBKR --> Queue
+    Trader --> Metrics --> Grafana & Alerting
     Healthwatch --> OpsState
     API <--> Trader
 ```
 
 ## Core Components
+
 ### Trading Loop
 - Entry point: `app/agents/trader.py`
-- Resolves active symbols (static list or dynamic scanner/AI filter)
-- Applies per-symbol venue gating and market-hours checks
-- Runs strategies, orchestrator selection, and risk checks
+- Resolves active symbols (dynamic scanner/AI filter; both equities and crypto derived from Alpaca)
+- Applies per-symbol venue gating: equities only when NYSE/Nasdaq open; crypto 24/7
+- Runs strategies, weight orchestration, and layered risk checks
 - Submits orders via the execution engine and order queue
-- Updates metrics and checkpointed state
-- `risk.enabled` can bypass risk checks, but broker account flags still block orders.
+- Updates Prometheus metrics and checkpointed state
+- `risk.enabled` can bypass risk checks, but broker account flags still block orders
 
-### Strategies (active)
+### Strategies (active, 9 total)
 - `trend_following`: Supertrend + VWAP deviation + RSI(14) gate + volume confirmation + regime crisis block
 - `factor_model`: Hurst-adaptive weighting, stochastic + CCI, ROC momentum, mean-reversion quality gate
 - `pattern_trading`: chart pattern breakout with 2×ATR adaptive stop + partial take-profit + trailing exits
 - `stat_arb_pairs`: log-ratio spread, ADF cointegration test, OLS hedge ratio, z-score entry (z=2.0)
 - `top_movers_rf`: same-day top-mover random-forest nowcast + intraday low-zone entry scoring
-- `crypto_momentum`: crypto-specific trend + RSI + volume filters; 24/7 via Alpaca
+- `crypto_momentum`: crypto-specific trend + RSI + volume filters; 24/7 via Alpaca GTC orders
 - `crypto_mean_reversion`: Bollinger/VWAP mean-reversion for crypto; 24/7 via Alpaca
 - `gap_reversal`: equity gap-up/down reversal (9:35–10:30 ET window, volume + RSI filter)
 - `earnings_drift`: Post-Earnings Announcement Drift (PEAD) — gap ≥5% + volume ≥1.5× after earnings
@@ -163,64 +131,78 @@ Disabled by default: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `market
 
 ### Orchestrator
 - Weight-based signal combination (`orchestrator.mode: weights`) using configurable `strategy_weights`
-- Weights adjusted by HMM regime (3-state: low_vol_trending / medium / high_vol_crisis) and optionally by `MacroRegimeAnalyzer` (FRED + Claude, 4h TTL)
+- Weights adjusted by HMM regime (3-state: low_vol_trending / medium / high_vol_crisis) and `MacroRegimeAnalyzer` (FRED VIX/DGS10/DXY + Claude, 4h TTL cache)
 - Half-Kelly position sizing: `max_pos_pct × (2p−1) × 0.5` from calibrated win probability
-- RL orchestrator exists but is disabled (`orchestrator.rl.enabled: false`) pending convergence fixes
+- RL orchestrator wired but disabled (`orchestrator.rl.enabled: false`) pending convergence work
 
 ### Execution
-- `app/execution/executor.py`: broker-agnostic execution; auto-upgrades market → limit at mid-price when spread available
+- `app/execution/executor.py`: broker-agnostic; auto-upgrades market → limit at mid-price when spread available
 - `app/execution/order_queue.py`: FIFO submission, broker feedback loop, daily retry budget reset
 - `app/execution/algos.py`: TWAP / VWAP / POV slicing + `adaptive_slices()` (regime-aware: 2× slices in crisis)
 - `SmartOrderRouter`: Almgren-Chriss impact model selects algo; legacy fallback available
 - TCA feedback: per-symbol EWMA slippage penalty reduces size up to 50%, decays 0.9×/day
-- Fractional orders: `qty < 1` routed as a single `fractional_slice` bypassing TWAP splitting
+- Fractional orders: `qty < 1` routed as a single `fractional_slice`, bypassing TWAP splitting
+- Supports both whole-share (equities) and fractional (crypto always, equities via `trading_limits.fractional_shares`)
 
 ### Data & Scanning
 - Primary live data: `data.provider: alpaca` (5m bars via Alpaca REST); yfinance as fallback
 - Market cache: Redis + file, staleness-controlled (`max_age_multiplier`, `ignore_staleness: false`)
-- Dynamic scanner + PPO-based AI filter for equity symbol selection; crypto symbols static from config
-- Real-time bid/ask via `QuoteStream` (`app/data/quote_stream.py`) — alpaca-py WebSocket; injects spread_pct and microprice into market_state
-- News catalyst: Alpaca news via Ollama-based LLM gate (llama3.2:3b, CPU); Claude for per-symbol sentiment
+- Universe: `alpaca_active_all` — both US equities and crypto derived live from Alpaca `get_all_assets()`; no hardcoded symbol lists. Capped at `max_symbols: 150` after AI filter
+- Both accounts (`alpaca:Realistic`, `alpaca:Higher`) evaluate the full 150-symbol universe; `_size_order` scales position size to each account's equity (`buying_power_scaling: false`)
+- Real-time bid/ask via `QuoteStream` (`app/data/quote_stream.py`) — alpaca-py WebSocket; injects `spread_pct` and `microprice` into market_state
+- News catalyst: Alpaca news API → **Ollama GPU** (llama3.2:3b, ~0.4s/inference on GTX 1060); Claude for per-symbol sentiment (15-min cache)
 - Alternative data: Fear & Greed Index (alternative.me), CoinGlass open interest (crypto), SEC EDGAR insider trades
 - Earnings calendar: Alpha Vantage CSV, daily refresh, `earnings_window` (pre/post/none) injected per-symbol
 - Return-ranker: XGBoost model trained on rolling 3-day window of live features + next-day returns
 
+### GPU Allocation
+The GTX 1060 (6 GB VRAM) is allocated as follows:
+
+| Workload | Container | VRAM | Notes |
+|----------|-----------|------|-------|
+| Ollama (llama3.2:3b) | `ollama` | ~2.7 GB | Primary beneficiary — 15–25× speedup over CPU; CUDA_VISIBLE_DEVICES=0 |
+| RL online training | `learner` | ~50–100 MB | Secondary; runs when market is closed |
+| AI filter (PPO) | `trader` | ~15–20 MB | Tiny model; GPU re-enabled Feb 2026 |
+| Remaining headroom | — | ~3.1 GB | Buffer prevents OOM |
+
+GPU enable/disable state persists in `/data/gpu_state.json`. Use `scripts/enable_gpu.sh` to re-enable after OOM.
+
 ### Learning
-- Offline RL training and online updates
-- GPU acceleration if available
-- CUDA errors in TensorFlow/torch disable GPU usage until the next restart (automatic CPU fallback).
+- Offline RL training and online updates via `learner` container
+- GPU acceleration if available; CUDA errors disable GPU via `gpu_state.json` until manually re-enabled
 - Best-model selection via `learning.use_best_model`
 - Model registry snapshots and drift monitoring with auto rollback
 
 ### Monitoring & API
 - Prometheus metrics (`app/monitoring/metrics.py`)
-- Grafana dashboards for orders, positions, PnL, account status, and latency
-- FastAPI `/health`, `/config`, `/config/raw`, `/config/schema`, `/config/update`, `/restart`, `/`, `/ui`
+- Grafana dashboards: per-account overview, strategy performance, latency (auto-generated from `.env`)
+- FastAPI `/health`, `/config`, `/config/raw`, `/config/schema`, `/config/update`, `/restart`, `/ui`
 - Optional API auth via `api.auth.*` using `X-API-Key` or `Authorization: Bearer`
 - Audit and compliance logs (JSONL/CSV) for decision traces
 
 ### Resilience & Storage
 - Periodic checkpoints for trader/learner state (`checkpointing.*`)
 - Retention pruning by age and count to avoid disk growth
+- `autoheal` container restarts failed services automatically; `healthwatch` gates trading by market hours
 
 ## Configuration Overview
-All configuration lives in `config/config.yaml`.
-`.env` values are only used when referenced via `${ENV_VAR}` interpolation or by services that read
-`.env` directly (for example, Alertmanager SMTP rendering).
+All configuration lives in `config/config.yaml`. `.env` values are only used when referenced via `${ENV_VAR}` interpolation or by services that read `.env` directly (e.g. Alertmanager SMTP rendering).
 
 Key sections:
 - `api.*`: FastAPI auth controls
 - `market.*`: venue gating, hours, symbol venue mapping (NYSE / Nasdaq / Crypto)
-- `brokers.*`: broker credentials and adapters (supports `brokers.<name>.accounts[]` or env auto-detect for multi-account routing)
-- `data.*`: symbols, crypto_symbols, dynamic scan, sources, AI filter
+- `brokers.*`: broker credentials and adapters; supports `brokers.<name>.accounts[]` or env auto-detect for multi-account routing
+- `data.*`: symbols (empty for live; dynamic scanner fills), dynamic scan, AI filter, interval, lookback
+- `data.dynamic_symbols.universe: alpaca_active_all`: equities + crypto from Alpaca (no hardcoded lists)
 - `market_cache.*`: Redis + file cache settings; `ignore_staleness: false`, `max_age_multiplier: 6`
-- `news.*`: catalyst fetch config (optional `news.llm.*` for Ollama gating; default `http://ollama:11434`)
+- `news.*`: catalyst fetch config; `news.llm.*` for Ollama gating (default `http://ollama:11434`)
 - `strategy.*`: strategy selection, params, and per-strategy weights
 - `orchestrator.*`: weight-based or RL mode; `strategy_weights` per strategy
 - `risk.*`: risk limits, crypto limits, stops, cool-downs, exposure caps (venue/sector)
 - `execution.*`: order handling, limit orders, algo slicing, smart router, open-order guard
+- `execution.brokers.routing.buying_power_scaling: false`: both accounts evaluate full universe; `_size_order` scales qty to each account's equity
 - `trading_limits.*`: `fractional_shares`, `min_notional`, `min_price`, `allow_shorts`
-- `llm.*`: Claude/Gemini backends, daily budget, sentiment/macro_regime/risk_interpreter/symbols_filter/meta_orchestrator
+- `llm.*`: Claude/Gemini backends, daily budget, sentiment / macro_regime / risk_interpreter / symbols_filter / meta_orchestrator
 - `alt_data.*`: fear_greed, coinglass, sec_edgar, alpha_vantage toggles and keys
 - `fred.*`: FRED API key + base URL for VIX / DGS10 / DXY macro data
 - `quote_stream.*`: real-time bid/ask WebSocket toggle
@@ -232,41 +214,28 @@ Key sections:
 - `kill_switch.*`: manual interlocked kill switches (sleep or liquidation)
 - `reports.daily_top_movers.*`: daily top movers email + training data export
 
-See `docs/configuration.md` for full details and `docs/STATUS.md` for current implementation status.
+See `docs/STATUS.md` for current implementation status and remaining roadmap.
 
 ## Daily Reporting
-Daily top movers reporting runs after each market close, emails a summary, and stores intraday 1-minute
-bars for the top performers. The report includes numeric indicators, signal hints, and optional news
-correlation for each top mover.
-The email body is also saved locally under `/data/reports/daily_top_movers/<YYYY-MM-DD>/_email/` as
-`.txt` and `.html`.
-Alertmanager SMTP and recipient settings are configured via `.env` and rendered into a local-only
-Alertmanager config file (do not commit secrets). See `.env.example` for the required keys.
-If a symbol has no trades and no skip metrics, the report will infer a reason such as
-`not_in_active_universe`, `open_order_pending`, `held_position_no_trade`, or `no_signal_or_filtered`.
-The metrics line now includes absolute move values (open->close, runup, drawdown) alongside %.
-Decision traces from the trading agent are loaded (when enabled) and summarized in the report.
+Daily top movers reporting runs after each market close, emails a summary, and stores intraday 1-minute bars for the top performers. The report includes numeric indicators, signal hints, and optional news correlation for each top mover. The email body is also saved locally under `/data/reports/daily_top_movers/<YYYY-MM-DD>/_email/`.
 
-Key config under `reports.daily_top_movers.*`:
-- `feed` (iex or sip)
-- `signal_thresholds.*` (early momentum / volume / runup / drawdown)
-- `news.*` (headlines + correlation hints)
-- `email.*` (SMTP overrides; `smtp_require_tls` can disable STARTTLS)
+Alertmanager SMTP and recipient settings are configured via `.env` and rendered into a local-only Alertmanager config file (do not commit secrets). See `.env.example` for the required keys.
 
 ## Safeguards
-- Market-hours gating by venue
-- Per-symbol venue mapping (manual + broker refresh)
-- Risk manager limits (loss caps, exposure, leverage)
-- VaR/CVaR gating and exposure caps by venue/sector
-- Volatility-aware kill switch profiles
-- Cool-down windows and stop logic
-- Fee-aware guardrails for RL strategy
-- Rolling strategy performance report and kill switch thresholds (`strategy.performance.*`)
+- Market-hours gating by venue (equities gated; crypto 24/7)
+- Per-symbol venue mapping (manual + broker auto-refresh)
+- Risk manager: loss caps, exposure caps (NYSE/Nasdaq 60%, Crypto 40%, per-sector limits), leverage ceiling
+- VaR/CVaR gating and sector/venue concentration limits
+- Per-symbol circuit breaker (5% unrealized loss blocks that symbol)
+- PDT retry suppression: tracks day-trade round-trips per broker/symbol
+- Pending notional race prevention: atomic reserve before enqueue, release on terminal response
+- Two-phase dispatch: exit orders complete before new entry orders begin
+- Time-of-day scaling: blocks at open (9:30–9:35 ET) and close (15:55–16:00 ET), 50% at lunch; crypto 70% at 00–04 UTC
 - Open-order guard and order-queue serialization
 
 ## Quick Start (Docker)
-1) Copy env template:
 
+1) Copy env template:
 ```bash
 cp .env.example .env
 ```
@@ -276,39 +245,41 @@ cp .env.example .env
 - `ANTHROPIC_API_KEY` — required for Claude sentiment / risk interpreter / macro regime
 - `GOOGLE_GEMINI_API_KEY` — required for Gemini symbol filter and post-session analyst
 - `FRED_API_KEY` — optional; MacroRegimeAnalyzer falls back to yfinance `^VIX` without it
-- `ALPHA_VANTAGE_API_KEY` — optional; EarningsDriftStrategy uses no-key fallback without it
-- `COINGLASS_API_KEY` — optional; CoinGlass OI in alt_data skipped without it
+- `ALPHA_VANTAGE_API_KEY` — optional; EarningsDriftStrategy uses no-signal fallback without it
+- `COINGLASS_API_KEY` — optional; CoinGlass OI skipped without it
 - `FRICKTRADE_API_TOKEN` — optional (only if `api.auth.enabled`)
 
 3) Start services:
-
 ```bash
-./scripts/compose_up.sh --build
+./scripts/compose_up.sh
 ```
-This auto-enables GPU if available and falls back to CPU otherwise. Use `docker compose up -d --build` for a CPU-only start.
+This auto-detects GPU and starts with `docker-compose.gpu.yml` overlay if available, falling back to CPU otherwise. Per-account Grafana dashboards are generated automatically from `.env`.
 
 4) Verify:
 - API health: `http://localhost:18081/health`
 - Config UI: `http://localhost:18081/ui`
 - Grafana: `http://localhost:3002`
-- Healthwatch metrics: `http://localhost:9105/metrics` (internal in Docker; use Prometheus to view)
 
-Services:
-- `trader`: live trading loop
-- `api`: FastAPI config/health/UI
-- `market-cache`: Redis-backed yfinance bar cache
-- `redis`: in-memory cache store
-- `learner`: RL online training updates
-- `prometheus`, `grafana`, `alertmanager`: monitoring
-- `calendar-updater`: weekly market holidays refresh
-- `tests-when-closed`: runs tests/backtests when markets are closed
-- `healthwatch`: health probes + market-based sleep/wake scheduler
-- `autoheal`: automatic container restart on health failure
-- `docker-socket-proxy`: isolated Docker socket access for healthwatch/autoheal
-- `daily-report`: daily top movers email + training data export
-- `ollama`: local LLM gate for news catalyst processing
+**Services:**
+
+| Service | Purpose |
+|---------|---------|
+| `trader` | Live trading loop (GPU for AI filter + RL) |
+| `learner` | RL online training updates (GPU) |
+| `ollama` | Local LLM gate — llama3.2:3b on GPU (~0.4s/call) |
+| `api` | FastAPI config/health/UI |
+| `market-cache` | Redis-backed Alpaca bar cache |
+| `redis` | In-memory cache store |
+| `prometheus` / `grafana` / `alertmanager` | Monitoring stack |
+| `calendar-updater` | Weekly market holidays refresh |
+| `tests-when-closed` | Runs pytest + backtests when market is closed |
+| `healthwatch` | Health probes + market-based sleep/wake scheduler |
+| `autoheal` | Auto-restart on health failure |
+| `docker-socket-proxy` | Isolated Docker socket for healthwatch/autoheal |
+| `daily-report` | Daily top movers email + training data export |
 
 ## Common Commands
+
 Download data:
 ```bash
 docker compose run --rm trader python3 -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
@@ -319,240 +290,61 @@ Backtest:
 docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml
 ```
 
+Walk-forward backtest:
+```bash
+python3 scripts/benchmark_runner.py --config config/config.yaml --walk-forward
+```
+
 Train RL policy:
 ```bash
 docker compose run --rm trader python3 -m app.main train --config /app/config/config.yaml
 ```
 
-Evaluate:
+Re-enable GPU after OOM:
 ```bash
-docker compose run --rm trader python3 -m app.main evaluate --config /app/config/config.yaml
+./scripts/enable_gpu.sh
 ```
 
 ## Documentation
-- `docs/README.md` for the full index
-- Subpages cover: AI filter, trading loop, strategies, execution, risk, brokers, backtesting, data, learning, API, monitoring, configuration
+- `docs/STATUS.md` — current implementation status, remaining roadmap, cron jobs, API keys
+- `scripts/README.md` — all operational scripts with usage examples
+- `AGENTS.md` — full commit-by-commit implementation history and architectural patterns
+- `docs/`: subsystem detail pages (AI filter, strategies, execution, risk, brokers, backtesting, monitoring)
 
 ## License
-
 This project is licensed under the GNU Affero General Public License v3.0 (AGPLv3). See `LICENSE`.
-Third-party attributions and license metadata are documented in `THIRD_PARTY_NOTICES.md`.
+Third-party attributions are in `THIRD_PARTY_NOTICES.md`.
 
 ## History
 
-See `AGENTS.md` for the full implementation history and `docs/STATUS.md` for current status and roadmap.
+See `AGENTS.md` for the full implementation history. Below are the major milestones:
 
-Recent milestones (newest first):
-- **v3.0 — Fractional trading** (2026-03-01): `_size_order` now returns float qty; crypto always fractional, equities configurable. `fractional_slice()` bypasses TWAP for sub-1-share orders. `cap_symbols_by_cash` and `price_max` universe cap both disabled when `fractional_shares: true`.
-- **v3.0 — Complete implementation** (2026-03-01): MacroRegimeAnalyzer (FRED+Claude), EarningsDriftStrategy (PEAD), alt_data module (Fear&Greed / CoinGlass / EDGAR), QuoteStream (alpaca-py WebSocket), adaptive_slices() regime-aware TWAP, walk-forward backtesting with embargo gap, RiskEventInterpreter wired into `_handle_drift()`, LLM symbol filter hooked into SymbolManager, RebalanceEngine.
-- **v3.0 — Crypto 24/7** (2026-02-28): `crypto_momentum`, `crypto_mean_reversion`, `gap_reversal` strategies; Alpaca GTC orders; 24/7 loop; per-venue exposure caps (Crypto 40%); `collect_crypto_training_data.py` hourly cron.
-- **v3.0 — LLM integration** (2026-02-28): `app/llm/` package — Claude (sentiment, risk_interpreter, meta_orchestrator, macro_regime), Gemini (symbols_filter, post_session_analyst); daily budget circuit breaker; raw article pipeline.
-- **v3.0 — Strategy overhaul** (2026-02-16): ~30-indicator injection; trend_following (Supertrend+VWAP), factor_model (Hurst-adaptive), stat_arb_pairs (ADF+OLS); ConfidenceCalibrator; regime-aware weight adjustments; SmartOrderRouter; TCA feedback; PortfolioOptimizer (risk_parity); half-Kelly sizing; ATR stops; limit orders default.
-- **v3.0 — Code review** (2026-02-13 to 2026-02-16): 19 concurrency/safety issues fixed; `datetime.utcnow()` fully migrated; per-symbol circuit breaker; PDT retry suppression; two-phase symbol dispatch (exits before entries); pending notional race prevention.
+- **GPU allocation** (2026-03-01): Ollama (llama3.2:3b) moved to GPU — primary beneficiary (15–25× speedup, 7s→0.4s/inference). Root cause of repeated Ollama exits identified: `docker-compose.gpu.yml` was mounting `/dev/nvidia*` into Ollama with `CUDA_VISIBLE_DEVICES=""` (empty string, ambiguous to CUDA) causing the CUDA runner to crash on startup. Fixed with `CUDA_VISIBLE_DEVICES=0`. Trader GPU re-enabled (had been disabled by OOM on Feb 24). `OLLAMA_KEEP_ALIVE=24h` and healthcheck added.
 
-Older history (pre-v3.0):
-- **Strategy upgrades**: trend_following gains RSI(14) filter + volume confirmation; factor_model extends to 10-bar momentum + mean-reversion factor + trend quality gate; pattern_trading uses ATR-based adaptive stop; stat_arb_pairs enabled as 4th strategy. Orchestrator weights rebalanced (0.35/0.25/0.25/0.15). Benchmark config fixed ($10k, 20 liquid symbols). Added `scripts/live_pnl_summary.sh` and `scripts/monitor_full_session.sh` for live diagnostics.
-- Added dynamic Grafana dashboard generation: per-account dashboards are auto-generated from `.env` by `scripts/generate_grafana_dashboards.py` (run automatically by `compose_up.sh`). Static per-account JSONs replaced by a template + generator; orphan dashboards are cleaned up on account removal.
-- **v3.0 code review**: 19 issues resolved — concurrency safety (regime detection under lock, enrich snapshots), exception narrowing in financial paths, full `datetime.utcnow()` migration, RiskManager timezone-aware daily reset, persistent ThreadPoolExecutor, OrderQueue FIFO stability + retry budget reset, code deduplication (`_calc_exposure_metrics`, `_build_rl_strategy`, `extract_equity_cash`), dead code removal (pipeline.py, market_state.py), Docker socket proxy for healthwatch/autoheal, Prometheus cardinality fix.
-- Switched trading loop to parallel execution (ThreadPoolExecutor) with fine-grained locking and decoupled metric reporting for better responsiveness.
-- Switched live market data and AI filter bars to batched yfinance with coverage filtering.
-- Added live profiling scripts for the trading loop.
-- Documented configuration precedence and `.env` usage.
-- Added local Alertmanager SMTP config rendering and `.env` keys.
-- Set market open gating to require all venues open (`open_mode: all`).
-- Published Ollama on host port `11434`.
-- Added Mermaid architecture diagram to the system map.
-- Added system map, operator guide, and developer guide to rebuild project ownership.
-- Switched AI symbol filter to PPO with online updates and PPO-specific config.
-- Aligned documentation with current codebase details, endpoints, and branding.
-- Forced fresh RL policy training by disabling resume/use_best_model after the observation update.
-- Replaced orchestrator model with policy-gradient RL and added entropy/baseline controls.
-- Added RL model shape guard to force retraining on observation changes.
-- Added buying_power_pct to RL observation and drift feature paths.
-- Added buying_power_pct to RL observation features.
-- Documented orchestrator cash/buying power features in configuration and strategies docs.
-- Added buying power features to the RL orchestrator input set.
-- Hardened secret masking/merge for data sources and isolated per-symbol loop errors.
-- Added trading loop modularization roadmap in docs.
-- Renamed documentation branding to Fricktrade.
-- Set live data provider default to brokers for faster market data.
-- Extracted per-batch symbol execution helper in the trading loop (Phase 6 refactor prep).
-- Extracted cycle maintenance helper in the trading loop (Phase 5 refactor prep).
-- Extracted market-open and order-queue helpers in the trading loop (Phase 4 refactor prep).
-- Extracted active-symbol metrics and batching helpers (Phase 3 refactor prep).
-- Centralized broker routing helpers and added routing tests (Phase 2 refactor prep).
-- Added decision pipeline wrapper to centralize symbol processing (Phase 1 refactor prep).
-- Added decision context scaffolding and trace helpers (Phase 0 refactor prep).
-- Sanitized Alertmanager SMTP config to remove hardcoded credentials.
-- Added SPDX headers to all text/config files and scrubbed secrets from tracked env files.
-- Added AGPLv3 SPDX headers across source files.
-- Added AGPLv3 licensing and third-party attribution inventory.
-- Added configurable extended-hours trading window and broker order flags.
-- Added audit/compliance decision logs and latency metrics + Grafana dashboard.
-- Added model registry metadata, drift detection, and auto-rollback to best RL model.
-- Added VaR/CVaR gating, exposure caps, and volatility-aware kill switch profiles.
-- Added market impact estimates, adaptive execution selection, and retry policy for queued orders.
-- Added OHLCV validation, split/dividend adjustments, and data quality reports for ingestion.
-- Added bootstrap CI, Monte Carlo stress, and buy/hold baseline to benchmarks.
-- Added benchmarking plots, regime tagging, scorecard metrics, and PDF summaries.
-- Added benchmark runner and documentation for walk-forward and stress tests.
-- Added Grafana panels for intraday signal metrics (percent + absolute).
-- Fixed AI filter retrain to pass broker config to news fetcher.
-- Fixed RL orchestrator AI feature extraction indentation regression.
-- Fixed Alpaca market data prefetch using missing IBKR handle; align AI filter signals to latest day.
-- Added intraday signal metrics to live decisions, RL features, and AI filter training.
-- Added env-based auto-detection for multi-account brokers with graceful fallback on invalid keys.
-- Added multi-account broker support with per-account routing and config helpers.
-- Added daily top movers report with email + training data export.
-- Added manual kill switches for force sleep and force liquidation with interlock.
-- Added healthwatch scheduler heartbeat logging.
-- Enabled healthwatch market-based stack sleep/wake in config.
-- Fixed market-based sleep/wake scheduling to use timezone-aware UTC timestamps.
-- Added optional healthwatch market-based stack sleep/wake control.
-- Added explicit logs when news catalyst refresh starts/completes.
-- Made news catalyst refresh async so the trader keeps running while Ollama updates.
-- Added a separate Grafana dashboard for strategy performance metrics.
-- Added Grafana stat panel for 24h PDT blocks.
-- Added Grafana panel for PDT blocks (day-trading protection).
-- Added rolling strategy performance reporting and kill switch thresholds.
-- Added PDT-protection block counter for broker-rejected orders.
-- Run Ollama as a docker service for news LLM gating.
-- Added optional Ollama-based LLM gate for news catalysts (disabled by default).
-- Fixed live lookback slicing to use bars-per-day instead of raw days count.
-- Added multi-broker live market data provider support (alpaca/ibkr) with routing.
-- Switched live market data provider to Alpaca (batch bars) with optional yfinance fallback.
-- Added Grafana table for strategy selection counts.
-- PnL% now uses broker-reported last_equity when available, otherwise start equity.
-- PnL% and drawdown metrics now track equity vs start/peak instead of staying at zero.
-- Switched Open Orders panel to instant view to avoid stale series.
-- Aligned Open Orders Grafana panel to show last 5 minutes to match pending orders view.
-- Switched dynamic symbol price caps to use buying power and exposed buying power metrics.
-- Capped dynamic symbol list size to the tradeable universe count (plus positions/open orders).
-- Raised dynamic_symbols.max_symbols to 50000 to allow the full active universe.
-- Enforced cash-aware symbol filtering to cap candidates by available cash and always include open-order symbols.
-- Added flow diagrams for the trading agent (dev).
-- Switched orchestrator to direct mode (single strategy selection) using all strategy signals.
-- Tweaked broker market status panel to show only current status (no history).
-- Added Grafana broker market status panel and broker_market_open metric.
-- Adjusted Grafana active symbol panels to show only active (value=1) series.
-- Capped AI-filter symbol list to dynamic_symbols.max_symbols to prevent oversized active symbol metrics.
-- Fixed yfinance downloads by only passing proxy when configured.
-- Guarded factor model and AI filter features against zero prices to avoid divide warnings.
-- Guarded intraday momentum strategy against zero prices during backtests.
-- Added production strategy set (trend, factor, stat-arb, market making) with execution algos and vol targeting.
-- Added limit-order support for brokers and time-sliced order queue scheduling.
-- Added tests for strategy models and execution algos.
-- Cleared stale active-symbol metrics so Grafana only shows current symbols.
-- Ensured held positions stay in dynamic symbols even when scanner filters exclude them.
-- Raised minimum trade price to 2.0 across dynamic scanning and pattern selection.
-- Added universe price filtering by cash-aware price bounds for dynamic symbols.
-- Added Grafana panel for broker API call activity.
-- Fixed Mermaid label text so the architecture diagram renders in master.
-- Ensured dynamic universe always keeps positions/orders and hardened broker-backed news fetching.
-- Fixed architecture diagram to show broker-backed news inputs.
-- Fixed OrderQueue snapshot response handling so tests pass.
-- Updated the architecture diagram to show broker-backed news and broker universe inputs.
-- Added broker-backed news catalysts and a broker-aware universe option for AI symbol filtering.
-- Added multi-broker routing with broker-aware metrics, backtest support, and config/UI updates.
-- Verified healthwatch metrics and sent test alert via Alertmanager.
-- Restarted healthwatch after fixing targets config.
-- Rebuilt dev stack with healthwatch/autoheal and resolved API port conflict.
-- Rebuilt and restarted live stack with healthwatch/autoheal.
-- Added healthwatch + autoheal with alerts for service restarts.
-- Rebuilt and restarted live stack to restore trader service.
-- Restructured README and docs into a progressive guide with new ops/testing/deploy pages.
-- Rebuilt dev tests image and re-ran pytest (13 passed, 14 warnings).
-- Re-ran pytest after checkpoint fix (13 passed, 14 warnings).
-- Ran dev pytest after checkpoint tests (10 passed, 14 warnings).
-- Ran pytest after adding checkpoint tests (10 passed).
-- v2.0 backtest failed before rebuild; image needs refresh after orchestrator guard.
-- Guarded RL orchestrator price update against zero/invalid prices after backtest failure.
-- Started v2.0 backtest run (in progress).
-- Added checkpointing with retention for trader/learner state to resume across reboots.
-- Waiting on v2.0 training completion (in progress).
-- v2.0 training still running after extended wait.
-- Monitoring v2.0 training run (in progress).
-- Started v2.0 training run (in progress).
-- Rebuilt and redeployed the dev stack with scalping settings.
-- Rebuilt and redeployed the live stack with scalping settings.
-- Ran pytest with warnings output (10 passed, 4 warnings).
-- Applied scalping-oriented configuration defaults (tighter stops, faster cadence).
-- Rebuilt and redeployed the live stack to apply symbol venue refresh.
-- Added automatic Alpaca symbol-to-venue refresh for per-symbol market gating.
-- Rebuilt and restarted the live stack after adding per-symbol venue gating.
-- Added per-symbol venue gating to prevent orders when a symbol’s market is closed.
-- RL orchestrator sweep running in dev (in progress).
-- Orchestrator sweep rerun requested after image refresh.
-- Orchestrator sweep now falls back to backtest CSV symbols when data.symbols is empty.
-- Updated orchestrator sweep script to use RL orchestrator settings.
-- Aligned orchestrator documentation with the RL implementation and marked legacy sweep usage.
-- Enabled backtest.run_when_closed and restarted tests-when-closed.
-- Rebuilt and restarted all services to apply the latest configuration.
-- Rebuilt tests-when-closed to include backtest runner support.
-- tests-when-closed now runs backtests when configured in backtest.run_when_closed.
-- Ran pytest in the tests-when-closed container (10 passed).
-- Dynamic backtest symbols now fall back to CSV data when symbols are empty.
-- Added backtest plan sampling with local news support plus robustness/unit tests.
-- Stopped the dev stack after publishing v2.0 release.
-- Rebuilt and restarted the v2.0 stack after fixing trader startup crash.
-- Fixed trader startup crash by initializing broker name before the order queue.
-- Started a long-running v2.0 RL training run (in progress).
-- Rebuilt the dev stack after enforcing GPU usage.
-- Rebuilt and restarted the v2.0 stack after enforcing GPU usage.
-- Enforced GPU usage for ML/RL components when CUDA is available.
-- Started a long-running dev RL training run (in progress).
-- Rebuilt the dev stack after RL training guard fix.
-- Rebuilt and restarted the v2.0 stack after RL training guard fix.
-- Guarded RL training against empty/short datasets to prevent index errors.
-- Adjusted dev docker-compose ports to avoid conflicts and rebuilt the dev stack.
-- Rebuilt and restarted the full v2.0 stack after orchestrator/backtest hardening.
-- Hardened backtests against live data calls and disabled on-demand AI feature fetches in the orchestrator by default.
-- Ignored dev worktree artifacts and cleaned up transient log/output files.
-- Removed unused orchestrator config parameters now that the RL orchestrator is standard.
-- Aligned AI/RL objectives with time-penalized return for faster equity growth.
-- Updated architecture diagram to show AI filter features feeding the orchestrator.
-- Enriched order feedback with broker status and fill metrics for the RL orchestrator.
-- Updated architecture diagram to include the order queue and broker feedback loop.
-- Added an order queue layer that serializes broker submissions and feeds order responses into the RL orchestrator.
-- Replaced the orchestrator with an RL-based version that incorporates AI filter inputs for actionable symbols.
-- Added documentation subpages per subsystem in `docs/`.
-- Added pytest-based test suite and a market-closed test runner service.
-- Fixed AI filter bar mapping for single-symbol responses; corrected backtest session prev-close handling.
-- Updated learner lock logs to reflect idle behavior.
-- Kept inactive learner in a sleep loop instead of exiting to avoid restart churn.
-- Added learner lock heartbeats during training/sleep to prevent CPU/GPU contention.
-- Enforced exclusive learner execution with GPU preference for online training.
-- Added AI filter device logging for GPU/CPU confirmation.
-- Enabled GPU acceleration for the AI symbol filter when CUDA is available.
-- Fixed trader loop indentation regression causing container restarts.
-- Updated architecture diagram to show AI filter ingesting news.
-- Added news-aware features to the AI symbol filter.
-- Synced news refresh to 1 minute to match AI filter cadence.
-- Added logging for news catalyst cache refreshes.
-- Increased AI filter online update steps and max symbols for continuous training.
-- Updated architecture diagram to reflect AI filter, ingestion, and online updates.
-- Enabled online updates for the AI symbol filter (incremental retraining on refresh).
-- Increased AI filter cadence to 1 minute and raised universe cap for live scanning.
-- Added a pre-run log for the AI filter so execution is visible immediately.
-- Added AI filter heartbeat logging every 30s after a successful run.
-- Added logging when the AI symbol filter runs so live usage is visible in logs.
-- Ported dev run artifacts (backtest and ingest outputs) into v2.0 for traceability.
-- Added Alpaca ingestion support to load a full universe when symbols are omitted; added saved backtest case configs.
-- Promoted the AI dynamic symbol filter into the live branch for v2.0.
-- Fixed open-order Prometheus gauges to remove stale labels so Grafana shows only current pending orders.
-- Added strategy-level pending-order guard to skip signal evaluation while orders are open.
-- Added pending-order cancel/replace logic and broker order cancellation support.
-- Forced Grafana to reload provisioned dashboards for consistent axis autoscaling.
-- Added AI-driven symbol scoring for full Alpaca US universe selection in dev.
-- Added portfolio position metrics and Grafana table panels for holdings and pending orders.
-- Ensured held positions are always evaluated and prevented short sells when no long position.
-- Deployed combined RL strategies (`rl_policy` + `rl_policy_fees`) and isolated dynamic symbol lists per strategy.
-- Added Alpaca historical ingestion for multi-year 5m data and wired ML orchestrator pretrain to use Alpaca data.
-- Added agent-aligned backtest engine so the real trading loop (strategy + orchestrator + risk + execution) is tested.
-- Added ML orchestrator (LSTM default) with online training, best-model checkpointing, and out-of-band pretraining.
-- Added dynamic symbol scanning with cash-aware caps and fallback filters.
-- Added web UI config editor and Grafana dashboards for active broker, strategies, orders, and account metrics.
+- **Symbol universe from broker** (2026-03-01): `load_universe("alpaca_active_all")` fetches both US equities and crypto from Alpaca `get_all_assets()`. Dead hardcoded `data.crypto_symbols` config removed. `buying_power_scaling: false` so both accounts evaluate the full 150-symbol universe. `filter_universe_by_price` bypasses the equity price check for crypto symbols.
 
-Backtest baseline (v3.0, Jan–Feb 2025, 15 symbols, $100k paper): −0.55%, 8 round trips, 38% win rate.
-Walk-forward validation available via `python3 scripts/benchmark_runner.py --walk-forward`.
+- **Fractional trading** (2026-03-01): `_size_order` now returns `float` qty. `fractional_slice()` bypasses TWAP for sub-1-share orders. `cap_symbols_by_cash` and `price_max` universe cap both skipped when `fractional_shares: true`. `min_notional` guard ($1) replaces `allowed_value < last_price` guard. Crypto symbols always fractional (contain "/"); equities controlled by `trading_limits.fractional_shares`.
+
+- **Complete implementation** (2026-03-01): `MacroRegimeAnalyzer` (FRED+Claude), `EarningsDriftStrategy` (PEAD), alt_data module (Fear&Greed / CoinGlass / EDGAR), `QuoteStream` (alpaca-py WebSocket), `adaptive_slices()` regime-aware TWAP, walk-forward backtesting with embargo gap, `RiskEventInterpreter` wired into `_handle_drift()`, LLM symbol filter hooked into `SymbolManager`, `RebalanceEngine`. `collect_crypto_training_data.py` hourly cron.
+
+- **Crypto 24/7** (2026-02-28): `crypto_momentum`, `crypto_mean_reversion`, `gap_reversal` strategies. Alpaca GTC orders for crypto. 24/7 loop (equity market closed → filter to crypto symbols only). Per-venue exposure caps (Crypto 40%). `symbol_venue()` returns "Crypto" for any symbol containing "/".
+
+- **LLM integration** (2026-02-28): `app/llm/` package — Claude backends (sentiment, risk_interpreter, macro_regime, meta_orchestrator) and Gemini backends (symbols_filter, post_session_analyst). Daily budget circuit breaker ($5 default). Raw article pipeline for sentiment context. `OLLAMA_KEEP_ALIVE=24h`.
+
+- **Multi-session fixes** (2026-02-28): `stat_arb_pairs` root cause fixed (class-level shared price cache across symbol instances). `regime_probability` emitted in trace. `factor_model` weight ×0.9 in low_vol_trending. `risk_block_detail` in trace. Calibrator warm-up raised 0.5→0.75.
+
+- **Return ranker** (2026-02-28): XGBoost return-ranker trained on rolling 3-day window; `max_age_days: 3` config. LLM catalyst (Ollama) added to `fetch_news_features()`. Alpaca news chunking (50 symbols/chunk). Rolling-window training with empty CSV cleanup.
+
+- **Strategy overhaul** (2026-02-16): ~30-indicator injection via `compute_all_indicators()`; trend_following (Supertrend+VWAP), factor_model (Hurst-adaptive), stat_arb_pairs (ADF+OLS); `ConfidenceCalibrator`; regime-aware weight adjustments; `SmartOrderRouter`; TCA feedback loop; `PortfolioOptimizer` (risk_parity); half-Kelly sizing; ATR stops; limit orders default; `adaptive_slices()`.
+
+- **Code review** (2026-02-13 to 2026-02-16): 19 concurrency/safety issues fixed. `datetime.utcnow()` fully migrated to timezone-aware. Per-symbol circuit breaker (was account-level 3%→per-symbol 5%). PDT retry suppression. Two-phase dispatch (exits before entries). Pending notional race prevention. Regime detection under lock. Narrow exception handling. `RiskManager` timezone-aware daily reset. `OrderQueue` FIFO stability + retry budget reset.
+
+- **v3.0 foundation** (2026-02-01 to 2026-02-13): Extracted modules (`symbol_manager`, `performance`, `open_orders`, `account_metrics`). `PortfolioOptimizer` (risk_parity). Exposure caps. `RewardConfig`. Entry-only guards. `_is_closing_position` early computation. Dead code removal (`pipeline.py`, `market_state.py`). Persistent `ThreadPoolExecutor`. Docker socket proxy for healthwatch/autoheal. Dynamic Grafana dashboard generation per account.
+
+- **v2.0** (2025–2026): RL orchestrator (PPO). AI symbol filter with online updates. Multi-broker routing (Alpaca + IBKR). Agent-aligned backtest engine. Model registry + drift detection + auto-rollback. VaR/CVaR, exposure caps, kill switch profiles. Audit/compliance logs. Healthwatch market-based sleep/wake. Daily top movers report with email. Per-symbol venue gating. Alpaca 5m bar ingest.
+
+---
+
+Backtest baseline (v3.0, Jan–Feb 2025, 15 symbols, $100k): −0.55%, 8 round trips, 38% win rate.
+Walk-forward validation: `python3 scripts/benchmark_runner.py --walk-forward`.
 RL orchestrator disabled pending convergence work; rule-based weight mode is the current production path.

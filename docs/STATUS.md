@@ -3,7 +3,7 @@
 
 # Fricktrade — Implementation Status & Roadmap
 
-*Last updated: 2026-03-01. See `AGENTS.md` for the full commit-by-commit history.*
+*Last updated: 2026-03-01 (GPU allocation, alpaca_active_all universe). See `AGENTS.md` for full history.*
 
 ---
 
@@ -79,6 +79,8 @@ enable `meta_orchestrator` after ≥3 session reports exist in `data/session_rep
 | Feature | Status |
 |---|---|
 | Alpaca as primary data provider (5m bars) | ✅ |
+| Universe: `alpaca_active_all` — equities + crypto from Alpaca `get_all_assets()` (no hardcoded lists) | ✅ |
+| `buying_power_scaling: false` — both accounts evaluate full 150-symbol universe; `_size_order` scales qty | ✅ |
 | QuoteStream real-time bid/ask (alpaca-py WebSocket) | ✅ |
 | Earnings calendar (Alpha Vantage CSV, daily refresh) | ✅ |
 | Fear & Greed Index (alternative.me, no key needed) | ✅ |
@@ -96,6 +98,18 @@ enable `meta_orchestrator` after ≥3 session reports exist in `data/session_rep
 | Cross-asset covariance (equities + crypto in same matrix) | ✅ |
 | Sector/venue concentration limits | ✅ |
 | Fractional shares (`trading_limits.fractional_shares: true`, `min_notional: 1.0`) | ✅ |
+
+### GPU Allocation (GTX 1060 6 GB)
+| Workload | Container | VRAM | Notes |
+|---|---|---|---|
+| Ollama llama3.2:3b | `ollama` | ~2.7 GB | Primary — 15–25× speedup (7s CPU → ~0.4s); `CUDA_VISIBLE_DEVICES=0`; `OLLAMA_KEEP_ALIVE=24h` |
+| RL online training | `learner` | ~50–100 MB | Runs market-closed windows |
+| AI filter (PPO) | `trader` | ~15–20 MB | Tiny model; re-enabled Mar 2026 |
+| Headroom | — | ~3.1 GB | Prevents OOM recurrence |
+
+GPU enable/disable state persists in `/data/gpu_state.json`. Re-enable with `scripts/enable_gpu.sh`.
+
+**Root cause of prior Ollama exits**: `docker-compose.gpu.yml` mounted `/dev/nvidia*` into Ollama with `CUDA_VISIBLE_DEVICES=""` (empty string ≠ `"none"` for CUDA), causing the CUDA runner to crash on startup (exit 0, silent). Fixed: `CUDA_VISIBLE_DEVICES=0` (explicit device number).
 
 ---
 
