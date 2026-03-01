@@ -1275,6 +1275,18 @@ class TradingAgent:
                 self._emit_decision_trace(trace, "skip", "no_price", "pricing")
                 return None
             min_price = self.cfg.get("trading_limits", {}).get("min_price")
+            # Per-asset-class min_price overrides the global trading_limits value.
+            # market.asset_classes.crypto.min_price: 0.0 means no floor for crypto
+            # (low-priced coins like ADA, ARB, CRV are not penny stocks).
+            if "/" in symbol:
+                _ac_min = (
+                    self.cfg.get("market", {})
+                    .get("asset_classes", {})
+                    .get("crypto", {})
+                    .get("min_price")
+                )
+                if _ac_min is not None:
+                    min_price = float(_ac_min) if float(_ac_min) > 0 else None
             if min_price is not None and action == "buy" and last_price < float(min_price):
                 self._record_skip(symbol, action, "min_price", broker_name)
                 logging.info("Skipping %s for %s: price below min_price", action, symbol)
