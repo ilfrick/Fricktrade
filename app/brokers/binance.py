@@ -16,7 +16,7 @@ Futures mode (futures=True):
   - Positions include avg_entry (entryPrice) and unrealized PnL.
   - Supports shorts (positionAmt < 0).
   - Demo trading: set base_url: https://demo-fapi.binance.com
-    The client's FUTURES_URL is overridden to that host at init time.
+    The client is initialised with demo=True, which routes to FUTURES_DEMO_URL.
 
 PDT rules do not apply (crypto-only broker).
 """
@@ -82,27 +82,15 @@ class BinanceBroker(Broker):
         self._name = name
         self._futures = futures
         self._base_url = base_url.rstrip("/") if base_url else ""
-        self.client = Client(api_key, api_secret, testnet=testnet)
 
-        # Override endpoint URLs when a custom base_url is provided.
-        # Futures: base_url="https://demo-fapi.binance.com" → FUTURES_URL
-        # Spot:    base_url="https://demo-api.binance.com"  → API_URL
-        if futures and self._base_url:
-            self.client.FUTURES_URL = f"{self._base_url}/fapi"
-            self.client.FUTURES_DATA_URL = f"{self._base_url}/futures/data"
-            logging.info(
-                "BinanceBroker(%s): futures mode, base_url=%s", name, self._base_url
-            )
-        elif futures:
-            logging.info("BinanceBroker(%s): futures mode (production fapi)", name)
-        elif self._base_url:
-            # Spot demo: https://demo-api.binance.com/api/...
-            self.client.API_URL = f"{self._base_url}/api"
-            logging.info(
-                "BinanceBroker(%s): spot mode, base_url=%s", name, self._base_url
-            )
-        else:
-            logging.info("BinanceBroker(%s): spot mode", name)
+        # Use the library's built-in demo flag when base_url is a demo endpoint.
+        # Client(demo=True) automatically routes to API_DEMO_URL (spot) and
+        # FUTURES_DEMO_URL (futures) — no manual URL overrides needed.
+        _demo = bool(self._base_url and "demo" in self._base_url.lower())
+        self.client = Client(api_key, api_secret, testnet=testnet, demo=_demo)
+
+        _mode = ("futures" if futures else "spot") + (" demo" if _demo else " live")
+        logging.info("BinanceBroker(%s): %s", name, _mode)
 
         # Maps order_id → Binance symbol string (required for cancel)
         self._order_symbol_map: dict[str, str] = {}
