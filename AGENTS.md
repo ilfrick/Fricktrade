@@ -906,6 +906,21 @@ all new-entry candidates. Local helper `_submit_phase(syms)` avoids repeating th
 
 **Bug fixed:** `scripts/collect_crypto_training_data.py` used `TimeFrame.Minute * 5` which raises `TypeError` with the installed alpaca-py version. Fixed to `TimeFrame(5, TimeFrameUnit.Minute)` (matching the pattern in `app/data/downloader.py` and `app/agents/orchestrator.py`).
 
+### 2026-03-01: Fix crypto GTC limit orders, alert spam, and equity leakage into crypto cycles
+
+**Bug 1 — Crypto GTC limit orders stuck (commit 0d54707):**
+`execution.limit_orders.enabled: true` was upgrading crypto market orders to limit orders at `last_price + 3bps`. Since bar data is stale (1–5 min old) and crypto is volatile, limit orders were placed below current ask → GTC order stayed open on Alpaca indefinitely, blocking the queue. Fix: skip limit-order upgrade for crypto symbols (`"/" in symbol`). Also fixed `QuoteStream` async handlers (alpaca-py requires `async def`, not `def`) and added credential guard + try/except for the crypto universe load in `symbol_manager.py`.
+
+**Bug 2 — Alert spam from min-notional rejections (commit 1eb5fd3):**
+Alpaca error code `40310000` ("cost basis must be >= minimal amount of order 10") was mapped to reason `"unknown"`, firing the `OrderRejected` alert. Fixed by: mapping `40310000 → "min_order_notional"` in `_reject_reason()`; adding text-fallback for "cost basis"/"minimal amount"; raising `min_notional: 1.0 → 10.0` in config; adding `{reason!="min_order_notional"}` filter to the `OrderRejected` Prometheus alert.
+
+**Bug 3 — Equity symbols processed in crypto-only cycles (commit 5baad58):**
+`_build_symbol_batches(symbols)` in `parallel`/`auto_split` routing mode ignored the `symbols` argument — it always returned the cached `_symbols_by_broker` partition which contained equity symbols from previous cycles. When equity market is closed the main loop filters `symbols` to crypto-only, but equity symbols leaked back through the broker batches. Fix: intersect each broker's batch with `set(symbols)` before returning. The intersection is a no-op when equity market is open (all held positions are already in `symbols` via `merge_symbols_with_positions`).
+
+**Config changes:** `quote_stream.enabled: false` (websockets library incompatible with alpaca-py `extra_headers`); `min_notional: 10.0`.
+
+**Testing:** 181 passed, 17 skipped (unchanged).
+
 ### 2026-03-01: Fix fractional trading support
 
 **Problem:** With crypto and fractional equities, `_size_order` always returned `int` quantities via `int(allowed_value // last_price)`. For a $250 account with 3% max position = $7.50, any asset above $7.50 (BTC at $67k, NVDA at $120) returned qty=0 and was never traded. Three separate guards all assumed whole-share pricing.
