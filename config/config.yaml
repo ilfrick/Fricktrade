@@ -651,6 +651,7 @@ data:
     max_symbols: 150       # cap total active universe; splits proportionally across accounts
     max_universe: 1000
     universe: alpaca_active_all  # equities + crypto; derived live from Alpaca account assets
+    crypto_quote_currencies: [USD]  # only trade crypto pairs quoted in USD; add USDC/USDT if you hold stablecoin balances
     universe_price_filter: true
     cash_aware: true
     cash_buffer_pct: 95

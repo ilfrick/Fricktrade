@@ -412,6 +412,18 @@ class SymbolManager:
                 return
             if not crypto_syms:
                 return
+            # Filter to allowed quote currencies (default: USD only).
+            # USDC/USDT pairs require the stablecoin balance; without it every
+            # order fails with "insufficient balance for USDC/USDT".
+            quote_currencies = dyn_cfg.get("crypto_quote_currencies", ["USD"])
+            if quote_currencies:
+                allowed = {str(q).upper() for q in quote_currencies}
+                crypto_syms = [
+                    s for s in crypto_syms
+                    if "/" in s and s.split("/", 1)[1].upper() in allowed
+                ]
+            if not crypto_syms:
+                return
             ordered = self.merge_with_positions(crypto_syms, portfolio, max_symbols)
             self._symbols_by_strategy = {}
             self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)

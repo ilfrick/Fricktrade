@@ -333,17 +333,21 @@ class OrderQueue:
 
 def _reject_reason(code: str, exc: Exception) -> str:
     """Extract reject reason from error code or exception text."""
+    text = str(exc).lower()
+    # Text checks take priority — Alpaca reuses code 40310000 for both
+    # "cost basis < $10" and "insufficient balance for USDC/USDT".
+    if "pattern day trading" in text or "pdt" in text:
+        return "pdt_protection"
+    if "insufficient balance for" in text:
+        return "insufficient_stablecoin"
+    if "insufficient" in text or "insufficient buying power" in text:
+        return "insufficient_funds"
+    if "cost basis" in text or "minimal amount" in text:
+        return "min_order_notional"
     mapping = {
         "40310100": "pdt_protection",
         "40310000": "min_order_notional",  # Alpaca: cost basis < $10 minimum
     }
     if code in mapping:
         return mapping[code]
-    text = str(exc).lower()
-    if "pattern day trading" in text or "pdt" in text:
-        return "pdt_protection"
-    if "insufficient" in text or "insufficient buying power" in text:
-        return "insufficient_funds"
-    if "cost basis" in text or "minimal amount" in text:
-        return "min_order_notional"
     return "unknown"

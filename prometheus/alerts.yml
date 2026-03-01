@@ -21,7 +21,7 @@ groups:
           summary: "Order failures detected"
           description: "Order failures observed in the last 15 minutes."
       - alert: OrderRejected
-        expr: sum by (broker, symbol, side, code, reason) (increase(order_rejects_total{reason!="min_order_notional"}[15m])) > 0
+        expr: sum by (broker, symbol, side, code, reason) (increase(order_rejects_total{reason!="min_order_notional",reason!="insufficient_stablecoin"}[15m])) > 0
         for: 5m
         labels:
           severity: warning
