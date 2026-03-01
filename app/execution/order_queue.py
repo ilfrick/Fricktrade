@@ -335,6 +335,7 @@ def _reject_reason(code: str, exc: Exception) -> str:
     """Extract reject reason from error code or exception text."""
     mapping = {
         "40310100": "pdt_protection",
+        "40310000": "min_order_notional",  # Alpaca: cost basis < $10 minimum
     }
     if code in mapping:
         return mapping[code]
@@ -343,4 +344,6 @@ def _reject_reason(code: str, exc: Exception) -> str:
         return "pdt_protection"
     if "insufficient" in text or "insufficient buying power" in text:
         return "insufficient_funds"
+    if "cost basis" in text or "minimal amount" in text:
+        return "min_order_notional"
     return "unknown"

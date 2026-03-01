@@ -251,7 +251,7 @@ trading_limits:
   blocked_actions: []
   min_price: 2.0
   fractional_shares: true   # enable fractional qty for crypto (always) and equities
-  min_notional: 1.0          # minimum USD order value (replaces per-share price gate)
+  min_notional: 10.0         # minimum USD order value; Alpaca crypto minimum is $10
 strategy:
   name: trend_following
   names:
@@ -1069,6 +1069,6 @@ fred:
   api_key: ${FRED_API_KEY}
   base_url: https://api.stlouisfed.org/fred
 quote_stream:
-  enabled: true
+  enabled: false   # disabled: websockets version incompatible with alpaca-py (extra_headers kwarg)
   feed: iex
   crypto: true
