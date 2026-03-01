@@ -80,6 +80,8 @@ def iter_binance_accounts(cfg: dict) -> Iterable[dict[str, Any]]:
                 "api_key": api_key,
                 "api_secret": api_secret,
                 "testnet": bool(binance_cfg.get("testnet", False)),
+                "futures": bool(binance_cfg.get("futures", False)),
+                "base_url": str(binance_cfg.get("base_url", "") or ""),
             }
         ]
     use_suffix = len(accounts) > 1

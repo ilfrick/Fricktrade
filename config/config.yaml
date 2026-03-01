@@ -158,12 +158,14 @@ brokers:
       spread_pct: 0.0
   binance:
     enabled: true
-    testnet: false           # use Binance testnet (requires separate testnet API keys)
+    futures: true                                   # use Futures (FAPI) endpoints
+    base_url: ${BINANCE_BASE_URL}                   # demo: https://demo-fapi.binance.com; blank = live
+    testnet: false
     api_key: ${BINANCE_API_KEY}
     api_secret: ${BINANCE_API_SECRET}
     accounts: []             # optional: named sub-accounts (same structure as alpaca.accounts)
     fees:
-      commission_pct: 0.1   # 0.1% standard; 0.075% with BNB fee discount
+      commission_pct: 0.05  # 0.05% standard futures taker; 0.02% maker
       per_trade_fee: 0.0
       per_share_fee: 0.0
       min_fee: 0.0

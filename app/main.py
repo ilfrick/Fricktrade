@@ -702,6 +702,8 @@ def _build_broker(cfg: dict):
             broker = BinanceBroker(
                 api_key=account.get("api_key", ""),
                 api_secret=account.get("api_secret", ""),
+                futures=bool(account.get("futures", False)),
+                base_url=str(account.get("base_url", "") or ""),
                 testnet=bool(account.get("testnet", False)),
                 name=account["name"],
             )
