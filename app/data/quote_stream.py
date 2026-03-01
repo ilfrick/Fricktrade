@@ -94,10 +94,10 @@ class QuoteStream:
     # Internal
     # ------------------------------------------------------------------
 
-    def _on_equity_quote(self, quote) -> None:
+    async def _on_equity_quote(self, quote) -> None:
         self._store_quote(quote)
 
-    def _on_crypto_quote(self, quote) -> None:
+    async def _on_crypto_quote(self, quote) -> None:
         self._store_quote(quote)
 
     def _store_quote(self, quote) -> None:

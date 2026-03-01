@@ -1402,7 +1402,9 @@ class TradingAgent:
             limit_price = order_meta.get("limit_price")
             algo_name = order_meta.get("algo")
             # Auto-upgrade market orders to limit at mid-price (Phase 4.1)
-            if order_type == "market" and limit_price is None:
+            # Skip for crypto: bar data is stale, limit orders at 3bps may never fill (GTC stays open)
+            _is_crypto_symbol = "/" in symbol
+            if order_type == "market" and limit_price is None and not _is_crypto_symbol:
                 _lo_cfg = self.cfg.get("execution", {}).get("limit_orders", {})
                 _lo_enabled = bool(_lo_cfg.get("enabled", False))
                 _high_urgency = float(_lo_cfg.get("high_urgency_threshold", 0.8))

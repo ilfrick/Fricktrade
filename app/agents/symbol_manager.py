@@ -401,9 +401,15 @@ class SymbolManager:
         # Equity market closed: load crypto universe directly; skip full equity universe load,
         # AI filter, and scanner (all equity-focused). Rate limiter above still applies.
         if not is_market_open(self._cfg):
+            if not api_key or not api_secret:
+                return
             max_universe = int(dyn_cfg.get("max_universe", 500))
             max_symbols = int(dyn_cfg.get("max_symbols", 50))
-            crypto_syms = load_universe(api_key, api_secret, "alpaca_active_crypto", max_universe=max_universe)
+            try:
+                crypto_syms = load_universe(api_key, api_secret, "alpaca_active_crypto", max_universe=max_universe)
+            except Exception as exc:
+                logging.warning("Crypto universe load failed: %s", exc)
+                return
             if not crypto_syms:
                 return
             ordered = self.merge_with_positions(crypto_syms, portfolio, max_symbols)
