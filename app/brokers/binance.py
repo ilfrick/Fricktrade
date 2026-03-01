@@ -32,6 +32,12 @@ from app.monitoring.broker_metrics import record_broker_call
 # Quote currencies Binance uses (longest first to avoid ambiguous splits)
 _BINANCE_QUOTES = ["USDT", "BUSD", "USDC", "BTC", "ETH", "BNB"]
 
+# Stablecoin assets to skip when building spot positions (balance-based)
+_BINANCE_STABLECOINS = frozenset([
+    "USDT", "BUSD", "USDC", "DAI", "TUSD", "FDUSD", "USDS", "USDP",
+    "PYUSD", "GUSD", "EUR", "EURI", "GBP", "TRY", "BRL", "ARS",
+])
+
 
 def _to_binance_symbol(symbol: str) -> str:
     """Convert 'BTC/USD' or 'BTC/USDT' → 'BTCUSDT'."""
@@ -226,7 +232,7 @@ class BinanceBroker(Broker):
         positions: list[dict] = []
         for balance in account.get("balances", []):
             asset = balance.get("asset", "")
-            if asset in ("USDT", "BUSD", "USDC"):
+            if asset in _BINANCE_STABLECOINS:
                 continue
             qty = float(balance.get("free", 0) or 0) + float(balance.get("locked", 0) or 0)
             if qty < 1e-8:

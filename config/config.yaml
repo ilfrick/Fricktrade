@@ -341,7 +341,7 @@ strategy:
       fast_window: 5
       medium_window: 15
       slow_window: 60
-      volume_mult: 2.0
+      volume_mult: 1.5    # relaxed from 2.0 — crypto volume spikes are less extreme overnight
       min_return_pct: 0.3
       trailing_stop_pct: 2.0
     crypto_mean_reversion:
@@ -397,11 +397,15 @@ orchestrator:
   top_k: 3
   min_score: 0.0
   strategy_weights:
-    trend_following: 0.18
-    factor_model: 0.14
-    pattern_trading: 0.20
-    stat_arb_pairs: 0.06
-    top_movers_rf: 0.42
+    trend_following: 0.15
+    factor_model: 0.13
+    pattern_trading: 0.18
+    stat_arb_pairs: 0.07
+    top_movers_rf: 0.15   # reduced from 0.42 — equity-only RF model should not dominate when crypto is in universe
+    crypto_momentum: 0.13
+    crypto_mean_reversion: 0.08
+    gap_reversal: 0.07
+    earnings_drift: 0.04
   rl:
     enabled: false
     model_type: lstm

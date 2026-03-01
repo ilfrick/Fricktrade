@@ -36,6 +36,9 @@ class PerformanceTracker:
         )
         self._strategy_names = list(strategy_names)
         self._last_report_at: datetime | None = None
+        # Consecutive negative-Sharpe tracking for weight penalty
+        self._neg_sharpe_threshold = int(perf_cfg.get("negative_sharpe_days", 3))
+        self._neg_sharpe_count: dict[str, int] = {}
 
     @property
     def enabled(self) -> bool:
@@ -284,12 +287,19 @@ class PerformanceTracker:
                 ac_stats = self.compute_trade_stats(ac_records) if ac_records else {"sharpe": 0.0, "profit_factor": 0.0}
                 STRATEGY_SHARPE_RATIO.labels(strategy=name, asset_class=asset_class).set(ac_stats["sharpe"])
                 STRATEGY_PROFIT_FACTOR.labels(strategy=name, asset_class=asset_class).set(ac_stats["profit_factor"])
-            # Sharpe > 0 check — warn if consistently negative (5-session check happens at report level)
-            if stats["trades"] >= 5 and stats["sharpe"] < 0:
-                logging.warning(
-                    "Strategy %s Sharpe < 0 (sharpe=%.2f trades=%d) — consider disabling",
-                    name, stats["sharpe"], stats["trades"],
-                )
+            # Consecutive negative-Sharpe tracking: increment counter when Sharpe < 0,
+            # reset when positive. Weight penalty applied via get_neg_sharpe_weight_mult().
+            if stats["trades"] >= self._min_trades:
+                if stats["sharpe"] < 0:
+                    self._neg_sharpe_count[name] = self._neg_sharpe_count.get(name, 0) + 1
+                    if self._neg_sharpe_count[name] >= self._neg_sharpe_threshold:
+                        logging.warning(
+                            "Strategy %s Sharpe < 0 for %d consecutive reports "
+                            "(sharpe=%.2f trades=%d) — weight halved",
+                            name, self._neg_sharpe_count[name], stats["sharpe"], stats["trades"],
+                        )
+                else:
+                    self._neg_sharpe_count[name] = 0
             strategy_report[name] = stats | {
                 "disabled": strategy_disabled_globally_fn(name)
             }
@@ -318,3 +328,9 @@ class PerformanceTracker:
             logging.warning("Performance report write failed: %s", exc)
         self._last_report_at = now
         return json.dumps(report)
+
+    def get_neg_sharpe_weight_mult(self, strategy_name: str) -> float:
+        """Returns 0.5 weight multiplier when strategy has N consecutive negative-Sharpe reports."""
+        if self._neg_sharpe_count.get(strategy_name, 0) >= self._neg_sharpe_threshold:
+            return 0.5
+        return 1.0
