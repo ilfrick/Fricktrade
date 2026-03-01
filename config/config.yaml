@@ -157,7 +157,7 @@ brokers:
       min_fee: 0.0
       spread_pct: 0.0
   binance:
-    enabled: false           # set to true and provide API keys to enable
+    enabled: true
     testnet: false           # use Binance testnet (requires separate testnet API keys)
     api_key: ${BINANCE_API_KEY}
     api_secret: ${BINANCE_API_SECRET}
