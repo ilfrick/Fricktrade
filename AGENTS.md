@@ -942,6 +942,46 @@ Alpaca error code `40310000` ("cost basis must be >= minimal amount of order 10"
 
 **Result:** BTC/USD on $250 paper account: `$7.50 / $67,000 = 0.00011194 BTC` — now trades correctly.
 
+### 2026-03-01: Fix Alpaca AssetClass enum in get_positions() normalization
+
+**Bug (commit 06d633c):**
+`AlpacaBroker.get_positions()` was supposed to normalize legacy no-slash crypto position symbols
+(`AAVEUSD` → `AAVE/USD`, `ETHUSD` → `ETH/USD`, etc.) to match the slash-format used everywhere
+else in the system. The normalization check used `asset_class == "crypto"` but the Alpaca SDK
+returns `asset_class=AssetClass.CRYPTO` (a Python enum). `str(AssetClass.CRYPTO).lower()` =
+`"assetclass.crypto"` — NOT `"crypto"` — so the equality check silently never matched.
+
+**Symptom:** `alpaca:Higher` had 6 stuck crypto positions (`AAVEUSD`, `ETHUSD`, `LINKUSD`,
+`UNIUSD`, `TRUMPUSD`, `CRVUSD`) that appeared in metrics as `symbol_active{symbol="AAVEUSD"}=1.0`
+even after the fix was deployed, because the fix never ran. Position exits never fired since
+`position_state` was keyed by `"AAVEUSD"` while the trading loop used `"AAVE/USD"`.
+
+**Fix:** Change `== "crypto"` to `"crypto" in asset_class` (substring match works for both the
+raw string `"crypto"` and the enum repr `"assetclass.crypto"`).
+
+**Testing:** 181 passed, 17 skipped.
+
+### 2026-03-01: Fix full universe for all brokers when buying_power_scaling disabled
+
+**Bug (commit c73c254):**
+`build_symbols_by_broker()` in `symbol_manager.py` always segregated held positions — each held
+symbol was assigned exclusively to the broker that holds it and hidden from the other broker.
+With `buying_power_scaling: false`, this was wrong: the intent of that flag is that every broker
+scans and trades the entire universe independently (no per-broker cap). With 6 crypto positions
+on `alpaca:Higher` and 1 on `alpaca:Realistic`, `alpaca:Higher` showed 32 active symbols and
+`alpaca:Realistic` showed 27, when both should show all 33.
+
+**Root cause:** `build_symbols_by_broker()` always ran the held-exclusion logic before calling
+`parallel_partition_symbols()`. `parallel_partition_symbols()` already had the correct early-exit
+(`if not scaling_enabled: return {name: list(symbols) for name in broker_names}`) but it only
+received the 26 non-held candidates — so each broker still got 26 + its own held positions only.
+
+**Fix:** Add an early-exit in `build_symbols_by_broker()`: when `buying_power_scaling: false`,
+return `{broker: list(ordered)}` for all brokers immediately, bypassing the held-exclusion and
+partition logic entirely.
+
+**Testing:** 181 passed, 17 skipped. Both broker dashboards now show 33 active symbols.
+
 ---
 
 ## Remaining Work (as of 2026-03-01)
