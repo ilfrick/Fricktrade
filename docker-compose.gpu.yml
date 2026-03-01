@@ -20,6 +20,19 @@ services:
       - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
       - /dev/nvidia-caps:/dev/nvidia-caps
 
-  # Ollama intentionally excluded from GPU override: runs CPU-only to avoid
-  # competing with the trader for VRAM. GPU device mounts caused the ollama
-  # runner to try CUDA init with CUDA_VISIBLE_DEVICES="" (ambiguous) and exit.
+  # Ollama gets GPU for LLM inference (15-25x speedup: 7s CPU → ~0.4s GPU).
+  # llama3.2:3b needs ~2GB VRAM; trader/learner models are tiny (~50MB total).
+  # All workloads fit in 6GB. CUDA_VISIBLE_DEVICES=0 (explicit) — NOT empty
+  # string which CUDA treats ambiguously and caused the runner to crash.
+  ollama:
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    devices:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-modeset:/dev/nvidia-modeset
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
+      - /dev/nvidia-caps:/dev/nvidia-caps

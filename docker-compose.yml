@@ -16,9 +16,8 @@ services:
   ollama:
     image: ollama/ollama:latest
     environment:
-      - CUDA_VISIBLE_DEVICES=  # Force CPU mode - GPU used by trader
-      - NVIDIA_VISIBLE_DEVICES=
       - OLLAMA_KEEP_ALIVE=24h  # Keep model loaded in memory; don't unload after 5-min default
+      # CUDA_VISIBLE_DEVICES/NVIDIA_VISIBLE_DEVICES set by docker-compose.gpu.yml when GPU present
     volumes:
       - ./ollama:/root/.ollama
     ports:
