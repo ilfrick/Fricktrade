@@ -43,6 +43,26 @@ def pov_slices(total_qty: int, max_participation: float, est_volume: float) -> l
     return slices
 
 
+def adaptive_slices(
+    total_qty: int,
+    duration_seconds: int,
+    base_slices: int,
+    regime: str = "medium_vol_normal",
+    realized_vol: float = 0.0,
+) -> list[AlgoSlice]:
+    """Regime-aware TWAP: more/shorter slices in crisis, fewer in calm."""
+    if regime == "high_vol_crisis":
+        slices = min(base_slices * 2, 16)
+        dur = max(duration_seconds // 2, 30)
+    elif regime == "low_vol_trending" and realized_vol < 0.005:
+        slices = max(base_slices - 1, 2)
+        dur = int(duration_seconds * 1.25)
+    else:
+        slices = base_slices
+        dur = duration_seconds
+    return twap_slices(total_qty, dur, slices)
+
+
 def vwap_slices(total_qty: int, volume_profile: Iterable[float], duration_seconds: int) -> list[AlgoSlice]:
     profile = list(volume_profile)
     if total_qty <= 0 or not profile:

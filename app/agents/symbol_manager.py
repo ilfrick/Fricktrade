@@ -62,6 +62,10 @@ class SymbolManager:
         self._ai_filter_inflight_at: datetime | None = None
         self._ai_filter_inflight_log_at: datetime | None = None
 
+        # LLM symbol filter (optional DailySymbolsFilter)
+        self._llm_filter = None
+        self._llm_filter_last_run: dict[str, datetime] = {}  # "equity"|"crypto" → last run time
+
     # ------------------------------------------------------------------
     # Properties for external access
     # ------------------------------------------------------------------
@@ -141,6 +145,82 @@ class SymbolManager:
     @property
     def active_symbol_labels_by_broker(self) -> dict[str, set[str]]:
         return self._active_symbol_labels_by_broker
+
+    # ------------------------------------------------------------------
+    # LLM filter integration
+    # ------------------------------------------------------------------
+
+    def set_llm_filter(self, llm_filter) -> None:
+        """Inject a DailySymbolsFilter instance for pre-market symbol selection."""
+        self._llm_filter = llm_filter
+
+    def maybe_run_llm_filter(
+        self,
+        regime: str | None = None,
+        vix: float | None = None,
+        portfolio: dict | None = None,
+    ) -> list[str] | None:
+        """Fire the LLM symbol filter if the timing conditions are met.
+
+        Equity: runs once daily at 08:30–09:15 ET (before market open).
+        Crypto: runs every crypto_refresh_hours (default 4h, any time).
+
+        Returns filtered symbol list, or None if not yet due or filter failed.
+        """
+        if self._llm_filter is None:
+            return None
+        sf_cfg = self._cfg.get("llm", {}).get("symbols_filter", {})
+        crypto_refresh_hours = int(sf_cfg.get("crypto_refresh_hours", 4))
+        now = datetime.now(timezone.utc)
+
+        try:
+            from zoneinfo import ZoneInfo
+            et = ZoneInfo("US/Eastern")
+            now_et = now.astimezone(et)
+        except Exception:
+            now_et = None
+
+        # Equity window: 08:30–09:15 ET on weekdays, once per day
+        if now_et is not None and now_et.weekday() < 5:
+            h, m = now_et.hour, now_et.minute
+            in_equity_window = (h == 8 and m >= 30) or (h == 9 and m < 15)
+            last_eq = self._llm_filter_last_run.get("equity")
+            equity_due = in_equity_window and (
+                last_eq is None or (now - last_eq).total_seconds() > 86400
+            )
+        else:
+            equity_due = False
+
+        # Crypto window: every crypto_refresh_hours
+        last_crypto = self._llm_filter_last_run.get("crypto")
+        crypto_due = last_crypto is None or (now - last_crypto).total_seconds() > crypto_refresh_hours * 3600
+
+        if not equity_due and not crypto_due:
+            return None
+
+        try:
+            equity_syms = [s for s in self._symbols if "/" not in s] if equity_due else []
+            crypto_syms = [s for s in self._symbols if "/" in s] if crypto_due else []
+            all_syms = equity_syms + crypto_syms
+            if not all_syms:
+                return None
+
+            sf_cfg_call = dict(sf_cfg)
+            sf_cfg_call.update({
+                "regime": regime or "unknown",
+                "vix": vix,
+                "portfolio_positions": list((portfolio or {}).get("positions", {}).keys()),
+            })
+            result = self._llm_filter.filter_symbols(all_syms, sf_cfg_call)
+            if equity_due:
+                self._llm_filter_last_run["equity"] = now
+            if crypto_due:
+                self._llm_filter_last_run["crypto"] = now
+            logging.info("LLM symbol filter: %d → %d symbols", len(all_syms), len(result or []))
+            return result
+        except Exception as exc:
+            logging.warning("LLM symbol filter failed: %s", exc)
+            return None
 
     # ------------------------------------------------------------------
     # Methods
@@ -296,6 +376,20 @@ class SymbolManager:
         now = now or datetime.now(timezone.utc)
         refresh_minutes = int(dyn_cfg.get("refresh_minutes", 15))
         if self._dynamic_symbols_at and (now - self._dynamic_symbols_at).total_seconds() < refresh_minutes * 60:
+            return
+
+        # LLM symbol filter: may fire pre-market (equity) or every N hours (crypto)
+        llm_filtered = self.maybe_run_llm_filter(portfolio=portfolio)
+        if llm_filtered is not None:
+            ordered = self.merge_with_positions(llm_filtered, portfolio, int(dyn_cfg.get("max_symbols", len(llm_filtered))))
+            self._symbols_by_strategy = {}
+            self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)
+            self._symbols_by_strategy["__global__"] = ordered
+            for name in strategy_names:
+                self._symbols_by_strategy[name] = ordered
+            self._symbols = ordered
+            self._dynamic_symbols = list(ordered)
+            self._dynamic_symbols_at = now
             return
 
         provider = dyn_cfg.get("provider", "alpaca")

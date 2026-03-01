@@ -261,6 +261,7 @@ strategy:
   - crypto_momentum
   - crypto_mean_reversion
   - gap_reversal
+  - earnings_drift
   combine: vote
   min_conviction: 0.12
   single_sided_conviction_multiplier: 0.4
@@ -333,6 +334,11 @@ strategy:
       rsi_period: 5
       rsi_oversold: 30.0
       rsi_overbought: 70.0
+    earnings_drift:
+      min_gap_pct: 5.0
+      min_volume_mult: 1.5
+      hold_days: 20
+      trailing_stop_pct: 4.0
     top_movers_rf:
       data_dir: /data
       model_path: /data/models/top_movers_rf/top_movers_rf.pkl
@@ -540,8 +546,10 @@ portfolio:
     min_position_pct: 0.01
     max_sector_pct: 0.40
   rebalance:
-    threshold_pct: 5.0
-    min_interval_minutes: 30
+    enabled: true
+    drift_threshold_pct: 5.0
+    min_trade_pct: 0.5
+    min_interval_minutes: 60
 backtest:
   data_dir: /data
   start: '2025-11-20'
@@ -970,6 +978,12 @@ llm:
     meta_orchestrator: claude # Complex reasoning
     risk_interpreter: claude  # Safety-critical
 
+  # Macro regime analyzer (Claude) — fetches FRED data + calls LLM every 4h
+  macro_regime:
+    enabled: true
+    refresh_hours: 4
+    backend: claude
+
   # Sentiment analyzer (Claude) — per-symbol news analysis
   # Fires only when news.enabled: true AND raw articles are fetched from Alpaca
   sentiment:
@@ -982,8 +996,9 @@ llm:
   symbols_filter:
     enabled: false           # Enable manually; runs pre-market, overrides AI filter
     run_time: pre_market   # pre_market | manual
-    select_count: 20
+    select_count: 30
     fallback_to_rules: true  # Use rule-based filter if LLM fails
+    crypto_refresh_hours: 4  # Re-run filter for crypto symbols every N hours (24/7)
 
   # Post-session analyst (Gemini) — automated daily review
   post_session:
@@ -1003,9 +1018,9 @@ llm:
 
   # Risk event interpreter (Claude) — replaces simple auto-rollback
   risk_interpreter:
-    enabled: false
-    min_severity: high       # Only interpret high/critical alerts
-    timeout_seconds: 10      # Max wait for LLM response
+    enabled: true
+    min_severity: medium     # Interpret medium/high/critical alerts
+    timeout_seconds: 15      # Max wait for LLM response
 
   # Cost management
   cost:
@@ -1041,3 +1056,24 @@ monitoring:
     signing:
       enabled: false
       secret_env: COMPLIANCE_SIGNING_SECRET
+alt_data:
+  fear_greed:
+    enabled: true
+  coinglass:
+    enabled: true
+    api_key: ${COINGLASS_API_KEY}
+    base_url: https://open-api.coinglass.com/public/v2
+  sec_edgar:
+    enabled: true
+    base_url: https://data.sec.gov
+  alpha_vantage:
+    enabled: true
+    api_key: ${ALPHA_VANTAGE_API_KEY}
+    base_url: https://www.alphavantage.co/query
+fred:
+  api_key: ${FRED_API_KEY}
+  base_url: https://api.stlouisfed.org/fred
+quote_stream:
+  enabled: true
+  feed: iex
+  crypto: true

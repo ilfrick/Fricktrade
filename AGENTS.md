@@ -868,3 +868,40 @@ all new-entry candidates. Local helper `_submit_phase(syms)` avoids repeating th
 `docs/trading-loop.md`, `MEMORY.md`.
 
 **Testing:** All existing tests pass; 4 new tests in `TestTwoPhaseSymbolDispatch`.
+
+### 2026-03-01: Complete Implementation — All Remaining Phases
+
+**Group 1 — Pure code:**
+1. **RiskEventInterpreter wired into `_handle_drift()`**: Added `self._risk_interpreter` and `self._risk_interpreter_pause_until` to `__init__`. Initialised in `_init_llm()` from `llm.risk_interpreter` config. In `_handle_drift()`, calls `interpret()` before RL rollback; if `recommended_action == "pause"`, sets `_risk_interpreter_pause_until = now + 1h`. Gate check added to `run_once()` before `_apply_kill_switch_profile`.
+2. **`adaptive_slices()`** added to `app/execution/algos.py`. Regime-aware TWAP: high-vol-crisis doubles slices/halves duration; low-vol-trending with low volatility reduces slices. Wired in `_plan_execution()` replacing `twap_slices()` for the `twap` path, reading `_regime_state.regime_name`.
+3. **Walk-forward backtest**: `build_walkforward_windows()` added to `app/backtest/sampling.py` (returns train_start/train_end/test_start/test_end tuples with embargo gap). `benchmark_runner.py` gains `--walk-forward`, `--train-days`, `--embargo-days`, `--test-days` CLI args and `run_walkforward()` function that prints a fold summary table.
+
+**Group 2 — New files:**
+- `app/llm/macro_regime.py` — `MacroRegimeAnalyzer` fetches FRED VIX/DGS10/DXY, calls Claude for 5-regime classification (`risk_on/risk_off/rotation/range_bound/crisis`), 4h TTL cache, returns `MacroRegime` with `weight_overrides`.
+- `app/data/earnings_calendar.py` — `fetch_earnings_calendar()` via Alpha Vantage CSV endpoint, `get_earnings_window()` classifies pre/post/none, file-based cache helpers.
+- `app/strategies/earnings_drift.py` — `EarningsDriftStrategy` (PEAD): triggers on `earnings_window == "post"` + gap ≥ 5% + volume ≥ 1.5x; confidence proportional to gap size.
+- `app/data/alt_data.py` — Three providers with TTL cache: `fetch_fear_greed()` (alternative.me, no key), `fetch_coinglass_oi()` (CoinGlass API), `fetch_sec_insider_trades()` + `insider_sentiment()` (EDGAR Form 4).
+- `app/data/quote_stream.py` — `QuoteStream` uses alpaca-py `StockDataStream`/`CryptoDataStream` in daemon threads; exposes `get_quote()` returning bid/ask/spread_pct/microprice.
+- `scripts/collect_crypto_training_data.py` — Hourly collector for crypto return-ranker training data (24/7, no market-hours gate); mirrors collect_return_ranker_data.py pattern.
+
+**Group 3 — Wiring:**
+- `_init_llm()` now also inits `MacroRegimeAnalyzer` (from `llm.macro_regime`) and `DailySymbolsFilter` (from `llm.symbols_filter`) with `set_llm_filter()` call on SymbolManager.
+- `_adjust_weights_for_regime()` calls `self._macro_regime.get_regime()` and applies `weight_overrides` on top of HMM regime adjustments.
+- `_enrich_market_state()` injects: quote stream (bid/ask/spread_pct/microprice), fear_greed_index, crypto_oi_change_pct, insider_sentiment (alt data), earnings_window.
+- `SymbolManager.set_llm_filter()` / `maybe_run_llm_filter()` added; injected into `refresh_dynamic_symbols()` before universe resolution.
+- `_maybe_rebalance()` / `_signal_expected_returns` added; called after each symbol batch; integrates with `RebalanceEngine` (lazy-imported from `app.portfolio.rebalance`).
+- `_init_quote_stream()` / `_init_rebalance_engine()` added as `__init__` helpers.
+- `_build_strategy()` handles `"earnings_drift"` case.
+- `_maybe_refresh_earnings_calendar()` refreshes Alpha Vantage calendar daily (max 25 symbols per free-tier call).
+
+**Config:** Added `alt_data`, `fred`, `quote_stream` top-level sections; `llm.macro_regime`, updated `llm.symbols_filter` (crypto_refresh_hours), `llm.risk_interpreter` (enabled=true, medium severity); `strategy.names` + `strategy.params.earnings_drift`; `portfolio.rebalance.enabled`.
+
+**env.example:** Added ANTHROPIC_API_KEY, GOOGLE_GEMINI_API_KEY, FRED_API_KEY, ALPHA_VANTAGE_API_KEY, COINGLASS_API_KEY.
+
+**Cleanup:** Deleted `data/monitoring/2026-02-16/` (89MB pre-v3.0).
+
+**Testing:** 181 passed, 17 skipped (unchanged).
+
+### 2026-03-01 (follow-up): Fix crypto TimeFrame bug in collect script
+
+**Bug fixed:** `scripts/collect_crypto_training_data.py` used `TimeFrame.Minute * 5` which raises `TypeError` with the installed alpaca-py version. Fixed to `TimeFrame(5, TimeFrameUnit.Minute)` (matching the pattern in `app/data/downloader.py` and `app/agents/orchestrator.py`).

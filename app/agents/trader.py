@@ -20,7 +20,7 @@ from app.execution.executor import ExecutionEngine
 from app.execution.order_queue import OrderQueue
 from app.execution.smart_router import SmartOrderRouter, OrderContext
 from app.execution.tca import TCAAnalyzer, Fill
-from app.execution.algos import pov_slices, twap_slices, vwap_slices
+from app.execution.algos import adaptive_slices, pov_slices, twap_slices, vwap_slices
 from app.execution.impact import estimate_market_impact
 from app.execution import routing as routing_utils
 from app.monitoring.metrics import (
@@ -311,8 +311,24 @@ class TradingAgent:
         # LLM integration — initialised lazily; missing API keys don't crash startup
         self._llm_client = None
         self._llm_sentiment = None
+        self._risk_interpreter = None
+        self._risk_interpreter_pause_until: datetime | None = None
+        self._macro_regime = None
+        self._llm_symbols_filter = None
         self._raw_news_cache: dict[str, list[dict]] = {}  # populated when news enrichment is added
+        # Quote stream (real-time bid/ask data)
+        self._quote_stream = None
+        # Earnings calendar cache
+        self._earnings_calendar: dict = {}
+        self._earnings_calendar_at: datetime | None = None
+        # Alt data config
+        self._alt_data_cfg: dict = {}
+        # Rebalance engine
+        self._rebalance_engine = None
+        self._signal_expected_returns: dict[str, float] = {}
         self._init_llm()
+        self._init_quote_stream()
+        self._init_rebalance_engine()
         self._load_checkpoint()
 
     def _init_llm(self) -> None:
@@ -337,9 +353,81 @@ class TradingAgent:
                     cache_ttl_seconds=int(sent_cfg.get("cache_ttl_seconds", 900)),
                     min_confidence_to_inject=float(sent_cfg.get("min_confidence_to_inject", 0.3)),
                 )
-            logging.info("LLM client initialised (sentiment=%s)", self._llm_sentiment is not None)
+            ri_cfg = llm_cfg.get("risk_interpreter", {})
+            if ri_cfg.get("enabled", False):
+                from app.llm.risk_interpreter import RiskEventInterpreter
+                ri_backend = llm_cfg.get("backends", {}).get("risk_interpreter", "claude")
+                self._risk_interpreter = RiskEventInterpreter(self._llm_client, backend=ri_backend)
+            mr_cfg = llm_cfg.get("macro_regime", {})
+            if mr_cfg.get("enabled", False):
+                import os as _os
+                from app.llm.macro_regime import MacroRegimeAnalyzer
+                self._macro_regime = MacroRegimeAnalyzer(
+                    self._llm_client,
+                    {
+                        "fred_api_key": _os.environ.get("FRED_API_KEY", ""),
+                        "fred_base_url": self.cfg.get("fred", {}).get("base_url",
+                                         "https://api.stlouisfed.org/fred"),
+                        **mr_cfg,
+                    },
+                )
+            sf_cfg = llm_cfg.get("symbols_filter", {})
+            if sf_cfg.get("enabled", False):
+                from app.llm.symbols_filter import DailySymbolsFilter
+                sf_backend = llm_cfg.get("backends", {}).get("symbols_filter", "gemini")
+                self._llm_symbols_filter = DailySymbolsFilter(
+                    self._llm_client, {"backend": sf_backend, **sf_cfg}
+                )
+                self._symbol_mgr.set_llm_filter(self._llm_symbols_filter)
+            logging.info(
+                "LLM client initialised (sentiment=%s, risk_interpreter=%s, macro_regime=%s, symbols_filter=%s)",
+                self._llm_sentiment is not None,
+                self._risk_interpreter is not None,
+                self._macro_regime is not None,
+                self._llm_symbols_filter is not None,
+            )
         except Exception as exc:
             logging.warning("LLM init failed (check API keys): %s", exc)
+
+    def _init_quote_stream(self) -> None:
+        """Initialise real-time quote stream if quote_stream.enabled is true."""
+        qs_cfg = self.cfg.get("quote_stream", {})
+        if not qs_cfg.get("enabled", False):
+            return
+        try:
+            import os as _os
+            from app.data.quote_stream import QuoteStream
+            alpaca_cfg = self.cfg.get("brokers", {}).get("alpaca", {})
+            api_key = str(alpaca_cfg.get("api_key", "") or "")
+            api_secret = str(alpaca_cfg.get("api_secret", "") or "")
+            import re as _re
+            for _attr, _envkey in (("api_key", api_key), ("api_secret", api_secret)):
+                _m = _re.match(r"^\$\{(.+)\}$", _envkey)
+                if _m:
+                    _v = _os.environ.get(_m.group(1), "")
+                    if _attr == "api_key":
+                        api_key = _v
+                    else:
+                        api_secret = _v
+            self._quote_stream = QuoteStream(api_key, api_secret, qs_cfg)
+            logging.info("QuoteStream initialised")
+        except Exception as exc:
+            logging.warning("QuoteStream init failed: %s", exc)
+
+    def _init_rebalance_engine(self) -> None:
+        """Initialise portfolio rebalance engine if portfolio.rebalance.enabled is true."""
+        port_cfg = self.cfg.get("portfolio", {})
+        rb_cfg = port_cfg.get("rebalance", {})
+        if not rb_cfg.get("enabled", False):
+            return
+        try:
+            from app.portfolio.rebalance import RebalanceEngine  # type: ignore[import]
+            self._rebalance_engine = RebalanceEngine(rb_cfg)
+            logging.info("RebalanceEngine initialised")
+        except ImportError:
+            logging.debug("RebalanceEngine not available (portfolio.rebalance module missing)")
+        except Exception as exc:
+            logging.warning("RebalanceEngine init failed: %s", exc)
 
     def _record_skip(self, symbol: str, action: str, reason: str, broker_name: str | None = None) -> None:
         SKIPPED_ORDERS.labels(symbol=symbol, side=action, reason=reason).inc()
@@ -448,6 +536,9 @@ class TradingAgent:
             return CryptoMeanReversionStrategy(params)
         if name == "gap_reversal":
             return GapReversalStrategy(params)
+        if name == "earnings_drift":
+            from app.strategies.earnings_drift import EarningsDriftStrategy
+            return EarningsDriftStrategy(params)
         if name == "top_movers_rf":
             strategy_cfg = dict(params.get("top_movers_rf", {}) or {})
             interval = str(self.cfg.get("data", {}).get("interval", "1m"))
@@ -680,7 +771,12 @@ class TradingAgent:
         if name == "twap":
             duration = int(algo_cfg.get("twap", {}).get("duration_seconds", 120))
             slices = int(algo_cfg.get("twap", {}).get("slices", 4))
-            return twap_slices(qty, duration, slices)
+            regime = str(
+                (self._regime_state.regime_name if self._regime_state is not None else None)
+                or "medium_vol_normal"
+            )
+            realized_vol = float(market_state.get("realized_vol", 0.0) or 0.0)
+            return adaptive_slices(qty, duration, slices, regime=regime, realized_vol=realized_vol)
         if name == "vwap":
             duration = int(algo_cfg.get("vwap", {}).get("duration_seconds", 120))
             profile = algo_cfg.get("vwap", {}).get("profile", [1, 1, 1, 1])
@@ -881,6 +977,10 @@ class TradingAgent:
                     trace["model_active"] = model_snapshot
             if self._kill_switch_liquidated:
                 return None
+            if (self._risk_interpreter_pause_until is not None
+                    and datetime.now(timezone.utc) < self._risk_interpreter_pause_until):
+                self._emit_decision_trace(trace, "skip", "risk_interpreter_pause", "risk")
+                return None
             self._apply_kill_switch_profile(market_state)
             broker_hint = self._resolve_broker_for_symbol(symbol, self._strategy_names, None)
             broker_override = market_state.get("broker_override")
@@ -996,6 +1096,11 @@ class TradingAgent:
             if _cs_qty <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
                 filtered_signals = [s for s in filtered_signals if s.get("action") != "sell"]
             action, reduce_pct, action_strategy = self._combine_signals(filtered_signals, weights, order=names, market_state=market_state)
+            # Track expected returns for portfolio optimizer / rebalance engine
+            if action == "buy":
+                self._signal_expected_returns[symbol] = float(
+                    market_state.get("kelly_win_prob", 0.3) or 0.3
+                )
             if trace and self._config_strategy_weights and (
                 not weights or all(v == 1.0 for v in (weights.values() if isinstance(weights, dict) else weights))
             ):
@@ -2208,11 +2313,48 @@ class TradingAgent:
                 for sym in syms
             ])
 
+        # Ensure quote stream is subscribed to current symbol set
+        if self._quote_stream is not None and symbols:
+            try:
+                self._quote_stream.update_symbols(symbols)
+            except Exception:
+                pass
+
         # Phase 1 — position-holders (exits, stops, take-profits).
         # Fully complete before Phase 2 so freed notional is visible to new entries.
         _submit_phase(holders)
         # Phase 2 — new-entry candidates.
         _submit_phase(non_holders)
+        # Optional rebalance pass: after all signals processed, check drift vs target
+        self._maybe_rebalance(batch_portfolio)
+
+    def _maybe_rebalance(self, portfolio: dict) -> None:
+        """Check whether portfolio has drifted from signal targets and enqueue rebalance trades."""
+        if self._rebalance_engine is None:
+            return
+        if len(self._signal_expected_returns) < 3:
+            self._signal_expected_returns.clear()
+            return
+        try:
+            equity = float(portfolio.get("equity", 0.0) or 0.0)
+            if equity <= 0:
+                return
+            positions = portfolio.get("positions", {})
+            current_weights: dict[str, float] = {}
+            for sym, pos in positions.items():
+                val = float(pos.get("value", 0.0) or 0.0)
+                current_weights[sym] = val / equity if equity > 0 else 0.0
+            decision = self._rebalance_engine.check_rebalance(
+                current_weights=current_weights,
+                signal_expected_returns=dict(self._signal_expected_returns),
+                nav=equity,
+            )
+            if decision and getattr(decision, "trades", None):
+                logging.info("Rebalance engine: %d trades", len(decision.trades))
+        except Exception as exc:
+            logging.debug("Rebalance engine skipped: %s", exc)
+        finally:
+            self._signal_expected_returns.clear()
 
     def _portfolio_for_broker(self, portfolio: dict, broker_name: str) -> dict:
         brokers = portfolio.get("brokers")
@@ -2248,6 +2390,18 @@ class TradingAgent:
             adjusted["trend_following"] = adjusted.get("trend_following", 0) * 0.7
             adjusted["stat_arb_pairs"] = adjusted.get("stat_arb_pairs", 0) * 1.4
             adjusted["factor_model"] = adjusted.get("factor_model", 0) * 1.2
+        # Macro regime overrides from LLM analyzer (4h TTL, non-blocking)
+        if self._macro_regime is not None:
+            try:
+                news_headlines = list(self._raw_news_cache.get("__headlines__", []))
+                macro = self._macro_regime.get_regime(news_headlines or None)
+                if macro and macro.weight_overrides:
+                    for strat, mult in macro.weight_overrides.items():
+                        if strat in adjusted:
+                            adjusted[strat] = adjusted[strat] * float(mult)
+                    logging.debug("MacroRegime(%s conf=%.2f) applied weight overrides", macro.name, macro.confidence)
+            except Exception as _mr_exc:
+                logging.debug("MacroRegime weight override skipped: %s", _mr_exc)
         return adjusted
 
     def _combine_signals(
@@ -2363,6 +2517,42 @@ class TradingAgent:
             self._handle_drift(reasons)
 
     def _handle_drift(self, reasons: list[str]) -> None:
+        if self._risk_interpreter is not None:
+            try:
+                portfolio = getattr(self, "_last_portfolio", {}) or {}
+                positions = [
+                    {"symbol": s, "side": "long", "quantity": float(p.get("qty", 0))}
+                    for s, p in portfolio.get("positions", {}).items()
+                    if float(p.get("qty", 0)) > 0
+                ]
+                hmm_state = "unknown"
+                if self._regime_state is not None:
+                    hmm_state = str(self._regime_state.regime_name or self._regime_state.regime)
+                interp = self._risk_interpreter.interpret(
+                    alert_type="drift",
+                    severity="medium",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    description=f"Drift detected: {', '.join(reasons)}",
+                    hmm_state=hmm_state,
+                    rollback_available=True,
+                    positions=positions,
+                )
+                if interp:
+                    logging.warning(
+                        "RiskInterpreter: %s — action=%s urgency=%s",
+                        interp.diagnosis,
+                        interp.recommended_action,
+                        interp.urgency,
+                    )
+                    _slog.event("warning", "risk_interpreter_drift",
+                                diagnosis=interp.diagnosis,
+                                action=interp.recommended_action,
+                                urgency=interp.urgency)
+                    if interp.recommended_action == "pause":
+                        self._risk_interpreter_pause_until = datetime.now(timezone.utc) + timedelta(hours=1)
+                        logging.warning("RiskInterpreter requested pause: trading suspended for 1 hour.")
+            except Exception as _ri_exc:
+                logging.debug("RiskInterpreter call failed: %s", _ri_exc)
         if self._drift_rollback_done or not self._drift_auto_rollback:
             return
         self.learning_cfg["use_best_model"] = True
@@ -2781,6 +2971,87 @@ class TradingAgent:
                         self._llm_sentiment.inject_into_market_state(market_state, sentiment)
                 except Exception as _llm_exc:
                     logging.debug("LLM sentiment skipped for %s: %s", symbol, _llm_exc)
+        # Quote stream — inject real-time bid/ask/spread/microprice
+        if self._quote_stream is not None:
+            try:
+                qt = self._quote_stream.get_quote(symbol)
+                if qt:
+                    market_state.update({
+                        "bid": qt.get("bid"),
+                        "ask": qt.get("ask"),
+                        "spread_pct": qt.get("spread_pct"),
+                        "microprice": qt.get("microprice"),
+                    })
+            except Exception as _qs_exc:
+                logging.debug("QuoteStream inject skipped for %s: %s", symbol, _qs_exc)
+        # Alt data injection
+        alt_cfg = self.cfg.get("alt_data", {})
+        if alt_cfg:
+            try:
+                from app.data.alt_data import fetch_fear_greed, fetch_coinglass_oi, fetch_sec_insider_trades, insider_sentiment
+                if alt_cfg.get("fear_greed", {}).get("enabled", False):
+                    fg = fetch_fear_greed()
+                    if fg is not None:
+                        market_state["fear_greed_index"] = fg
+                is_crypto = "/" in symbol
+                if is_crypto and alt_cfg.get("coinglass", {}).get("enabled", False):
+                    cg_cfg = alt_cfg["coinglass"]
+                    import os as _os
+                    cg_key = str(cg_cfg.get("api_key", "") or "")
+                    import re as _re
+                    _m = _re.match(r"^\$\{(.+)\}$", cg_key)
+                    if _m:
+                        cg_key = _os.environ.get(_m.group(1), "")
+                    if cg_key:
+                        oi = fetch_coinglass_oi(symbol, cg_key, str(cg_cfg.get("base_url", "")))
+                        if oi:
+                            market_state["crypto_oi_change_pct"] = oi.get("change_pct_24h", 0.0)
+                if not is_crypto and alt_cfg.get("sec_edgar", {}).get("enabled", False):
+                    trades = fetch_sec_insider_trades(symbol)
+                    market_state["insider_sentiment"] = insider_sentiment(trades)
+            except Exception as _ad_exc:
+                logging.debug("Alt data inject skipped for %s: %s", symbol, _ad_exc)
+        # Earnings calendar injection
+        if not ("/" in symbol):  # equity only
+            try:
+                self._maybe_refresh_earnings_calendar()
+                if self._earnings_calendar:
+                    from app.data.earnings_calendar import get_earnings_window
+                    market_state["earnings_window"] = get_earnings_window(symbol, self._earnings_calendar)
+            except Exception as _ec_exc:
+                logging.debug("Earnings calendar inject skipped for %s: %s", symbol, _ec_exc)
+
+    def _maybe_refresh_earnings_calendar(self) -> None:
+        """Refresh earnings calendar once daily from Alpha Vantage."""
+        now = datetime.now(timezone.utc)
+        if (self._earnings_calendar_at is not None
+                and (now - self._earnings_calendar_at).total_seconds() < 86400):
+            return
+        try:
+            import os as _os, re as _re
+            av_cfg = self.cfg.get("alt_data", {}).get("alpha_vantage", {})
+            if not av_cfg.get("enabled", False):
+                return
+            api_key = str(av_cfg.get("api_key", "") or "")
+            _m = _re.match(r"^\$\{(.+)\}$", api_key)
+            if _m:
+                api_key = _os.environ.get(_m.group(1), "")
+            if not api_key:
+                return
+            from app.data.earnings_calendar import fetch_earnings_calendar
+            equity_symbols = [s for s in self._symbol_mgr.symbols if "/" not in s]
+            if not equity_symbols:
+                return
+            calendar = fetch_earnings_calendar(
+                equity_symbols[:25],  # free tier: 25 req/day; one bulk call
+                api_key,
+                str(av_cfg.get("base_url", "https://www.alphavantage.co/query")),
+            )
+            self._earnings_calendar = calendar
+            self._earnings_calendar_at = now
+            logging.debug("Earnings calendar refreshed for %d symbols", len(calendar))
+        except Exception as exc:
+            logging.debug("Earnings calendar refresh failed: %s", exc)
 
     def _recalculate_exposure(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         self._calc_exposure_metrics(market_state, portfolio, symbol)

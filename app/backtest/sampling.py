@@ -118,6 +118,38 @@ def build_windows(
     return windows
 
 
+def build_walkforward_windows(
+    start: datetime,
+    end: datetime,
+    train_days: int = 180,
+    embargo_days: int = 5,
+    test_days: int = 30,
+    step_days: int = 30,
+) -> list[tuple[datetime, datetime, datetime, datetime]]:
+    """Return list of (train_start, train_end, test_start, test_end) walk-forward folds.
+
+    Each fold has an embargo gap between train_end and test_start to prevent
+    lookahead leakage from recent training samples.
+    """
+    if train_days <= 0 or test_days <= 0:
+        return []
+    step_days = max(1, step_days)
+    folds = []
+    # First test window starts after the first training period + embargo
+    test_start = start + timedelta(days=train_days + embargo_days)
+    while test_start <= end:
+        test_end = min(end, test_start + timedelta(days=test_days))
+        train_end = test_start - timedelta(days=embargo_days)
+        train_start = train_end - timedelta(days=train_days)
+        if train_start < start:
+            train_start = start
+        folds.append((train_start, train_end, test_start, test_end))
+        if test_end >= end:
+            break
+        test_start = test_start + timedelta(days=step_days)
+    return folds
+
+
 def build_backtest_plan(cfg: dict) -> list[BacktestWindow]:
     backtest_cfg = cfg.get("backtest", {})
     plan_cfg = backtest_cfg.get("plan", {})

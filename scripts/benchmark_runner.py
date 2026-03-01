@@ -16,6 +16,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 
 from app.backtest.agent_engine import run_agent_backtest
+from app.backtest.sampling import build_walkforward_windows
 from app.utils.config import load_config
 
 
@@ -459,6 +460,60 @@ def _range_or_default(value, default: tuple[float, float]) -> tuple[float, float
     return default
 
 
+def run_walkforward(cfg: dict, train_days: int, embargo_days: int, test_days: int, step_days: int) -> None:
+    """Run walk-forward backtest and print fold summary table."""
+    bt_cfg = cfg.get("backtest", {})
+    start = datetime.strptime(bt_cfg["start"], "%Y-%m-%d")
+    end = datetime.strptime(bt_cfg["end"], "%Y-%m-%d")
+    folds = build_walkforward_windows(start, end, train_days=train_days, embargo_days=embargo_days,
+                                      test_days=test_days, step_days=step_days)
+    if not folds:
+        print("No walk-forward folds generated (check start/end dates and train/test days).")
+        return
+
+    print(f"\nWalk-Forward Backtest  ({len(folds)} folds, "
+          f"train={train_days}d embargo={embargo_days}d test={test_days}d step={step_days}d)")
+    header = f"{'Fold':>4}  {'Train period':>23}  {'Test period':>23}  {'OOS Sharpe':>10}  {'OOS PF':>7}  {'WinRate':>7}"
+    print(header)
+    print("-" * len(header))
+
+    agg_sharpes: list[float] = []
+    for idx, (train_start, train_end, test_start, test_end) in enumerate(folds, 1):
+        # Run OOS test window
+        fold_cfg = _apply_updates(cfg, {
+            "backtest.start": test_start.strftime("%Y-%m-%d"),
+            "backtest.end": test_end.strftime("%Y-%m-%d"),
+        })
+        try:
+            result = run_agent_backtest(fold_cfg)
+            runs = _as_runs(result)
+            returns = [r["return_pct"] for r in runs if r.get("return_pct") is not None]
+            trades_list = [r.get("trades", 0) for r in runs]
+            sc = _scorecard(returns)
+            sharpe = sc.get("sharpe", 0.0)
+            total_trades = sum(trades_list)
+            # Approximate profit factor and win rate from return sign (no detailed trade data here)
+            pos = [r for r in returns if r > 0]
+            neg = [r for r in returns if r < 0]
+            pf = (sum(pos) / abs(sum(neg))) if neg and sum(neg) != 0 else float("inf")
+            win_rate = len(pos) / len(returns) * 100 if returns else 0.0
+        except Exception as exc:
+            sharpe, pf, win_rate = 0.0, 0.0, 0.0
+            logging.warning("Walk-forward fold %d failed: %s", idx, exc)
+
+        agg_sharpes.append(sharpe)
+        train_str = f"{train_start:%Y-%m-%d} → {train_end:%Y-%m-%d}"
+        test_str = f"{test_start:%Y-%m-%d} → {test_end:%Y-%m-%d}"
+        pf_str = f"{pf:.2f}" if pf != float("inf") else "  inf"
+        print(f"{idx:>4}  {train_str:>23}  {test_str:>23}  {sharpe:>10.3f}  {pf_str:>7}  {win_rate:>6.1f}%")
+
+    if agg_sharpes:
+        avg_sharpe = sum(agg_sharpes) / len(agg_sharpes)
+        print("-" * len(header))
+        print(f"{'AGG':>4}  {'':>23}  {'':>23}  {avg_sharpe:>10.3f}  {'':>7}  {'':>7}")
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config/config.yaml")
@@ -470,9 +525,20 @@ def main() -> None:
     parser.add_argument("--plan-step-days", type=int, default=30)
     parser.add_argument("--plan-liquidity-tiers", type=int, default=3)
     parser.add_argument("--plan-sample-per-tier", type=int, default=10)
+    # Walk-forward OOS evaluation
+    parser.add_argument("--walk-forward", action="store_true", help="Run walk-forward OOS evaluation.")
+    parser.add_argument("--train-days", type=int, default=180, help="Training window size in days.")
+    parser.add_argument("--embargo-days", type=int, default=5, help="Embargo gap between train and test.")
+    parser.add_argument("--test-days", type=int, default=30, help="OOS test window size in days.")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+
+    if args.walk_forward:
+        run_walkforward(cfg, train_days=args.train_days, embargo_days=args.embargo_days,
+                        test_days=args.test_days, step_days=args.plan_step_days)
+        return
+
     if args.use_plan:
         cfg = _apply_updates(
             cfg,

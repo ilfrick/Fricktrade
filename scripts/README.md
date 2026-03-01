@@ -42,6 +42,7 @@ Operational and development scripts for Fricktrade.
 | Script | Description |
 |--------|-------------|
 | `collect_return_ranker_data.py` | Collect daily return-ranker training data (market features, news, next-day returns) from decision traces and Alpaca; triggers rolling-window retraining (`max_age_days=3`) |
+| `collect_crypto_training_data.py` | Hourly crypto return-ranker training data collector (no market-hours gate); fetches 5m bars from Alpaca/yfinance for `data.crypto_symbols`, labels with 60-min forward returns, appends to `data/training/crypto_ranker_{date}.csv`; triggers retraining after 100+ rows. Cron: `0 * * * *` |
 | `reset_checkpoints.sh` | Clear all model checkpoints and training state; use before a clean retrain from scratch |
 
 ## LLM Analysis
