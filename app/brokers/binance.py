@@ -70,13 +70,42 @@ class BinanceBroker(Broker):
         # Maps order_id → Binance symbol string (required for cancel)
         self._order_symbol_map: dict[str, str] = {}
 
+    @staticmethod
+    def _server_ip() -> str:
+        """Best-effort fetch of this server's outbound IP for whitelist hints."""
+        try:
+            import requests as _req
+            return _req.get("https://api.ipify.org", timeout=5).text.strip()
+        except Exception:
+            return "<unknown>"
+
     # --- Broker interface ---
 
     def is_connected(self) -> bool:
+        """Verify connectivity with an authenticated call, not just ping().
+
+        ping() requires no auth and always succeeds even with bad keys —
+        we need an authenticated call to surface IP-whitelist / key errors
+        at startup rather than on every trading cycle.
+        """
         try:
-            self.client.ping()
+            self.client.get_account()
             return True
-        except Exception:
+        except Exception as exc:
+            exc_str = str(exc)
+            if "-2015" in exc_str or "Invalid API-key" in exc_str:
+                ip = self._server_ip()
+                logging.error(
+                    "Binance auth failed (code -2015 — IP whitelist or permissions). "
+                    "Go to Binance → API Management → edit your key and either "
+                    "add this server's IP (%s) to the whitelist, "
+                    "or set 'Unrestricted' access. "
+                    "Also ensure 'Enable Reading' and 'Enable Spot & Margin Trading' "
+                    "permissions are checked.",
+                    ip,
+                )
+            else:
+                logging.warning("Binance is_connected() failed: %s", exc)
             return False
 
     def get_account(self) -> dict:
