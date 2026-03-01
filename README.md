@@ -3,11 +3,13 @@
 
 # Fricktrade (Multi-Market)
 
-Fricktrade is an intraday trading agent for US and EU equities (NYSE, Nasdaq, Borsa Italiana). It combines multiple strategies, an RL-based orchestrator, broker adapters, risk controls, and monitoring into a Docker-first stack for live trading, backtesting, and continuous learning.
+Fricktrade is an automated trading agent for US equities (NYSE, Nasdaq) and crypto (24/7 via Alpaca). It combines multiple signal-generating strategies, LLM-driven analysis, a portfolio optimizer, broker adapters, layered risk controls, and monitoring into a Docker-first stack for live paper/live trading, backtesting, and continuous learning.
 
 ## Goals
-- Trade intraday with configurable strategies and strict risk controls.
+- Trade equities intraday and crypto 24/7 with configurable strategies and strict risk controls.
+- Fractional share support: crypto always, equities configurable (`trading_limits.fractional_shares`).
 - Operate live or in backtest mode with shared core logic.
+- LLM-augmented decisions: Claude for sentiment/risk/macro, Gemini for symbol selection and session grading.
 - Provide observability (Prometheus + Grafana) and operational controls (FastAPI UI).
 - Support GPU acceleration where available, with CPU fallback.
 - Be resilient to restarts via periodic state checkpoints.
@@ -145,34 +147,43 @@ flowchart LR
 - `risk.enabled` can bypass risk checks, but broker account flags still block orders.
 
 ### Strategies (active)
-- `trend_following`: MA trend breakout + RSI(14) filter + volume confirmation
-- `factor_model`: momentum (10-bar) + liquidity + volatility + mean-reversion composite with trend quality gate
-- `pattern_trading`: chart pattern breakout with ATR-based adaptive stop + trailing exits
-- `stat_arb_pairs`: dynamic pair selection (rolling correlation) + spread z-score mean-reversion
+- `trend_following`: Supertrend + VWAP deviation + RSI(14) gate + volume confirmation + regime crisis block
+- `factor_model`: Hurst-adaptive weighting, stochastic + CCI, ROC momentum, mean-reversion quality gate
+- `pattern_trading`: chart pattern breakout with 2×ATR adaptive stop + partial take-profit + trailing exits
+- `stat_arb_pairs`: log-ratio spread, ADF cointegration test, OLS hedge ratio, z-score entry (z=2.0)
 - `top_movers_rf`: same-day top-mover random-forest nowcast + intraday low-zone entry scoring
+- `crypto_momentum`: crypto-specific trend + RSI + volume filters; 24/7 via Alpaca
+- `crypto_mean_reversion`: Bollinger/VWAP mean-reversion for crypto; 24/7 via Alpaca
+- `gap_reversal`: equity gap-up/down reversal (9:35–10:30 ET window, volume + RSI filter)
+- `earnings_drift`: Post-Earnings Announcement Drift (PEAD) — gap ≥5% + volume ≥1.5× after earnings
 
-Additional strategies available but disabled by default: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `market_maker`.
+Signals are weighted (`confidence × strategy_weight`) and combined; `min_conviction` threshold (default 0.3) filters low-confidence actions. A bin-based `ConfidenceCalibrator` (per-strategy, 200-sample warm-up) transforms raw confidence to calibrated probability.
+
+Disabled by default: `rl_policy`, `rl_policy_fees`, `intraday_momentum`, `market_maker`.
 
 ### Orchestrator
-- Weight-based strategy signal combination using configurable `strategy_weights`
-- Signals weighted by `confidence * strategy_weight`; `min_conviction` threshold filters low-conviction actions
-- RL orchestrator available but disabled by default (`orchestrator.rl.enabled: false`)
+- Weight-based signal combination (`orchestrator.mode: weights`) using configurable `strategy_weights`
+- Weights adjusted by HMM regime (3-state: low_vol_trending / medium / high_vol_crisis) and optionally by `MacroRegimeAnalyzer` (FRED + Claude, 4h TTL)
+- Half-Kelly position sizing: `max_pos_pct × (2p−1) × 0.5` from calibrated win probability
+- RL orchestrator exists but is disabled (`orchestrator.rl.enabled: false`) pending convergence fixes
 
 ### Execution
-- `app/execution/executor.py`: broker-agnostic execution
-- `app/execution/order_queue.py`: FIFO submission, broker feedback loop
-- Open-order guardrails + cancel/replace logic
-- Optional TWAP/VWAP/POV slicing for larger orders
+- `app/execution/executor.py`: broker-agnostic execution; auto-upgrades market → limit at mid-price when spread available
+- `app/execution/order_queue.py`: FIFO submission, broker feedback loop, daily retry budget reset
+- `app/execution/algos.py`: TWAP / VWAP / POV slicing + `adaptive_slices()` (regime-aware: 2× slices in crisis)
+- `SmartOrderRouter`: Almgren-Chriss impact model selects algo; legacy fallback available
+- TCA feedback: per-symbol EWMA slippage penalty reduces size up to 50%, decays 0.9×/day
+- Fractional orders: `qty < 1` routed as a single `fractional_slice` bypassing TWAP splitting
 
 ### Data & Scanning
-- Live data from `data.provider` (yfinance, alpaca, or brokers). yfinance runs through the market-cache service (Redis + file fallback), with optional cache-only reads.
-- Historical bars from Alpaca for training/backtesting/ingestion
-- Dynamic scanner and PPO-based AI filter for symbol selection
-- Optional Keras return overlay can contribute to AI symbol scores (TensorFlow/Keras installed in containers).
-- The AI filter can publish cached symbol lists so the trader reads from cache when available.
-- News catalyst support (Alpaca news) via an optional Ollama-based LLM gate.
-- `data.process_on_new_bar_only` skips per-symbol processing when bars have not advanced.
-- Filtered symbol cache is stored per symbol in Redis/file with staleness controls (`market_cache.max_age_multiplier`, `market_cache.ignore_staleness`).
+- Primary live data: `data.provider: alpaca` (5m bars via Alpaca REST); yfinance as fallback
+- Market cache: Redis + file, staleness-controlled (`max_age_multiplier`, `ignore_staleness: false`)
+- Dynamic scanner + PPO-based AI filter for equity symbol selection; crypto symbols static from config
+- Real-time bid/ask via `QuoteStream` (`app/data/quote_stream.py`) — alpaca-py WebSocket; injects spread_pct and microprice into market_state
+- News catalyst: Alpaca news via Ollama-based LLM gate (llama3.2:3b, CPU); Claude for per-symbol sentiment
+- Alternative data: Fear & Greed Index (alternative.me), CoinGlass open interest (crypto), SEC EDGAR insider trades
+- Earnings calendar: Alpha Vantage CSV, daily refresh, `earnings_window` (pre/post/none) injected per-symbol
+- Return-ranker: XGBoost model trained on rolling 3-day window of live features + next-day returns
 
 ### Learning
 - Offline RL training and online updates
@@ -199,23 +210,29 @@ All configuration lives in `config/config.yaml`.
 
 Key sections:
 - `api.*`: FastAPI auth controls
-- `market.*`: venue gating, hours, symbol venue mapping
+- `market.*`: venue gating, hours, symbol venue mapping (NYSE / Nasdaq / Crypto)
 - `brokers.*`: broker credentials and adapters (supports `brokers.<name>.accounts[]` or env auto-detect for multi-account routing)
-- `data.*`: symbols, dynamic scan, sources, AI filter
-- `market_cache.*`: Redis + file cache settings for live yfinance bars and filtered symbol lists
-- `news.*`: catalyst fetch config (optional `news.llm.*` for Ollama gating; default base_url `http://ollama:11434`)
-- `strategy.*`: strategy selection and params
-- `orchestrator.*`: RL orchestrator settings
-- `risk.*`: risk limits, stops, cool-downs
-- `execution.*`: order handling and open-order guard
+- `data.*`: symbols, crypto_symbols, dynamic scan, sources, AI filter
+- `market_cache.*`: Redis + file cache settings; `ignore_staleness: false`, `max_age_multiplier: 6`
+- `news.*`: catalyst fetch config (optional `news.llm.*` for Ollama gating; default `http://ollama:11434`)
+- `strategy.*`: strategy selection, params, and per-strategy weights
+- `orchestrator.*`: weight-based or RL mode; `strategy_weights` per strategy
+- `risk.*`: risk limits, crypto limits, stops, cool-downs, exposure caps (venue/sector)
+- `execution.*`: order handling, limit orders, algo slicing, smart router, open-order guard
+- `trading_limits.*`: `fractional_shares`, `min_notional`, `min_price`, `allow_shorts`
+- `llm.*`: Claude/Gemini backends, daily budget, sentiment/macro_regime/risk_interpreter/symbols_filter/meta_orchestrator
+- `alt_data.*`: fear_greed, coinglass, sec_edgar, alpha_vantage toggles and keys
+- `fred.*`: FRED API key + base URL for VIX / DGS10 / DXY macro data
+- `quote_stream.*`: real-time bid/ask WebSocket toggle
+- `portfolio.rebalance.*`: drift-threshold rebalancing engine
 - `learning.*`: RL training and online updates
-- `backtest.*`: backtest range and engine settings
+- `backtest.*`: backtest range, engine settings, walk-forward windows
 - `monitoring.*`: metrics and alerts
 - `checkpointing.*`: checkpoint cadence + retention
 - `kill_switch.*`: manual interlocked kill switches (sleep or liquidation)
-- `reports.daily_top_movers.*`: daily top movers report + training exports
+- `reports.daily_top_movers.*`: daily top movers email + training data export
 
-See `docs/configuration.md` for full details.
+See `docs/configuration.md` for full details and `docs/STATUS.md` for current implementation status.
 
 ## Daily Reporting
 Daily top movers reporting runs after each market close, emails a summary, and stores intraday 1-minute
@@ -254,10 +271,14 @@ Key config under `reports.daily_top_movers.*`:
 cp .env.example .env
 ```
 
-2) Set broker credentials in `.env`:
-- `ALPACA_API_KEY`
-- `ALPACA_API_SECRET`
-- `FRICKTRADE_API_TOKEN` (if `api.auth.enabled`)
+2) Set credentials in `.env`:
+- `ALPACA_API_KEY`, `ALPACA_API_SECRET` — required (paper or live)
+- `ANTHROPIC_API_KEY` — required for Claude sentiment / risk interpreter / macro regime
+- `GOOGLE_GEMINI_API_KEY` — required for Gemini symbol filter and post-session analyst
+- `FRED_API_KEY` — optional; MacroRegimeAnalyzer falls back to yfinance `^VIX` without it
+- `ALPHA_VANTAGE_API_KEY` — optional; EarningsDriftStrategy uses no-key fallback without it
+- `COINGLASS_API_KEY` — optional; CoinGlass OI in alt_data skipped without it
+- `FRICKTRADE_API_TOKEN` — optional (only if `api.auth.enabled`)
 
 3) Start services:
 
@@ -319,7 +340,17 @@ Third-party attributions and license metadata are documented in `THIRD_PARTY_NOT
 
 ## History
 
-Recent changes (newest first):
+See `AGENTS.md` for the full implementation history and `docs/STATUS.md` for current status and roadmap.
+
+Recent milestones (newest first):
+- **v3.0 — Fractional trading** (2026-03-01): `_size_order` now returns float qty; crypto always fractional, equities configurable. `fractional_slice()` bypasses TWAP for sub-1-share orders. `cap_symbols_by_cash` and `price_max` universe cap both disabled when `fractional_shares: true`.
+- **v3.0 — Complete implementation** (2026-03-01): MacroRegimeAnalyzer (FRED+Claude), EarningsDriftStrategy (PEAD), alt_data module (Fear&Greed / CoinGlass / EDGAR), QuoteStream (alpaca-py WebSocket), adaptive_slices() regime-aware TWAP, walk-forward backtesting with embargo gap, RiskEventInterpreter wired into `_handle_drift()`, LLM symbol filter hooked into SymbolManager, RebalanceEngine.
+- **v3.0 — Crypto 24/7** (2026-02-28): `crypto_momentum`, `crypto_mean_reversion`, `gap_reversal` strategies; Alpaca GTC orders; 24/7 loop; per-venue exposure caps (Crypto 40%); `collect_crypto_training_data.py` hourly cron.
+- **v3.0 — LLM integration** (2026-02-28): `app/llm/` package — Claude (sentiment, risk_interpreter, meta_orchestrator, macro_regime), Gemini (symbols_filter, post_session_analyst); daily budget circuit breaker; raw article pipeline.
+- **v3.0 — Strategy overhaul** (2026-02-16): ~30-indicator injection; trend_following (Supertrend+VWAP), factor_model (Hurst-adaptive), stat_arb_pairs (ADF+OLS); ConfidenceCalibrator; regime-aware weight adjustments; SmartOrderRouter; TCA feedback; PortfolioOptimizer (risk_parity); half-Kelly sizing; ATR stops; limit orders default.
+- **v3.0 — Code review** (2026-02-13 to 2026-02-16): 19 concurrency/safety issues fixed; `datetime.utcnow()` fully migrated; per-symbol circuit breaker; PDT retry suppression; two-phase symbol dispatch (exits before entries); pending notional race prevention.
+
+Older history (pre-v3.0):
 - **Strategy upgrades**: trend_following gains RSI(14) filter + volume confirmation; factor_model extends to 10-bar momentum + mean-reversion factor + trend quality gate; pattern_trading uses ATR-based adaptive stop; stat_arb_pairs enabled as 4th strategy. Orchestrator weights rebalanced (0.35/0.25/0.25/0.15). Benchmark config fixed ($10k, 20 liquid symbols). Added `scripts/live_pnl_summary.sh` and `scripts/monitor_full_session.sh` for live diagnostics.
 - Added dynamic Grafana dashboard generation: per-account dashboards are auto-generated from `.env` by `scripts/generate_grafana_dashboards.py` (run automatically by `compose_up.sh`). Static per-account JSONs replaced by a template + generator; orphan dashboards are cleaned up on account removal.
 - **v3.0 code review**: 19 issues resolved — concurrency safety (regime detection under lock, enrich snapshots), exception narrowing in financial paths, full `datetime.utcnow()` migration, RiskManager timezone-aware daily reset, persistent ThreadPoolExecutor, OrderQueue FIFO stability + retry budget reset, code deduplication (`_calc_exposure_metrics`, `_build_rl_strategy`, `extract_equity_cash`), dead code removal (pipeline.py, market_state.py), Docker socket proxy for healthwatch/autoheal, Prometheus cardinality fix.
@@ -522,7 +553,6 @@ Recent changes (newest first):
 - Added dynamic symbol scanning with cash-aware caps and fallback filters.
 - Added web UI config editor and Grafana dashboards for active broker, strategies, orders, and account metrics.
 
-Highest positive impact (testing/live trading):
-- RL-only strategy in agent backtest: +25.76% return, 12 trades on the full-year run.
-- Dual RL strategies with per-strategy symbol lists: +56.20% return in short-window dynamic-symbol tests.
-- Best-model loading for RL (`learning.use_best_model: true`) keeps the highest-evaluated model in live runs.
+Backtest baseline (v3.0, Jan–Feb 2025, 15 symbols, $100k paper): −0.55%, 8 round trips, 38% win rate.
+Walk-forward validation available via `python3 scripts/benchmark_runner.py --walk-forward`.
+RL orchestrator disabled pending convergence work; rule-based weight mode is the current production path.

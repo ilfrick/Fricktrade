@@ -3,6 +3,9 @@
 
 # Top-Tier Backlog (Phase 1–2)
 
+> **⚠️ HISTORICAL DOCUMENT** — Pre-v3.0 backlog. Most items completed in v3.0
+> (Feb–Mar 2026). See `docs/STATUS.md` for the current roadmap.
+
 ## Epics → Work Items
 
 ### EPIC 1: Quant-Grade Validation

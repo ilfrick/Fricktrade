@@ -3,6 +3,8 @@
 
 # Top-Tier Roadmap (Epics)
 
+> **⚠️ HISTORICAL DOCUMENT** — Pre-v3.0 epics. See `docs/STATUS.md` for current status.
+
 ## EPIC 1: Quant-Grade Validation Pipeline
 - Walk-forward + regime split automation
 - Monte Carlo/bootstrapped confidence intervals

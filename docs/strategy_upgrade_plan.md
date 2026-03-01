@@ -1,5 +1,8 @@
 # Strategy Upgrade Plan: Toward Industry Best Practices
 
+> **⚠️ HISTORICAL DOCUMENT** — All strategy upgrades described here were implemented
+> in v3.0 (Feb 2026). See `docs/STATUS.md` for current status and remaining work.
+
 ## Executive Summary
 
 This plan outlines a phased approach to upgrade Fricktrade's trading strategies from

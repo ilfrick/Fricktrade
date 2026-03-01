@@ -1,5 +1,9 @@
 # Fricktrade Improvement Roadmap
 
+> **⚠️ HISTORICAL DOCUMENT** — Generated 2026-02-05. Most items in this roadmap were
+> implemented in v3.0 (Feb–Mar 2026). See `docs/STATUS.md` for current status and
+> remaining work, and `AGENTS.md` for the implementation history.
+
 Generated: 2026-02-05
 
 ## Executive Summary

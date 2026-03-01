@@ -926,3 +926,25 @@ all new-entry candidates. Local helper `_submit_phase(syms)` avoids repeating th
 - `config/config.yaml`: added `trading_limits.fractional_shares: true` and `min_notional: 1.0`
 
 **Result:** BTC/USD on $250 paper account: `$7.50 / $67,000 = 0.00011194 BTC` — now trades correctly.
+
+---
+
+## Remaining Work (as of 2026-03-01)
+
+See `docs/STATUS.md` for the full detail. Summary:
+
+### P1 — High priority
+1. **RL convergence fix** — continuous action space, reward shaping, 500k timestep training, walk-forward validation; RL disabled until it beats rule-based baseline
+2. **PDT Force-Swing mode** — detect 3rd same-day round-trip and hold overnight instead of triggering PDT block
+3. **Auto-disable on Sharpe < 0** — Prometheus metrics exist; wire auto-disable per strategy into `_adjust_weights_for_regime`
+
+### P2 — Medium priority
+4. **Per-strategy kill switch** — `strategy.params.<name>.enabled: false` flag in trading loop
+5. **Regime-aware `min_conviction`** — per-strategy, per-regime thresholds; currently global 0.3
+6. **Factor risk pre-trade gate** — `RiskModel.factor_risk()` exists but not called in execution path
+7. **Enable `meta_orchestrator`** — requires ≥3 session reports in `data/session_reports/`
+
+### P3 — Architectural
+8. Intent semantic separation: `enter_long` / `exit_long` / `enter_short` / `exit_short`
+9. OMS pending-qty validation to prevent oversell at queue level
+10. Extended-hours wiring for earnings-drift pre-market execution
