@@ -158,8 +158,8 @@ brokers:
       spread_pct: 0.0
   binance:
     enabled: true
-    futures: true                                   # use Futures (FAPI) endpoints
-    base_url: ${BINANCE_BASE_URL}                   # demo: https://demo-fapi.binance.com; blank = live
+    futures: false                                  # Spot mode; set true for Futures (FAPI) endpoints
+    base_url: ${BINANCE_BASE_URL}                   # spot demo: https://demo-api.binance.com; fapi demo: https://demo-fapi.binance.com; blank = live
     testnet: false
     api_key: ${BINANCE_API_KEY}
     api_secret: ${BINANCE_API_SECRET}

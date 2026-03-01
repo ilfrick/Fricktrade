@@ -84,8 +84,9 @@ class BinanceBroker(Broker):
         self._base_url = base_url.rstrip("/") if base_url else ""
         self.client = Client(api_key, api_secret, testnet=testnet)
 
-        # Override the futures endpoint URL when a custom base_url is provided.
-        # e.g. base_url="https://demo-fapi.binance.com" → FUTURES_URL points to demo.
+        # Override endpoint URLs when a custom base_url is provided.
+        # Futures: base_url="https://demo-fapi.binance.com" → FUTURES_URL
+        # Spot:    base_url="https://demo-api.binance.com"  → API_URL
         if futures and self._base_url:
             self.client.FUTURES_URL = f"{self._base_url}/fapi"
             self.client.FUTURES_DATA_URL = f"{self._base_url}/futures/data"
@@ -94,6 +95,12 @@ class BinanceBroker(Broker):
             )
         elif futures:
             logging.info("BinanceBroker(%s): futures mode (production fapi)", name)
+        elif self._base_url:
+            # Spot demo: https://demo-api.binance.com/api/...
+            self.client.API_URL = f"{self._base_url}/api"
+            logging.info(
+                "BinanceBroker(%s): spot mode, base_url=%s", name, self._base_url
+            )
         else:
             logging.info("BinanceBroker(%s): spot mode", name)
 
