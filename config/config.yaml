@@ -632,13 +632,6 @@ data:
   prefetch_after_filter: false
   process_on_new_bar_only: false
   symbols: []
-  crypto_symbols:
-    - BTC/USD
-    - ETH/USD
-    - SOL/USD
-    - AVAX/USD
-    - LINK/USD
-    - DOGE/USD
   interval: 5m
   lookback_days: 7
   session_gain_mode: gap
@@ -657,7 +650,7 @@ data:
     refresh_minutes: 1
     max_symbols: 150       # cap total active universe; splits proportionally across accounts
     max_universe: 1000
-    universe: alpaca_active
+    universe: alpaca_active_all  # equities + crypto; derived live from Alpaca account assets
     universe_price_filter: true
     cash_aware: true
     cash_buffer_pct: 95

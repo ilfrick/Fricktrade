@@ -155,10 +155,12 @@ def load_universe(
     universe: Iterable[str] | str,
     max_universe: int = 500,
 ) -> list[str]:
-    if isinstance(universe, str) and universe == "alpaca_active":
+    if isinstance(universe, str) and universe in ("alpaca_active", "alpaca_active_crypto", "alpaca_active_all"):
         _, _, _, TradingClient = _alpaca_imports()
         client = TradingClient(api_key, api_secret, raw_data=True)
         assets = client.get_all_assets()
+        want_equity = universe in ("alpaca_active", "alpaca_active_all")
+        want_crypto = universe in ("alpaca_active_crypto", "alpaca_active_all")
         symbols = []
         for asset in assets:
             status = asset.get("status")
@@ -168,7 +170,11 @@ def load_universe(
                 continue
             if tradable is not True:
                 continue
-            if asset_class != "us_equity":
+            if asset_class == "us_equity" and not want_equity:
+                continue
+            if asset_class == "crypto" and not want_crypto:
+                continue
+            if asset_class not in ("us_equity", "crypto"):
                 continue
             symbol = asset.get("symbol")
             if not symbol:
@@ -197,12 +203,15 @@ def filter_universe_by_price(
     symbols = [s for s in symbols if s]
     if not symbols:
         return []
+    # Crypto symbols (contain "/") are always fractional — skip price filter for them.
+    crypto_syms = [s for s in symbols if "/" in s]
+    equity_syms = [s for s in symbols if "/" not in s]
     if not api_key or not api_secret:
         return symbols
     StockHistoricalDataClient, _, _, _ = _alpaca_imports()
     client = StockHistoricalDataClient(api_key, api_secret)
-    filtered: list[str] = []
-    for chunk in _chunked(symbols, 100):
+    filtered: list[str] = list(crypto_syms)  # crypto always passes
+    for chunk in _chunked(equity_syms, 100):
         snapshots = _fetch_snapshots(client, chunk, feed, timeout_seconds, retries)
         if snapshots is None:
             continue

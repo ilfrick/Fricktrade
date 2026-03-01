@@ -18,11 +18,18 @@ services:
     environment:
       - CUDA_VISIBLE_DEVICES=  # Force CPU mode - GPU used by trader
       - NVIDIA_VISIBLE_DEVICES=
+      - OLLAMA_KEEP_ALIVE=24h  # Keep model loaded in memory; don't unload after 5-min default
     volumes:
       - ./ollama:/root/.ollama
     ports:
       - "0.0.0.0:11434:11434"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   trader:
     build:
