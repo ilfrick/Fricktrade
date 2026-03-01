@@ -734,6 +734,12 @@ class SymbolManager:
         routing_cfg = exec_cfg.get("routing", {})
         broker_names = list(self._broker_map.keys())
 
+        # When buying_power_scaling is disabled every broker scans the full universe
+        # independently — no per-broker symbol cap, no exclusive held-symbol assignment.
+        scaling_enabled = bool(routing_cfg.get("buying_power_scaling", True))
+        if not scaling_enabled:
+            return {name: list(ordered) for name in broker_names}
+
         # Collect per-broker buying power and held/open-order symbols
         broker_buying_power: dict[str, float] = {}
         broker_extras: dict[str, list[str]] = {}
