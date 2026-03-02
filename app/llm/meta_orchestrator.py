@@ -130,7 +130,7 @@ class MetaOrchestrator:
     changes to config.yaml with human confirmation.
     """
 
-    def __init__(self, llm_client: LLMClient, backend: str = "claude"):
+    def __init__(self, llm_client: LLMClient, backend: str = "gemini"):
         self.llm = llm_client
         self.backend = backend
 

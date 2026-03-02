@@ -92,7 +92,7 @@ class MacroRegimeAnalyzer:
         self._fred_base_url = str(cfg.get("fred_base_url",
                                           "https://api.stlouisfed.org/fred") or "")
         self._refresh_hours = int(cfg.get("refresh_hours", 4))
-        self._backend = str(cfg.get("backend", "claude"))
+        self._backend = str(cfg.get("backend", "gemini"))
         self._cache: Optional[MacroRegime] = None
         self._failed_at: Optional[datetime] = None  # backoff after API failure
 

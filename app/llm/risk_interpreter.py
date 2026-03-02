@@ -111,7 +111,7 @@ class RiskEventInterpreter:
     circuit breaker — risk responses must not be suppressed by cost.
     """
 
-    def __init__(self, llm_client: LLMClient, backend: str = "claude"):
+    def __init__(self, llm_client: LLMClient, backend: str = "gemini"):
         self.llm = llm_client
         self.backend = backend
 
