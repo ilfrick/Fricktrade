@@ -48,6 +48,20 @@ def test_daily_loss_reset():
     assert manager.can_open_trade(0.0, 0.0, 0.0)
 
 
+def test_update_daily_loss_sets_not_accumulates():
+    """update_daily_loss must SET the absolute day PnL, not accumulate deltas.
+    Bug: if called each metrics cycle with the same -0.1% value, it must not
+    compound to -45% after 450 cycles and permanently block all buys."""
+    manager = RiskManager({"max_daily_loss_pct": 3.0})
+    # Simulate 450 metrics-refresh cycles all reporting -0.1% absolute day PnL
+    for _ in range(450):
+        manager.update_daily_loss(-0.1)
+    assert manager.daily_loss == -0.1, (
+        f"Expected -0.1 (SET semantics), got {manager.daily_loss} (accumulation bug)"
+    )
+    assert manager.can_open_trade(0.0, 0.0, 0.0)
+
+
 def test_circuit_breaker():
     manager = RiskManager({"circuit_breaker_drawdown_pct": 5.0})
     assert not manager.should_circuit_break(4.9)

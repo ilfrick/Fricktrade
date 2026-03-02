@@ -78,8 +78,11 @@ class RiskManager:
             self._daily_loss = min(0.0, self._daily_loss + float(pnl_pct))
 
     def update_daily_loss(self, pnl_pct: float) -> None:
-        """Alias for record_pnl for backward compatibility."""
-        self.record_pnl(pnl_pct)
+        """Set current day-to-date PnL as an absolute value (not a delta).
+        Called each metrics cycle with the full day PnL so it must SET, not accumulate."""
+        with self._lock:
+            self._maybe_reset_daily()
+            self._daily_loss = min(0.0, float(pnl_pct))
 
     def reset_daily(self) -> None:
         """Manually reset daily loss tracking to zero."""
