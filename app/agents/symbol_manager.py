@@ -400,7 +400,10 @@ class SymbolManager:
 
         # Equity market closed: load crypto universe directly; skip full equity universe load,
         # AI filter, and scanner (all equity-focused). Rate limiter above still applies.
-        if not is_market_open(self._cfg):
+        # Check NYSE specifically — is_market_open() returns True 24/7 when Crypto venue
+        # is in trading_venues, masking when only crypto should run.
+        equity_open = is_venue_open(self._cfg, "NYSE") or is_venue_open(self._cfg, "Nasdaq")
+        if not equity_open:
             if not api_key or not api_secret:
                 return
             max_universe = int(dyn_cfg.get("max_universe", 500))
