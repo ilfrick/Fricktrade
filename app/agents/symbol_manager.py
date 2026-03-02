@@ -743,7 +743,11 @@ class SymbolManager:
         if not scaling_enabled:
             result = {name: list(ordered) for name in broker_names}
             for broker_name in list(result):
-                if "binance" not in broker_name.lower():
+                if "binance" in broker_name.lower():
+                    # Binance is crypto-only — strip all equity symbols
+                    result[broker_name] = [s for s in result[broker_name] if "/" in s]
+                else:
+                    # Alpaca/IBKR: strip /USDT and other non-/USD crypto pairs
                     result[broker_name] = [
                         s for s in result[broker_name]
                         if "/" not in s or s.upper().endswith("/USD")
@@ -775,16 +779,18 @@ class SymbolManager:
             extras = broker_extras.get(broker_name, [])
             part = partitioned.get(broker_name, [])
             symbols_by_broker[broker_name] = list(dict.fromkeys(extras + part))
-        # Filter quote-currency-incompatible symbols per broker.
-        # Alpaca only supports /USD-quoted crypto; other stablecoin-quoted pairs (e.g.
-        # /USDT, /USDC) are Binance-only and must not appear in Alpaca batches.
+        # Filter asset-class-incompatible symbols per broker.
+        # Binance is crypto-only; Alpaca/IBKR only support /USD-quoted crypto.
         for broker_name, syms in list(symbols_by_broker.items()):
             if "binance" in broker_name.lower():
-                continue  # Binance supports all quote currencies
-            symbols_by_broker[broker_name] = [
-                s for s in syms
-                if "/" not in s or s.upper().endswith("/USD")
-            ]
+                # Binance: crypto only — drop all equity symbols
+                symbols_by_broker[broker_name] = [s for s in syms if "/" in s]
+            else:
+                # Alpaca/IBKR: strip /USDT and other non-/USD crypto pairs
+                symbols_by_broker[broker_name] = [
+                    s for s in syms
+                    if "/" not in s or s.upper().endswith("/USD")
+                ]
         return symbols_by_broker
 
     def resolve_universe(
