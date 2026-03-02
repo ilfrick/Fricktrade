@@ -252,7 +252,7 @@ class BinanceBroker(Broker):
                 continue
             positions.append(
                 {
-                    "symbol": f"{asset}/USDT",
+                    "symbol": f"{asset}/USD",
                     "qty": qty,
                     "avg_entry": None,  # not tracked by Binance Spot
                     "side": "long",
