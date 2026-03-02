@@ -282,6 +282,7 @@ strategy:
   - crypto_mean_reversion
   - gap_reversal
   - earnings_drift
+  - rl_policy
   combine: weight
   min_conviction: 0.12
   single_sided_conviction_multiplier: 0.4
@@ -399,13 +400,14 @@ orchestrator:
   strategy_weights:
     trend_following: 0.15
     factor_model: 0.13
-    pattern_trading: 0.18
+    pattern_trading: 0.15
     stat_arb_pairs: 0.07
-    top_movers_rf: 0.15   # reduced from 0.42 — equity-only RF model should not dominate when crypto is in universe
+    top_movers_rf: 0.14   # reduced from 0.42 — equity-only RF model should not dominate when crypto is in universe
     crypto_momentum: 0.13
     crypto_mean_reversion: 0.08
     gap_reversal: 0.07
     earnings_drift: 0.04
+    rl_policy: 0.04
   rl:
     enabled: true
     model_type: lstm

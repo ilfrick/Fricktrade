@@ -154,9 +154,9 @@ class ClaudeBackend(LLMBackend):
 class GeminiBackend(LLMBackend):
     """Google Gemini backend."""
 
-    # Pricing per 1M tokens (Gemini 2.5 Pro as of Feb 2026)
-    INPUT_COST_PER_M = 1.25
-    OUTPUT_COST_PER_M = 10.00
+    # Pricing per 1M tokens (Gemini 2.5 Flash as of Feb 2026, thinking disabled)
+    INPUT_COST_PER_M = 0.075
+    OUTPUT_COST_PER_M = 0.30
 
     def __init__(self, model: Optional[str] = None):
         from google import genai
@@ -164,7 +164,7 @@ class GeminiBackend(LLMBackend):
             api_key=os.environ["GOOGLE_GEMINI_API_KEY"]
         )
         self.model = model or os.getenv(
-            "LLM_GEMINI_MODEL", "gemini-2.5-pro"
+            "LLM_GEMINI_MODEL", "gemini-2.5-flash"
         )
 
     def complete(
