@@ -304,7 +304,8 @@ class AlpacaMarketDataProvider:
         timeframe = _alpaca_timeframe(self._interval)
         cache: dict[str, dict] = {}
         equity_syms = [s for s in symbols if "/" not in s]
-        crypto_syms = [s for s in symbols if "/" in s]
+        # Alpaca CryptoBarsRequest only supports /USD-quoted pairs; /USDT etc. are Binance-only.
+        crypto_syms = [s for s in symbols if "/" in s and s.upper().endswith("/USD")]
         for chunk in _chunked(equity_syms, self._chunk_size):
             req = StockBarsRequest(
                 symbol_or_symbols=chunk,
@@ -361,6 +362,8 @@ class AlpacaMarketDataProvider:
         now = datetime.now(timezone.utc)
         start = now - timedelta(days=self._lookback)
         timeframe = _alpaca_timeframe(self._interval)
+        if "/" in symbol and not symbol.upper().endswith("/USD"):
+            return None  # Non-USD crypto (e.g. /USDT) not supported by Alpaca
         if "/" in symbol:
             req = CryptoBarsRequest(symbol_or_symbols=[symbol], timeframe=timeframe, start=start, end=now)
             data = _fetch_crypto_bars(self._crypto_client, req, self._timeout_seconds, self._retries)
