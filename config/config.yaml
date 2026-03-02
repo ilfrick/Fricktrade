@@ -341,14 +341,14 @@ strategy:
       fast_window: 5
       medium_window: 15
       slow_window: 60
-      volume_mult: 1.5    # relaxed from 2.0 — crypto volume spikes are less extreme overnight
-      min_return_pct: 0.3
+      volume_mult: 1.5    # used as confidence boost multiplier, not a hard gate
+      min_return_pct: 0.15  # relaxed from 0.3 — 0.3% is too strict for 5m bars at off-peak hours
       trailing_stop_pct: 2.0
     crypto_mean_reversion:
       bb_period: 20
       bb_std: 2.0
       rsi_period: 14
-      rsi_oversold: 25.0
+      rsi_oversold: 35.0  # relaxed from 25 — RSI rarely hits 25 in thin weekend markets
       drop_window_bars: 15
       hard_stop_pct: 3.0
     gap_reversal:

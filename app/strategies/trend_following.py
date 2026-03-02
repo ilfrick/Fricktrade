@@ -43,10 +43,13 @@ class TrendFollowingStrategy(Strategy):
         # RSI(14) — compute inline
         rsi = self._compute_rsi(close)
 
-        # Volume confirmation
+        # Volume confirmation — skipped for crypto (Alpaca bar volumes are platform-only,
+        # not global exchange volume, and are unreliably thin on weekends).
+        symbol = market_state.get("symbol", "")
+        is_crypto = "/" in symbol
         volumes = market_state.get("volumes", []) or []
         vol_ok = True
-        if len(volumes) >= 5:
+        if not is_crypto and len(volumes) >= 5:
             avg_vol = float(np.mean(volumes[-5:-1])) if len(volumes) > 1 else 0.0
             vol_ok = avg_vol <= 0 or volumes[-1] >= avg_vol * 1.5
 

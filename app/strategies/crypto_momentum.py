@@ -64,19 +64,25 @@ class CryptoMomentumStrategy(Strategy):
         ret_med = _ret(self.params.medium_window)
         ret_slow = _ret(self.params.slow_window)
 
-        # Volume confirmation
+        # Volume confirmation — used as a confidence boost, not a hard gate.
+        # Alpaca crypto bar volume is platform-routed flow, not global exchange volume.
+        # It's systematically thin on weekends and off-peak hours, so blocking on it
+        # would silence signals during valid low-volume regimes.
         volumes = market_state.get("volumes", []) or []
-        vol_ok = False
+        vol_boost = 1.0
         if len(volumes) >= self.params.medium_window + 1:
             avg_vol = float(np.mean(volumes[-self.params.medium_window - 1 : -1]))
-            vol_ok = avg_vol > 0 and float(volumes[-1]) >= avg_vol * self.params.volume_mult
+            if avg_vol > 0:
+                ratio = float(volumes[-1]) / avg_vol
+                vol_boost = min(ratio / self.params.volume_mult, 1.5)  # caps at 1.5×
 
         all_positive = ret_fast > self.params.min_return_pct and ret_med > 0.0 and ret_slow > 0.0
         all_negative = ret_fast < -self.params.min_return_pct and ret_med < 0.0 and ret_slow < 0.0
 
-        if all_positive and vol_ok:
+        if all_positive:
             min_ret = min(ret_fast, ret_med, ret_slow)
-            confidence = min(min_ret / (self.params.min_return_pct * 3.0), 1.0)
+            base_conf = min(min_ret / (self.params.min_return_pct * 3.0), 1.0)
+            confidence = min(base_conf * max(vol_boost, 0.5), 1.0)
             return {
                 "action": "buy",
                 "confidence": float(confidence),
@@ -84,7 +90,7 @@ class CryptoMomentumStrategy(Strategy):
                 "trailing_stop_pct": self.params.trailing_stop_pct,
             }
 
-        if all_negative and vol_ok:
+        if all_negative:
             # Long-only: signal to exit any existing position
             return {"action": "sell", "confidence": 0.6, "name": "crypto_momentum"}
 
