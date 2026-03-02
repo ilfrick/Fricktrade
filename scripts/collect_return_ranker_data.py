@@ -278,7 +278,8 @@ def _fetch_news(symbols: list[str], lookback_hours: int = 12, as_of: datetime | 
 
 
 def _fetch_bars(symbols: list[str], lookback_days: int = 5) -> dict:
-    """Fetch 5m OHLCV bars from yfinance — same call as ai_filter._fetch_bars_yfinance."""
+    """Fetch 5m OHLCV bars from yfinance, with Binance fallback for /USDT symbols."""
+    bars: dict = {}
     try:
         from app.data.yfinance_utils import fetch_yfinance_bars
         bars, _ = fetch_yfinance_bars(
@@ -289,10 +290,30 @@ def _fetch_bars(symbols: list[str], lookback_days: int = 5) -> dict:
             lowercase=True,
             drop_zero_volume=False,
         )
-        return bars
     except Exception as exc:
         log.error("yfinance fetch failed: %s", exc)
-        return {}
+
+    # Supplement /USDT symbols that yfinance cannot serve
+    missing_usdt = [
+        s for s in symbols
+        if "/" in s and not s.upper().endswith("/USD") and s not in bars
+    ]
+    if missing_usdt:
+        import os
+        api_key = os.getenv("BINANCE_API_KEY", "")
+        api_secret = os.getenv("BINANCE_API_SECRET", "")
+        if api_key and api_secret:
+            try:
+                from binance.client import Client  # type: ignore[import]
+                from app.data.binance_market_data import fetch_binance_bars as _fetch_bn
+                client = Client(api_key, api_secret)
+                bn_bars = _fetch_bn(missing_usdt, client, "5m", lookback_days)
+                bars.update(bn_bars)
+                log.info("return_ranker: Binance bars fetched for %d /USDT symbols", len(bn_bars))
+            except Exception as exc:
+                log.warning("return_ranker: Binance bars fallback failed: %s", exc)
+
+    return bars
 
 
 def _normalize_frame(frame) -> "pd.DataFrame":

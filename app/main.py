@@ -985,6 +985,23 @@ def main():
                 cache_only=cache_cfg.cache_only,
                 cache_max_age_seconds=cache_max_age,
             )
+        # Wrap with Binance provider for /USDT symbols when Binance is configured
+        from app.data.binance_market_data import (
+            BinanceMarketDataProvider as _BinanceMDP,
+            _HybridMarketDataProvider,
+            _build_binance_client_from_cfg,
+        )
+        _bn_client = _build_binance_client_from_cfg(cfg)
+        if _bn_client is not None:
+            market_data_provider = _HybridMarketDataProvider(
+                market_data_provider,
+                _BinanceMDP(
+                    _bn_client,
+                    cfg["data"]["lookback_days"],
+                    cfg["data"]["interval"],
+                    cfg["data"].get("session_gain_mode", "gap"),
+                ),
+            )
         agent.loop(symbols, market_data_provider, 60)
         return
 

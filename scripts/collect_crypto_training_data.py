@@ -92,10 +92,16 @@ def _fetch_alpaca_bars(symbol: str, api_key: str, api_secret: str,
         return records
     except ImportError:
         log.warning("alpaca-py not installed; using yfinance fallback for %s", symbol)
-        return _fetch_yfinance_bars(symbol, lookback_hours)
+        result = _fetch_yfinance_bars(symbol, lookback_hours)
+        if result is None and "/" in symbol and not symbol.upper().endswith("/USD"):
+            result = _fetch_binance_bars(symbol, lookback_hours)
+        return result
     except Exception as exc:
         log.warning("Alpaca bars fetch failed for %s: %s", exc, symbol)
-        return _fetch_yfinance_bars(symbol, lookback_hours)
+        result = _fetch_yfinance_bars(symbol, lookback_hours)
+        if result is None and "/" in symbol and not symbol.upper().endswith("/USD"):
+            result = _fetch_binance_bars(symbol, lookback_hours)
+        return result
 
 
 def _fetch_yfinance_bars(symbol: str, lookback_hours: int = 24) -> list[dict] | None:
@@ -125,6 +131,42 @@ def _fetch_yfinance_bars(symbol: str, lookback_hours: int = 24) -> list[dict] | 
         return records
     except Exception as exc:
         log.warning("yfinance fallback failed for %s: %s", symbol, exc)
+        return None
+
+
+def _fetch_binance_bars(symbol: str, lookback_hours: int = 24) -> list[dict] | None:
+    """Binance kline fallback for /USDT symbols not available on Alpaca/yfinance."""
+    import os
+    api_key = os.getenv("BINANCE_API_KEY", "")
+    api_secret = os.getenv("BINANCE_API_SECRET", "")
+    if not api_key or not api_secret:
+        return None
+    try:
+        from app.data.binance_market_data import fetch_binance_bars as _fetch_bn
+        from binance.client import Client  # type: ignore[import]
+        client = Client(api_key, api_secret)
+        lookback_days = max(1, int(math.ceil(lookback_hours / 24)))
+        bars_map = _fetch_bn([symbol], client, "5m", lookback_days)
+        df = bars_map.get(symbol)
+        if df is None or df.empty:
+            return None
+        records = []
+        for ts, row in df.iterrows():
+            if hasattr(ts, "to_pydatetime"):
+                ts = ts.to_pydatetime()
+            if getattr(ts, "tzinfo", None) is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            records.append({
+                "ts": ts,
+                "open": float(row.get("open", 0)),
+                "high": float(row.get("high", 0)),
+                "low": float(row.get("low", 0)),
+                "close": float(row.get("close", 0)),
+                "volume": float(row.get("volume", 0)),
+            })
+        return records or None
+    except Exception as exc:
+        log.warning("Binance bars fallback failed for %s: %s", symbol, exc)
         return None
 
 

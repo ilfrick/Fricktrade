@@ -162,6 +162,20 @@ def score_symbols(
                         _save_linear_model(model_path, model, stats)
 
             bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
+
+            # Supplement with Binance bars for /USDT symbols (not covered by Alpaca/yfinance)
+            _usdt_syms = [s for s in symbols if "/" in s and not s.upper().endswith("/USD")]
+            if _usdt_syms and brokers_cfg:
+                try:
+                    _bn_client = _get_binance_client_from_brokers_cfg(brokers_cfg)
+                    if _bn_client is not None:
+                        from app.data.binance_market_data import fetch_binance_bars as _fetch_bn
+                        _bn_bars = _fetch_bn(_usdt_syms, _bn_client, config.interval, config.lookback_days)
+                        bars.update(_bn_bars)
+                        logging.info("AI filter: merged Binance bars for %d /USDT symbols", len(_bn_bars))
+                except Exception as _bn_exc:
+                    logging.warning("AI filter: Binance bar merge failed: %s", _bn_exc)
+
             scores = {}
             signal_map: dict[str, dict[str, float]] = {}
             # Fetch rich news features for return ranker (article count + recency + catalyst)
@@ -1148,6 +1162,25 @@ def _map_feed(feed: str) -> DataFeed:
     if feed.lower() == "sip":
         return DataFeed.SIP
     return DataFeed.IEX
+
+
+def _get_binance_client_from_brokers_cfg(brokers_cfg: dict):
+    """Return a python-binance Client from the brokers sub-dict, or None."""
+    try:
+        from binance.client import Client  # type: ignore[import]
+        bn = (brokers_cfg or {}).get("binance", {}) or {}
+        if not bn.get("enabled", False):
+            return None
+        api_key = bn.get("api_key", "") or ""
+        api_secret = bn.get("api_secret", "") or ""
+        if not api_key or not api_secret:
+            return None
+        base_url = str(bn.get("base_url", "") or "")
+        demo = bool(base_url and "demo" in base_url.lower())
+        testnet = bool(bn.get("testnet", False))
+        return Client(api_key, api_secret, testnet=testnet, demo=demo)
+    except Exception:
+        return None
 
 
 def _fetch_news_catalysts(
