@@ -1000,17 +1000,17 @@ llm:
 
   # Backend assignment per module
   backends:
-    sentiment: claude        # Quality-critical
+    sentiment: gemini        # Quality-critical
     symbols_filter: gemini   # High volume, large context
     post_session: gemini     # Large trade logs
-    meta_orchestrator: claude # Complex reasoning
-    risk_interpreter: claude  # Safety-critical
+    meta_orchestrator: gemini # Complex reasoning
+    risk_interpreter: gemini  # Safety-critical
 
   # Macro regime analyzer (Claude) — fetches FRED data + calls LLM every 4h
   macro_regime:
     enabled: true
     refresh_hours: 4
-    backend: claude
+    backend: gemini
 
   # Sentiment analyzer (Claude) — per-symbol news analysis
   # Fires only when news.enabled: true AND raw articles are fetched from Alpaca

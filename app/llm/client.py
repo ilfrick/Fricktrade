@@ -182,6 +182,7 @@ class GeminiBackend(LLMBackend):
                 "system_instruction": system_prompt,
                 "max_output_tokens": max_tokens,
                 "temperature": temperature,
+                "thinking_config": {"thinking_budget": 0},
             },
         )
         latency = (time.monotonic() - t0) * 1000
@@ -193,8 +194,19 @@ class GeminiBackend(LLMBackend):
             + output_tok * self.OUTPUT_COST_PER_M / 1_000_000
         )
 
+        # response.text can be None when thinking consumes all tokens; fall back to parts
+        content = response.text
+        if content is None:
+            for candidate in (response.candidates or []):
+                for part in getattr(getattr(candidate, "content", None), "parts", None) or []:
+                    if getattr(part, "text", None):
+                        content = part.text
+                        break
+                if content is not None:
+                    break
+
         return LLMResponse(
-            content=response.text,
+            content=content,
             model=self.model,
             input_tokens=input_tok,
             output_tokens=output_tok,
