@@ -289,9 +289,14 @@ class TradingAgent:
         # Pending notional tracking to prevent leverage race across ThreadPool workers
         self._pending_notional: dict[str, float] = {}
         self._pending_notional_lock = threading.Lock()
+        # Per-(broker, symbol) pending buy tracking to prevent duplicate buys
+        self._pending_buy_symbols: dict[tuple[str, str], datetime] = {}
+        self._pending_buy_symbols_lock = threading.Lock()
         # Exit backoff tracking for repeated sell failures
         self._exit_fail_counts: dict[tuple[str, str], int] = {}
         self._exit_backoff_until: dict[tuple[str, str], datetime] = {}
+        # Stuck-order cooldown: suppress buy re-submissions after timeout
+        self._stuck_cooldown: dict[tuple[str, str], datetime] = {}
         # PDT-blocked symbols: suppress sell retries until next trading day
         self._pdt_blocked: set[tuple[str, str]] = set()
         self._pdt_blocked_date: date | None = None
@@ -1323,6 +1328,15 @@ class TradingAgent:
                 logging.info("Skipping %s for %s: account blocked", action, symbol)
                 self._emit_decision_trace(trace, "skip", "account_blocked", "account")
                 return None
+            if action == "buy":
+                _sc_until = self._stuck_cooldown.get((broker_name, symbol))
+                if _sc_until:
+                    if datetime.now(timezone.utc) < _sc_until:
+                        self._record_skip(symbol, action, "stuck_cooldown", broker_name)
+                        self._emit_decision_trace(trace, "skip", "stuck_cooldown", "risk")
+                        return None
+                    else:
+                        del self._stuck_cooldown[(broker_name, symbol)]
             if not risk_disabled and not _is_closing_position:
                 var_reason = self._account_metrics.var_limit_reason(broker_state)
                 if var_reason:
@@ -1355,6 +1369,18 @@ class TradingAgent:
             if trace:
                 trace["haircuts"] = self._haircut_snapshot(market_state)
             if qty <= 0:
+                if skip_reason == "dust_position":
+                    try:
+                        broker_obj = self._broker_map.get(broker_name)
+                        if broker_obj:
+                            broker_obj.close_position(symbol)
+                            logging.info(
+                                "Dust position force-closed: %s/%s qty=%.2e",
+                                broker_name, symbol, current_qty,
+                            )
+                    except Exception as _de:
+                        logging.warning("Dust close failed %s/%s: %s", broker_name, symbol, _de)
+                    return None
                 if skip_reason:
                     self._record_risk_outcome(symbol, action, False, str(skip_reason), broker_name)
                     self._record_skip(symbol, action, str(skip_reason), broker_name)
@@ -1475,6 +1501,12 @@ class TradingAgent:
                         return None
                     order_notional = qty * last_price
 
+            # Block duplicate buys while an order for this symbol is still pending
+            if action == "buy" and not _is_closing_position:
+                if self._has_pending_buy(broker_name, symbol):
+                    self._record_skip(symbol, action, "pending_order", broker_name)
+                    self._emit_decision_trace(trace, "skip", "pending_order", "risk")
+                    return None
             # Atomic leverage check for buy orders (prevents ThreadPool race)
             if action == "buy" and not _is_closing_position:
                 if not self._check_and_reserve_notional(broker_name, order_notional, portfolio):
@@ -1525,7 +1557,10 @@ class TradingAgent:
                     self._release_pending_notional(broker_name, order_notional)
                 self._record_skip(symbol, action, "order_failed", broker_name)
                 logging.warning("Order enqueue failed for %s %s: %s", action, symbol, exc)
-                self._emit_decision_trace(trace, "skip", "order_failed", "execution")
+                self._emit_decision_trace(
+                    trace, "skip", "order_failed", "execution",
+                    {"error_detail": str(exc)[:300]},
+                )
                 return None
 
             # Track pending sell qty to prevent overshoot
@@ -1551,6 +1586,8 @@ class TradingAgent:
                 TRADES.labels(symbol=symbol, side=action).inc()
                 TRADES_BY_BROKER.labels(broker=broker_name, symbol=symbol, side=action).inc()
                 broker_state.last_trade_at = now
+                if action == "buy" and not _is_closing_position:
+                    self._reserve_pending_buy(broker_name, symbol)
                 _slog.event(
                     "info", "trade_executed",
                     symbol=symbol, action=action, qty=qty,
@@ -1624,6 +1661,24 @@ class TradingAgent:
         with self._pending_notional_lock:
             current = self._pending_notional.get(broker, 0.0)
             self._pending_notional[broker] = max(0.0, current - notional)
+
+    def _reserve_pending_buy(self, broker: str, symbol: str) -> None:
+        with self._pending_buy_symbols_lock:
+            self._pending_buy_symbols[(broker, symbol)] = datetime.now(timezone.utc)
+
+    def _release_pending_buy(self, broker: str, symbol: str) -> None:
+        with self._pending_buy_symbols_lock:
+            self._pending_buy_symbols.pop((broker, symbol), None)
+
+    def _has_pending_buy(self, broker: str, symbol: str, max_age_seconds: int = 120) -> bool:
+        with self._pending_buy_symbols_lock:
+            ts = self._pending_buy_symbols.get((broker, symbol))
+            if ts is None:
+                return False
+            if (datetime.now(timezone.utc) - ts).total_seconds() > max_age_seconds:
+                self._pending_buy_symbols.pop((broker, symbol), None)
+                return False
+            return True
 
     # --- Exit backoff for repeated sell failures ---
 
@@ -1711,12 +1766,25 @@ class TradingAgent:
                 # Release pending notional for buy-side terminal responses
                 side = str(response.side or "").lower()
                 status = str(response.status or "").lower()
-                if side == "buy" and status in ("completed", "rejected", "canceled"):
+                if side == "buy" and status in ("completed", "rejected", "canceled", "timed_out"):
                     est_price = response.filled_avg_price or 0.0
                     resp_qty = float(response.qty or 0)
                     notional = resp_qty * est_price if est_price else float(response.notional if hasattr(response, "notional") else 0)
                     if notional > 0:
                         self._release_pending_notional(response.broker, notional)
+                    self._release_pending_buy(response.broker, response.symbol)
+                # Set stuck-order cooldown on buy timeout
+                if status == "timed_out" and side == "buy":
+                    cooldown_min = int(
+                        self.cfg.get("execution", {}).get("stuck_cooldown_minutes", 15)
+                    )
+                    self._stuck_cooldown[(response.broker, response.symbol)] = (
+                        datetime.now(timezone.utc) + timedelta(minutes=cooldown_min)
+                    )
+                    logging.info(
+                        "Stuck-order cooldown: %s/%s suppressed for %d min",
+                        response.broker, response.symbol, cooldown_min,
+                    )
                 # Release pending sell qty on terminal sell responses
                 if side == "sell" and status in ("completed", "rejected", "canceled"):
                     _ps_key = (response.broker, response.symbol)
@@ -1915,9 +1983,13 @@ class TradingAgent:
                 raw_qty = current_qty * max(min(reduce_pct, 1.0), 0.0)
                 if self._is_fractional(symbol):
                     precision = 8 if "/" in symbol else 3
-                    qty: float = round(raw_qty, precision)
+                    factor = 10 ** precision
+                    qty: float = math.floor(raw_qty * factor) / factor
                 else:
                     qty = int(raw_qty)
+                # Dust: positive holding too small to sell via qty-based order
+                if qty == 0 and current_qty > 0 and current_qty < 1e-6:
+                    return (0, "dust_position")
                 return (qty, None) if qty > 0 else (0, "position_limit")
             if not allow_shorts or not self._can_short(symbol, portfolio):
                 return 0, "shorting_disabled"
@@ -2469,7 +2541,6 @@ class TradingAgent:
             adjusted["trend_following"] = adjusted.get("trend_following", 0) * 1.3
             adjusted["pattern_trading"] = adjusted.get("pattern_trading", 0) * 1.2
             adjusted["stat_arb_pairs"] = adjusted.get("stat_arb_pairs", 0) * 0.8
-            adjusted["factor_model"] = adjusted.get("factor_model", 0) * 0.9
             adjusted["factor_model"] = adjusted.get("factor_model", 0) * 0.9
         elif regime == 2:  # high_vol_crisis
             adjusted["trend_following"] = adjusted.get("trend_following", 0) * 0.7

@@ -282,7 +282,7 @@ strategy:
   - crypto_mean_reversion
   - gap_reversal
   - earnings_drift
-  combine: vote
+  combine: weight
   min_conviction: 0.12
   single_sided_conviction_multiplier: 0.4
   fee_aware:
@@ -939,6 +939,7 @@ pattern_trading:
     trailing_stop_pct: 0.02
 execution:
   symbol_executor_workers: 4
+  stuck_cooldown_minutes: 15
   limit_orders:
     enabled: true             # Use limit orders by default; market orders only for high urgency
     default_offset_bps: 3.0   # Fallback offset when spread_pct unavailable (3 bps)

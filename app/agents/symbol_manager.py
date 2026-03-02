@@ -741,7 +741,14 @@ class SymbolManager:
         # independently — no per-broker symbol cap, no exclusive held-symbol assignment.
         scaling_enabled = bool(routing_cfg.get("buying_power_scaling", True))
         if not scaling_enabled:
-            return {name: list(ordered) for name in broker_names}
+            result = {name: list(ordered) for name in broker_names}
+            for broker_name in list(result):
+                if "binance" not in broker_name.lower():
+                    result[broker_name] = [
+                        s for s in result[broker_name]
+                        if "/" not in s or s.upper().endswith("/USD")
+                    ]
+            return result
 
         # Collect per-broker buying power and held/open-order symbols
         broker_buying_power: dict[str, float] = {}
@@ -768,6 +775,16 @@ class SymbolManager:
             extras = broker_extras.get(broker_name, [])
             part = partitioned.get(broker_name, [])
             symbols_by_broker[broker_name] = list(dict.fromkeys(extras + part))
+        # Filter quote-currency-incompatible symbols per broker.
+        # Alpaca only supports /USD-quoted crypto; other stablecoin-quoted pairs (e.g.
+        # /USDT, /USDC) are Binance-only and must not appear in Alpaca batches.
+        for broker_name, syms in list(symbols_by_broker.items()):
+            if "binance" in broker_name.lower():
+                continue  # Binance supports all quote currencies
+            symbols_by_broker[broker_name] = [
+                s for s in syms
+                if "/" not in s or s.upper().endswith("/USD")
+            ]
         return symbols_by_broker
 
     def resolve_universe(
