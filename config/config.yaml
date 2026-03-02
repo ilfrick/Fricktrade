@@ -407,7 +407,7 @@ orchestrator:
     gap_reversal: 0.07
     earnings_drift: 0.04
   rl:
-    enabled: false
+    enabled: true
     model_type: lstm
     device: auto
     hidden_dim: 32
