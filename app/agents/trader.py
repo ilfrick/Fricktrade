@@ -1493,6 +1493,7 @@ class TradingAgent:
                 return None
             order_start = time.perf_counter()
             try:
+                _slices_enqueued = False
                 if slices:
                     order_id = None
                     for order_slice in slices:
@@ -1507,6 +1508,7 @@ class TradingAgent:
                             notional=order_slice.qty * last_price,
                             is_position_close=_is_closing_position,
                         )
+                    _slices_enqueued = True
                 else:
                     order_id = order_queue.enqueue(
                         symbol,
@@ -1545,7 +1547,7 @@ class TradingAgent:
                 strategy_label = action_strategy or (names[0] if names else None)
                 if strategy_label:
                     broker_state.pending_entry_strategy[symbol] = {"strategy": strategy_label, "ts": now}
-            if order_id and action in ("buy", "sell"):
+            if (order_id or _slices_enqueued) and action in ("buy", "sell"):
                 TRADES.labels(symbol=symbol, side=action).inc()
                 TRADES_BY_BROKER.labels(broker=broker_name, symbol=symbol, side=action).inc()
                 broker_state.last_trade_at = now

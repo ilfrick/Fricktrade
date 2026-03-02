@@ -212,12 +212,30 @@ class BinanceBroker(Broker):
             self._name, "get_account", self.client.get_account
         )
         usdt_free = usdt_locked = 0.0
+        non_stable: list[tuple[str, float]] = []
         for balance in account.get("balances", []):
-            if balance.get("asset") == "USDT":
-                usdt_free = float(balance.get("free", 0) or 0)
-                usdt_locked = float(balance.get("locked", 0) or 0)
-                break
+            asset = balance.get("asset", "")
+            free = float(balance.get("free", 0) or 0)
+            locked = float(balance.get("locked", 0) or 0)
+            qty = free + locked
+            if qty < 1e-8:
+                continue
+            if asset == "USDT":
+                usdt_free = free
+                usdt_locked = locked
+            elif asset not in _BINANCE_STABLECOINS:
+                non_stable.append((asset, qty))
+
         equity = usdt_free + usdt_locked
+        # Add market value of held crypto assets so equity doesn't appear to
+        # drop when USDT is spent buying — this prevents false VaR spikes.
+        for asset, qty in non_stable:
+            try:
+                ticker = self.client.get_symbol_ticker(symbol=f"{asset}USDT")
+                price = float(ticker.get("price", 0) or 0)
+                equity += qty * price
+            except Exception:
+                pass  # skip if price unavailable
         return {"equity": equity, "cash": usdt_free, "buying_power": usdt_free}
 
     def _spot_positions(self) -> list[dict]:
