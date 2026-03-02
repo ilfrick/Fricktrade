@@ -1782,7 +1782,7 @@ class TradingAgent:
                 side = str(response.side or "").lower()
                 status = str(response.status or "").lower()
                 if side == "buy" and status in ("completed", "rejected", "canceled", "timed_out"):
-                    est_price = response.filled_avg_price or 0.0
+                    est_price = float(response.filled_avg_price or 0)
                     resp_qty = float(response.qty or 0)
                     notional = resp_qty * est_price if est_price else float(response.notional if hasattr(response, "notional") else 0)
                     if notional > 0:
