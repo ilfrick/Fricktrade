@@ -828,6 +828,9 @@ def _fetch_bars_yfinance(
     limit_symbols: int | None,
 ) -> dict[str, pd.DataFrame]:
     symbols = symbols[:limit_symbols] if limit_symbols else symbols
+    # yfinance cannot fetch /USDT or other non-USD-quoted crypto pairs (Binance-only).
+    # Filter them out to avoid ERROR-level yfinance failures every cycle.
+    symbols = [s for s in symbols if "/" not in s or s.upper().endswith("/USD")]
     max_age = interval_to_seconds(cfg.interval) * max(cfg.market_cache_max_age_multiplier, 1)
     if cfg.market_cache_enabled:
         cache = MarketCache(
