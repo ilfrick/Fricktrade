@@ -482,7 +482,8 @@ class MarketCache:
     def _write_filtered_symbol_file(self, interval: str, symbol: str, record: dict) -> None:
         path = self._filtered_dir / interval
         path.mkdir(parents=True, exist_ok=True)
-        target = path / f"{symbol}.json"
+        safe_symbol = symbol.replace("/", "_")
+        target = path / f"{safe_symbol}.json"
         tmp = target.with_suffix(".tmp")
         try:
             tmp.write_text(json.dumps(record, indent=2), encoding="utf-8")
