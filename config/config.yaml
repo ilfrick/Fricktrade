@@ -940,6 +940,8 @@ pattern_trading:
 execution:
   symbol_executor_workers: 4
   stuck_cooldown_minutes: 15
+  stuck_blacklist_after: 2      # consecutive timed-out buys before 1h blacklist
+  stuck_blacklist_hours: 1      # hours to blacklist a symbol after repeated stuck orders
   limit_orders:
     enabled: true             # Use limit orders by default; market orders only for high urgency
     default_offset_bps: 3.0   # Fallback offset when spread_pct unavailable (3 bps)

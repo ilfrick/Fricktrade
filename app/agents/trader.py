@@ -297,6 +297,9 @@ class TradingAgent:
         self._exit_backoff_until: dict[tuple[str, str], datetime] = {}
         # Stuck-order cooldown: suppress buy re-submissions after timeout
         self._stuck_cooldown: dict[tuple[str, str], datetime] = {}
+        # Per-symbol stuck-count: blacklist symbol for 1h after 2 consecutive stuck buy timeouts
+        self._stuck_timeout_counts: dict[tuple[str, str], int] = {}
+        self._symbol_stuck_blacklist: dict[tuple[str, str], datetime] = {}
         # PDT-blocked symbols: suppress sell retries until next trading day
         self._pdt_blocked: set[tuple[str, str]] = set()
         self._pdt_blocked_date: date | None = None
@@ -1337,6 +1340,15 @@ class TradingAgent:
                         return None
                     else:
                         del self._stuck_cooldown[(broker_name, symbol)]
+                _bl_until = self._symbol_stuck_blacklist.get((broker_name, symbol))
+                if _bl_until:
+                    if datetime.now(timezone.utc) < _bl_until:
+                        self._record_skip(symbol, action, "stuck_blacklist", broker_name)
+                        self._emit_decision_trace(trace, "skip", "stuck_blacklist", "risk")
+                        return None
+                    else:
+                        del self._symbol_stuck_blacklist[(broker_name, symbol)]
+                        self._stuck_timeout_counts.pop((broker_name, symbol), None)
             if not risk_disabled and not _is_closing_position:
                 var_reason = self._account_metrics.var_limit_reason(broker_state)
                 if var_reason:
@@ -1607,6 +1619,8 @@ class TradingAgent:
                     },
                 )
             elif action in ("buy", "sell"):
+                if action == "buy" and not _is_closing_position:
+                    self._release_pending_notional(broker_name, order_notional)
                 self._record_skip(symbol, action, "order_failed", broker_name)
                 self._emit_decision_trace(trace, "skip", "order_failed", "execution")
             return order_id
@@ -1670,7 +1684,7 @@ class TradingAgent:
         with self._pending_buy_symbols_lock:
             self._pending_buy_symbols.pop((broker, symbol), None)
 
-    def _has_pending_buy(self, broker: str, symbol: str, max_age_seconds: int = 120) -> bool:
+    def _has_pending_buy(self, broker: str, symbol: str, max_age_seconds: int = 900) -> bool:
         with self._pending_buy_symbols_lock:
             ts = self._pending_buy_symbols.get((broker, symbol))
             if ts is None:
@@ -1773,7 +1787,10 @@ class TradingAgent:
                     if notional > 0:
                         self._release_pending_notional(response.broker, notional)
                     self._release_pending_buy(response.broker, response.symbol)
-                # Set stuck-order cooldown on buy timeout
+                    if status == "completed":
+                        # Successful fill resets the consecutive-stuck counter
+                        self._stuck_timeout_counts.pop((response.broker, response.symbol), None)
+                # Set stuck-order cooldown on buy timeout; blacklist after 2 consecutive timeouts
                 if status == "timed_out" and side == "buy":
                     cooldown_min = int(
                         self.cfg.get("execution", {}).get("stuck_cooldown_minutes", 15)
@@ -1785,6 +1802,24 @@ class TradingAgent:
                         "Stuck-order cooldown: %s/%s suppressed for %d min",
                         response.broker, response.symbol, cooldown_min,
                     )
+                    _stuck_key = (response.broker, response.symbol)
+                    _stuck_count = self._stuck_timeout_counts.get(_stuck_key, 0) + 1
+                    self._stuck_timeout_counts[_stuck_key] = _stuck_count
+                    blacklist_after = int(
+                        self.cfg.get("execution", {}).get("stuck_blacklist_after", 2)
+                    )
+                    if _stuck_count >= blacklist_after:
+                        blacklist_hours = int(
+                            self.cfg.get("execution", {}).get("stuck_blacklist_hours", 1)
+                        )
+                        self._symbol_stuck_blacklist[_stuck_key] = (
+                            datetime.now(timezone.utc) + timedelta(hours=blacklist_hours)
+                        )
+                        self._stuck_timeout_counts.pop(_stuck_key, None)
+                        logging.warning(
+                            "Stuck blacklist: %s/%s blacklisted for %dh after %d consecutive timeouts",
+                            response.broker, response.symbol, blacklist_hours, _stuck_count,
+                        )
                 # Release pending sell qty on terminal sell responses
                 if side == "sell" and status in ("completed", "rejected", "canceled"):
                     _ps_key = (response.broker, response.symbol)

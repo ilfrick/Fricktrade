@@ -127,6 +127,7 @@ class OrderQueue:
 
         if not started_immediately:
             logging.info("Order queued: %s %s qty=%s type=%s", side, symbol, qty, order_type)
+            return "queued"  # truthy sentinel: order accepted to heap, not yet submitted to broker
 
         return result_order_id
 
