@@ -1260,6 +1260,12 @@ class TradingAgent:
                 self._emit_decision_trace(trace, "hold", "strategies_hold", "signal")
                 return None
             if action == "exit":
+                # PDT guard: don't close equity positions that would trigger a day-trade violation
+                if (broker_name, symbol) in self._pdt_blocked or self._would_trigger_pdt_swing(broker_name, symbol, market_state):
+                    _slog.event("debug", "pdt_swing_hold", symbol=symbol, broker=broker_name,
+                                daytrade_count=(market_state.get("account_flags") or {}).get("daytrade_count"))
+                    self._emit_decision_trace(trace, "hold", "pdt_swing", "signal")
+                    return None
                 if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
                     self._open_order_mgr.remove_pending(symbol, broker=broker_name)
                 self.broker.close_position(symbol, broker=broker_name)
@@ -1272,6 +1278,14 @@ class TradingAgent:
                 if trace:
                     trace["action"] = "sell"
                     trace["sell_to_close"] = True
+
+            # PDT guard for sell actions (covers strategies returning "sell" directly)
+            if action == "sell" and "/" not in symbol:
+                if (broker_name, symbol) in self._pdt_blocked or self._would_trigger_pdt_swing(broker_name, symbol, market_state):
+                    _slog.event("debug", "pdt_swing_hold", symbol=symbol, broker=broker_name,
+                                daytrade_count=(market_state.get("account_flags") or {}).get("daytrade_count"))
+                    self._emit_decision_trace(trace, "hold", "pdt_swing", "signal")
+                    return None
 
             if self._open_order_mgr.has_pending(symbol, broker=broker_name):
                 if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
