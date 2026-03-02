@@ -85,7 +85,7 @@ class SentimentResult:
 
 class NewsSentimentAnalyzer:
     """
-    Analyzes news sentiment for trading symbols using Claude.
+    Analyzes news sentiment for trading symbols using Gemini.
 
     Results are cached per symbol (TTL: cache_ttl_seconds) to avoid
     redundant API calls within the same news cycle.
@@ -94,7 +94,7 @@ class NewsSentimentAnalyzer:
     def __init__(
         self,
         llm_client: LLMClient,
-        backend: str = "claude",
+        backend: str = "gemini",
         cache_ttl_seconds: int = 900,
         min_confidence_to_inject: float = 0.3,
     ):
