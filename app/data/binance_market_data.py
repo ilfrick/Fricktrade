@@ -328,9 +328,9 @@ class BinanceMarketDataProvider:
         self._cache_ts: float = 0.0
 
     def prepare(self, symbols: list[str]) -> None:
-        """Bulk-fetch bars for all /USDT (non-/USD) symbols and cache results."""
-        usdt_symbols = [s for s in symbols if "/" in s and not s.upper().endswith("/USD")]
-        if not usdt_symbols:
+        """Bulk-fetch bars for all crypto symbols (/USDT and /USD) and cache results."""
+        crypto_symbols = [s for s in symbols if "/" in s]
+        if not crypto_symbols:
             return
         cache_ttl = _interval_seconds(self._interval)
         now = datetime.now(timezone.utc).timestamp()
@@ -338,7 +338,7 @@ class BinanceMarketDataProvider:
             return  # Cache still fresh
 
         bars = fetch_binance_bars(
-            usdt_symbols,
+            crypto_symbols,
             self._client,
             self._interval,
             self._lookback_days,
@@ -372,22 +372,30 @@ class BinanceMarketDataProvider:
 # ---------------------------------------------------------------------------
 
 class _HybridMarketDataProvider:
-    """Routes /USDT symbols to BinanceMarketDataProvider, all others to primary."""
+    """Routes /USDT symbols to Binance; falls back to Binance for /USD crypto
+    symbols not served by primary (e.g. CRV/USD, LDO/USD not in Alpaca)."""
 
     def __init__(self, primary: Any, binance_provider: BinanceMarketDataProvider) -> None:
         self._primary = primary
         self._binance = binance_provider
 
     def prepare(self, symbols: list[str]) -> None:
-        non_usdt = [s for s in symbols if not ("/" in s and not s.upper().endswith("/USD"))]
-        usdt = [s for s in symbols if "/" in s and not s.upper().endswith("/USD")]
-        if non_usdt:
-            self._primary.prepare(non_usdt)
-        if usdt:
-            self._binance.prepare(usdt)
+        # Primary handles equities and /USD crypto it knows about
+        self._primary.prepare(symbols)
+        # Binance prepares all crypto (both /USDT and /USD) — covers gaps
+        crypto = [s for s in symbols if "/" in s]
+        if crypto:
+            self._binance.prepare(crypto)
 
     def __call__(self, symbol: str) -> dict:
+        # /USDT always goes to Binance
         if "/" in symbol and not symbol.upper().endswith("/USD"):
+            return self._binance(symbol)
+        # /USD crypto: try primary first, fall back to Binance if empty
+        if "/" in symbol:
+            state = self._primary(symbol)
+            if state.get("last_price") is not None:
+                return state
             return self._binance(symbol)
         return self._primary(symbol)
 

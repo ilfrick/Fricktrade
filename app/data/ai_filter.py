@@ -163,16 +163,21 @@ def score_symbols(
 
             bars = _fetch_bars(symbols, api_key, api_secret, config, limit_symbols=None)
 
-            # Supplement with Binance bars for /USDT symbols (not covered by Alpaca/yfinance)
-            _usdt_syms = [s for s in symbols if "/" in s and not s.upper().endswith("/USD")]
-            if _usdt_syms and brokers_cfg:
+            # Supplement with Binance bars for crypto symbols missing from yfinance/Alpaca:
+            # - /USDT symbols (never in Alpaca/yfinance)
+            # - /USD crypto that yfinance couldn't serve (CRV/USD, LDO/USD, ARB/USD etc.)
+            _missing_crypto = [
+                s for s in symbols
+                if "/" in s and s not in bars
+            ]
+            if _missing_crypto and brokers_cfg:
                 try:
                     _bn_client = _get_binance_client_from_brokers_cfg(brokers_cfg)
                     if _bn_client is not None:
                         from app.data.binance_market_data import fetch_binance_bars as _fetch_bn
-                        _bn_bars = _fetch_bn(_usdt_syms, _bn_client, config.interval, config.lookback_days)
+                        _bn_bars = _fetch_bn(_missing_crypto, _bn_client, config.interval, config.lookback_days)
                         bars.update(_bn_bars)
-                        logging.info("AI filter: merged Binance bars for %d /USDT symbols", len(_bn_bars))
+                        logging.info("AI filter: merged Binance bars for %d missing crypto symbols", len(_bn_bars))
                 except Exception as _bn_exc:
                     logging.warning("AI filter: Binance bar merge failed: %s", _bn_exc)
 
