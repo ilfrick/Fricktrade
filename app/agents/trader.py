@@ -355,7 +355,7 @@ class TradingAgent:
             )
             sent_cfg = llm_cfg.get("sentiment", {})
             if sent_cfg.get("enabled", False):
-                backend = llm_cfg.get("backends", {}).get("sentiment", "claude")
+                backend = llm_cfg.get("backends", {}).get("sentiment", "gemini")
                 self._llm_sentiment = NewsSentimentAnalyzer(
                     self._llm_client,
                     backend=backend,
@@ -365,7 +365,7 @@ class TradingAgent:
             ri_cfg = llm_cfg.get("risk_interpreter", {})
             if ri_cfg.get("enabled", False):
                 from app.llm.risk_interpreter import RiskEventInterpreter
-                ri_backend = llm_cfg.get("backends", {}).get("risk_interpreter", "claude")
+                ri_backend = llm_cfg.get("backends", {}).get("risk_interpreter", "gemini")
                 self._risk_interpreter = RiskEventInterpreter(self._llm_client, backend=ri_backend)
             mr_cfg = llm_cfg.get("macro_regime", {})
             if mr_cfg.get("enabled", False):
