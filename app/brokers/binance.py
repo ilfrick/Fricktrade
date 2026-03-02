@@ -24,6 +24,7 @@ PDT rules do not apply (crypto-only broker).
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from app.brokers.base import Broker
@@ -57,6 +58,35 @@ def _from_binance_symbol(symbol: str) -> str:
             base = sym[: -len(quote)]
             return f"{base}/{quote}"
     return symbol
+
+
+# Process-level cache: binance_symbol → LOT_SIZE stepSize
+_LOT_STEP_CACHE: dict[str, float] = {}
+
+
+def _get_lot_step(client: Any, binance_sym: str) -> float:
+    """Return LOT_SIZE stepSize for a Binance symbol (cached per process)."""
+    if binance_sym in _LOT_STEP_CACHE:
+        return _LOT_STEP_CACHE[binance_sym]
+    try:
+        info = client.get_symbol_info(binance_sym)
+        if info:
+            for f in info.get("filters", []):
+                if f.get("filterType") == "LOT_SIZE":
+                    step = float(f.get("stepSize", 1.0) or 1.0)
+                    _LOT_STEP_CACHE[binance_sym] = step
+                    return step
+    except Exception:
+        pass
+    return 1.0  # safe default: floor to integer
+
+
+def _floor_to_step(qty: float, step: float) -> float:
+    """Floor qty to the nearest multiple of step."""
+    if step <= 0:
+        return qty
+    factor = 1.0 / step
+    return math.floor(qty * factor) / factor
 
 
 class BinanceBroker(Broker):
@@ -270,6 +300,10 @@ class BinanceBroker(Broker):
     def _spot_place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         binance_sym = _to_binance_symbol(symbol)
         side_upper = side.upper()
+        step = _get_lot_step(self.client, binance_sym)
+        adj_qty = _floor_to_step(qty, step)
+        if adj_qty <= 0:
+            raise ValueError(f"Quantity {qty} floors to 0 for {symbol} (step={step})")
 
         def _submit() -> Any:
             if str(order_type).lower() == "limit":
@@ -278,11 +312,11 @@ class BinanceBroker(Broker):
                     raise ValueError("limit_price required for limit orders")
                 return self.client.order_limit(
                     symbol=binance_sym, side=side_upper,
-                    quantity=str(qty), price=str(float(limit_price)),
+                    quantity=str(adj_qty), price=str(float(limit_price)),
                     timeInForce="GTC",
                 )
             return self.client.order_market(
-                symbol=binance_sym, side=side_upper, quantity=str(qty)
+                symbol=binance_sym, side=side_upper, quantity=str(adj_qty)
             )
 
         order = record_broker_call(self._name, "place_order", _submit)
@@ -301,11 +335,16 @@ class BinanceBroker(Broker):
                 break
         if free_qty < 1e-8:
             return
+        step = _get_lot_step(self.client, binance_sym)
+        sell_qty = _floor_to_step(free_qty, step)
+        if sell_qty < step:
+            logging.info("Binance close_position %s: qty %s below step %s, skipping.", symbol, free_qty, step)
+            return
         try:
             order = record_broker_call(
                 self._name, "close_position_sell",
                 lambda: self.client.order_market_sell(
-                    symbol=binance_sym, quantity=str(free_qty)
+                    symbol=binance_sym, quantity=str(sell_qty)
                 ),
             )
             self._register_order(order, binance_sym)
