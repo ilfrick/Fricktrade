@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -16,7 +16,7 @@ def should_restart(started_at: datetime) -> bool:
     if not flag.exists():
         return False
     try:
-        mtime = datetime.fromtimestamp(flag.stat().st_mtime)
+        mtime = datetime.fromtimestamp(flag.stat().st_mtime, tz=timezone.utc)
     except OSError:
         return False
     return mtime > started_at
