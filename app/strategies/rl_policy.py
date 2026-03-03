@@ -98,6 +98,14 @@ class RLPolicyStrategy(Strategy):
         portfolio = market_state.get("portfolio", {}) if isinstance(market_state, dict) else {}
         cash_pct = float(portfolio.get("cash_pct", 1.0) or 1.0)
         buying_power_pct = float(portfolio.get("buying_power_pct", cash_pct) or cash_pct)
+
+        # Sync position from actual portfolio so the model sees the real holding
+        # for THIS symbol, not a stale/cross-contaminated state from another symbol.
+        symbol = market_state.get("symbol", "") if isinstance(market_state, dict) else ""
+        if symbol:
+            _positions = portfolio.get("positions", {})
+            _qty = float(_positions.get(symbol, {}).get("qty", 0) or 0)
+            self.position = 1.0 if _qty > 0 else (-1.0 if _qty < 0 else 0.0)
         risk_outcome = market_state.get("risk_outcome") if isinstance(market_state, dict) else None
         account_flags = market_state.get("account_flags") if isinstance(market_state, dict) else None
         risk_features = risk_feature_vector(
