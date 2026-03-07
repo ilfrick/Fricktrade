@@ -394,7 +394,7 @@ strategy:
       pdt_min_equity: 25000
       min_buying_power: 50
 orchestrator:
-  mode: weight
+  mode: select
   top_k: 99
   min_score: 0.0
   strategy_weights:
