@@ -2,6 +2,8 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 import logging
+import time
+from datetime import datetime, timezone
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest, LimitOrderRequest
@@ -10,11 +12,14 @@ from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
 from app.brokers.base import Broker
 from app.monitoring.broker_metrics import record_broker_call
 
+_DEPOSIT_CACHE_TTL = 600  # seconds
+
 
 class AlpacaBroker(Broker):
     def __init__(self, api_key: str, api_secret: str, base_url: str, paper: bool = True, name: str = "alpaca"):
         self.client = TradingClient(api_key, api_secret, paper=paper, url_override=base_url)
         self._name = name
+        self._deposit_cache: tuple[float, float] | None = None  # (timestamp, amount)
 
     def is_connected(self) -> bool:
         try:
@@ -23,6 +28,38 @@ class AlpacaBroker(Broker):
             return bool(account_data)
         except Exception:
             return False
+
+    def get_today_deposits(self) -> float:
+        now = time.monotonic()
+        if self._deposit_cache is not None:
+            ts, amount = self._deposit_cache
+            if now - ts < _DEPOSIT_CACHE_TTL:
+                return amount
+        amount = self._fetch_today_deposits()
+        self._deposit_cache = (now, amount)
+        return amount
+
+    def _fetch_today_deposits(self) -> float:
+        try:
+            from alpaca.trading.requests import GetAccountActivitiesRequest  # type: ignore[import]
+        except ImportError:
+            return 0.0
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        total = 0.0
+        try:
+            req = GetAccountActivitiesRequest(
+                activity_types=["CSD", "JNLC"],
+                after=today_start,
+            )
+            activities = self.client.get_account_activities(req)
+            for act in (activities or []):
+                d = act.dict() if hasattr(act, "dict") else dict(act)
+                net = float(d.get("net_amount", 0) or 0)
+                if net > 0:
+                    total += net
+        except Exception as exc:
+            logging.debug("Alpaca get_today_deposits failed: %s", exc)
+        return total
 
     def get_account(self) -> dict:
         def _check_account_data(account_obj) -> bool:
@@ -40,6 +77,7 @@ class AlpacaBroker(Broker):
         data = account.dict()
         if "shorting_enabled" in data:
             data["shorting_enabled"] = bool(data.get("shorting_enabled"))
+        data["today_deposits"] = self.get_today_deposits()
         return data
 
     def get_positions(self) -> list[dict]:

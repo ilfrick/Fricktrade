@@ -38,10 +38,12 @@ class BrokerRouter(Broker):
             total_equity += equity
             total_cash += cash
             total_buying_power += buying_power
+            today_deposits = float(account.get("today_deposits", 0) or 0) if isinstance(account, dict) else 0.0
             per_broker[name] = {
                 "equity": equity,
                 "cash": cash,
                 "buying_power": buying_power,
+                "today_deposits": today_deposits,
                 "raw": account,
             }
         return {

@@ -1032,6 +1032,10 @@ See `docs/STATUS.md` for the full detail. Summary:
 
 **Binance OHLCV coverage** (`app/data/binance_market_data.py`, `app/main.py`, `app/data/ai_filter.py`): New module providing `fetch_binance_bars()`, `BinanceMarketDataProvider`, and `_HybridMarketDataProvider`. All `/USDT`-quoted symbols (DOT/USDT, ADA/USDT, LDO/USDT …) now get bar data via Binance `get_klines()`. The hybrid provider is wired in `app/main.py` and the AI filter. Training scripts (`collect_crypto_training_data.py`, `collect_return_ranker_data.py`) also have Binance fallback paths.
 
+**Binance USDC equity fix** (`app/brokers/binance.py`): `_spot_account()` previously only counted USDT toward equity; USDC and other USD-pegged stablecoins were silently omitted. Added `_USD_PEGGED_STABLECOINS` frozenset; all USD-pegged stablecoin balances now summed at 1:1 into equity. `cash`/`buying_power` remain USDT-only.
+
+**Deposit-aware P&L** (`app/brokers/base.py`, `app/brokers/alpaca.py`, `app/brokers/binance.py`, `app/brokers/router.py`, `app/agents/trader.py`, `app/agents/account_metrics.py`): Cash injections no longer appear as trading profit. Each broker implements `get_today_deposits() → float` with 10-min cache (Alpaca: `GetAccountActivitiesRequest(activity_types=["CSD","JNLC"])`, Binance: `get_deposit_history(startTime=today_ms)`). Value exposed via `get_account()["today_deposits"]`; `BrokerRouter` forwards it per-broker. `BrokerState.day_deposits_baseline` captures deposits already in opening equity; `account_metrics.update_broker_equity()` subtracts only *new* intraday deposits before calling `update_daily_loss()`.
+
 **API descriptions** (`app/api/server.py`): Added ~25 missing `_DESCRIPTIONS` entries for `brokers.binance.*`, `risk.crypto.*`, `risk.pdt.*`, and several `data.*` keys.
 
 **Grafana dashboards**: Added "Connectivity" (green/red) and "API Errors 1h" (green/yellow/red) stat panels to all account dashboards. Template updated; `account_alpaca_higher.json` and `account_alpaca_realistic.json` now git-tracked. All three account dashboards have the same top-row layout: Broker Market Status (w=12) + Connectivity (w=6) + API Errors (w=6).

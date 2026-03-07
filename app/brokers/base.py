@@ -33,6 +33,10 @@ class Broker(ABC):
     def cancel_order(self, order_id: str) -> None:
         raise NotImplementedError
 
+    def get_today_deposits(self) -> float:
+        """Return net USD value of external deposits received today. Override per broker."""
+        return 0.0
+
     def get_asset_class(self, symbol: str) -> str:
         """Return 'crypto' or 'equities' based on symbol format."""
         return "crypto" if "/" in symbol else "equities"

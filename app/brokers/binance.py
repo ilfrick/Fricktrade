@@ -25,7 +25,11 @@ from __future__ import annotations
 
 import logging
 import math
+import time
+from datetime import datetime, timezone
 from typing import Any
+
+_DEPOSIT_CACHE_TTL = 600  # seconds
 
 from app.brokers.base import Broker
 from app.monitoring.broker_metrics import record_broker_call
@@ -123,6 +127,7 @@ class BinanceBroker(Broker):
         # FUTURES_DEMO_URL (futures) — no manual URL overrides needed.
         _demo = bool(self._base_url and "demo" in self._base_url.lower())
         self.client = Client(api_key, api_secret, testnet=testnet, demo=_demo)
+        self._deposit_cache: tuple[float, float] | None = None  # (monotonic_ts, amount)
 
         _mode = ("futures" if futures else "spot") + (" demo" if _demo else " live")
         logging.info("BinanceBroker(%s): %s", name, _mode)
@@ -179,6 +184,43 @@ class BinanceBroker(Broker):
         except Exception as exc:
             self._log_auth_error(exc)
             return False
+
+    def get_today_deposits(self) -> float:
+        now = time.monotonic()
+        if self._deposit_cache is not None:
+            ts, amount = self._deposit_cache
+            if now - ts < _DEPOSIT_CACHE_TTL:
+                return amount
+        amount = self._fetch_today_deposits()
+        self._deposit_cache = (now, amount)
+        return amount
+
+    def _fetch_today_deposits(self) -> float:
+        if self._futures:
+            return 0.0  # futures wallet balance already covers all collateral
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_ms = int(today_start.timestamp() * 1000)
+        total = 0.0
+        try:
+            deposits = self.client.get_deposit_history(startTime=start_ms)
+            for d in (deposits or []):
+                # Only count confirmed deposits (status 1=success, 6=credited)
+                if int(d.get("status", 0)) not in (1, 6):
+                    continue
+                asset = d.get("coin", "") or d.get("asset", "")
+                amount = float(d.get("amount", 0) or 0)
+                if asset in _USD_PEGGED_STABLECOINS:
+                    total += amount
+                elif amount > 0:
+                    try:
+                        ticker = self.client.get_symbol_ticker(symbol=f"{asset}USDT")
+                        price = float(ticker.get("price", 0) or 0)
+                        total += amount * price
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logging.debug("Binance get_today_deposits failed: %s", exc)
+        return total
 
     def get_account(self) -> dict:
         if self._futures:
@@ -275,7 +317,8 @@ class BinanceBroker(Broker):
                 equity += qty * price
             except Exception:
                 pass  # skip if price unavailable
-        return {"equity": equity, "cash": usdt_free, "buying_power": usdt_free}
+        return {"equity": equity, "cash": usdt_free, "buying_power": usdt_free,
+                "today_deposits": self.get_today_deposits()}
 
     def _spot_positions(self) -> list[dict]:
         account = record_broker_call(

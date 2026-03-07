@@ -110,6 +110,7 @@ class BrokerState:
     var_cvar: dict[str, float] = field(default_factory=dict)
     day_start_date: date | None = None
     day_start_equity: float | None = None
+    day_deposits_baseline: float = 0.0
     last_trade_at: datetime | None = None
     pending_entry_strategy: dict[str, dict[str, object]] = field(default_factory=dict)
     position_state: dict[str, dict[str, object]] = field(default_factory=dict)

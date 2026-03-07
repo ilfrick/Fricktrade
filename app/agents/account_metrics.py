@@ -80,7 +80,8 @@ class AccountMetricsUpdater:
         return self._var_cvar
 
     def update_broker_equity(
-        self, broker_name: str, broker_state, equity: float, last_equity: float | None = None
+        self, broker_name: str, broker_state, equity: float,
+        last_equity: float | None = None, today_deposits: float = 0.0
     ) -> None:
         if broker_state.equity_start is None:
             broker_state.equity_start = equity
@@ -98,8 +99,19 @@ class AccountMetricsUpdater:
         if broker_state.day_start_date != today or broker_state.day_start_equity is None:
             broker_state.day_start_date = today
             broker_state.day_start_equity = equity
+            # Capture deposits already included in today's opening equity so they
+            # are not counted as trading profit later in the day.
+            broker_state.day_deposits_baseline = today_deposits
         if broker_state.day_start_equity:
-            day_pnl_pct = (equity - broker_state.day_start_equity) / broker_state.day_start_equity * 100.0
+            # Only count deposits that arrived AFTER the day baseline was set.
+            new_deposits = max(0.0, today_deposits - broker_state.day_deposits_baseline)
+            trading_equity = equity - new_deposits
+            day_pnl_pct = (trading_equity - broker_state.day_start_equity) / broker_state.day_start_equity * 100.0
+            if new_deposits > 0:
+                logging.info(
+                    "%s: excluding %.2f intraday deposit from day P&L (raw day P&L would be %.2f%%)",
+                    broker_name, new_deposits, (equity - broker_state.day_start_equity) / broker_state.day_start_equity * 100.0,
+                )
             broker_state.risk.update_daily_loss(day_pnl_pct)
 
     def update(self, broker, broker_states: dict, broker_name: str) -> dict | None:
@@ -128,9 +140,14 @@ class AccountMetricsUpdater:
                     ACCOUNT_BUYING_POWER_BY_BROKER.labels(broker=name).set(buying_power)
                     ACCOUNT_INVESTED_BY_BROKER.labels(broker=name).set(equity - cash)
                     broker_equities[str(name)] = equity
+                    broker_today_deposits = float(details.get("today_deposits", 0) or 0)
                     bstate = broker_states.get(str(name))
                     if bstate:
-                        self.update_broker_equity(str(name), bstate, equity, last_equity=broker_last_equity)
+                        self.update_broker_equity(
+                            str(name), bstate, equity,
+                            last_equity=broker_last_equity,
+                            today_deposits=broker_today_deposits,
+                        )
                         bstate.buying_power = buying_power
             else:
                 total_val, cash_val, buying_power_val = extract_equity_cash(account)
@@ -138,9 +155,10 @@ class AccountMetricsUpdater:
             return account
         if not broker_equities:
             broker_equities[broker_name] = total_val
+            single_deposits = float(account.get("today_deposits", 0) or 0) if isinstance(account, dict) else 0.0
             bstate = broker_states.get(broker_name)
             if bstate:
-                self.update_broker_equity(broker_name, bstate, total_val)
+                self.update_broker_equity(broker_name, bstate, total_val, today_deposits=single_deposits)
         if self._equity_start is None:
             self._equity_start = total_val
         if self._equity_peak is None or total_val > self._equity_peak:
