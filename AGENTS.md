@@ -10,15 +10,15 @@ This repo contains a Python intraday trading agent for US/EU equities and 24/7 c
 - `app/main.py` is the CLI entrypoint with subcommands: `trade`, `backtest`, `download`, `api`, `train`, `online-train`, `evaluate`, `ingest`.
 - Core loop: `app/agents/trader.py` orchestrates the trading loop, delegating to extracted modules:
   - `app/agents/symbol_manager.py` (symbol selection, AI filter, venue mapping)
-  - `app/agents/market_state.py` (typed market state dataclass)
   - `app/agents/performance.py` (trade recording, stats, kill switch)
   - `app/agents/open_orders.py` (open order cache and pending-order checks)
   - `app/agents/account_metrics.py` (equity tracking, drawdown, VaR/CVaR)
+  - `app/agents/orchestrator.py` (SimpleOrchestrator + RLStrategyOrchestrator with LSTM)
   - `app/risk/manager.py` + `app/risk/config.py` (risk limits, cooldown, exposure caps, order limits)
   - `app/utils/structured_log.py` (structured JSON logging for trade/risk events)
   - `app/utils/volatility.py` (shared realized volatility calculation)
-  - `app/strategies/intraday_momentum.py` + `app/execution/executor.py`.
-- Broker adapters: `app/brokers/alpaca.py`, `app/brokers/ibkr.py`, `app/brokers/binance.py` (Spot), abstract base in `app/brokers/base.py`.
+  - `app/execution/executor.py` + `app/execution/algos.py` (SmartOrderRouter, TWAP/VWAP/POV).
+- Broker adapters: `app/brokers/alpaca.py`, `app/brokers/ibkr.py`, `app/brokers/binance.py` (Spot + demo), abstract base in `app/brokers/base.py`. Binance market data via `app/data/binance_market_data.py` (`fetch_binance_bars`, `BinanceMarketDataProvider`, `_HybridMarketDataProvider`).
 - Backtesting: `app/backtest/agent_engine.py` runs the real `TradingAgent` loop on CSVs; legacy SMA lives in `app/backtest/engine.py`.
 - Learning (RL): `app/learning/` for env, data loading, training, and online updates; `app/strategies/rl_policy.py` for inference.
 - Data download: `app/data/downloader.py` uses `yfinance` with retry and rate limiting.
@@ -161,11 +161,11 @@ docker compose run --rm api
 - Risk and strategy parameters live in `config/config.yaml`.
 - Learning config lives under `learning` (enable policy, guardrail mode, feature set, and optional online updates). `learning.device: auto` uses CUDA if available.
 - Pattern Trading config lives under `pattern_trading` and is enabled via `strategy.name: pattern_trading`.
-- Multi-strategy config uses `strategy.names` with `strategy.combine` set to `priority` or `vote` (enabled by default in `config/config.yaml`).
+- Multi-strategy config uses `strategy.names` (currently: `trend_following`, `factor_model`, `pattern_trading`, `stat_arb_pairs`, `top_movers_rf`, `crypto_momentum`, `crypto_mean_reversion`, `gap_reversal`, `earnings_drift`, `rl_policy`) with `strategy.combine: vote`. Vote mode: each strategy casts one vote (buy/sell/hold); majority wins. On a tie, `rl_policy`'s signal is used as tiebreaker; final fallback is hold.
 - Additional strategies include `trend_following`, `factor_model`, `stat_arb_pairs`, and `market_maker` under `strategy.params.*`.
 - Execution algos (TWAP/VWAP/POV) are configured under `execution.algos`.
 - Volatility targeting is configured under `risk.vol_targeting`.
-- AI strategy orchestration uses `orchestrator.*` with an RL policy-gradient model to score strategies per symbol and select the top candidates each cycle (LSTM or MLP configured under `orchestrator.rl.*`).
+- AI strategy orchestration uses `orchestrator.*`. `orchestrator.rl.enabled: true` activates `RLStrategyOrchestrator` (LSTM), which selects `top_k` strategies per cycle via learned probabilities. The LSTM trains online from price-move rewards; until it has sufficient data it outputs near-uniform probabilities. `orchestrator.mode: weight` returns probability-weighted strategy scores to `_combine_signals()`.
 - Fee-aware RL is available as `rl_policy_fees`, using broker-specific fee config under `brokers.<name>.fees` plus guardrails in `strategy.fee_aware`.
 - Strategy performance reporting + kill switch are configured under `strategy.performance.*` (rolling win rate/drawdown checks).
 - Orchestrator pretraining runs out-of-band by default (`orchestrator.rl.pretrain.in_trader: false`); use `python -m app.main pretrain-orchestrator` in Docker to warm-start the model.
@@ -199,7 +199,7 @@ docker compose run --rm api
 
 ## Behavior Details
 
-- Trading loop pulls live data via `data.provider` (alpaca primary; yfinance fallback) and iterates over the active symbol set (static list or dynamic scanner/AI filter).
+- Trading loop pulls live data via `data.provider` (alpaca primary; yfinance fallback; Binance for `/USDT`-quoted symbols via `_HybridMarketDataProvider`) and iterates over the active symbol set (static list or dynamic scanner/AI filter).
 - Equity trading is paused when equity markets are closed; crypto symbols continue 24/7.
 - Strategy emits `buy`, `sell`, `exit`, or `hold`; `exit` closes the position.
 - Risk checks are threshold-based and order sizing is cash-aware using broker equity/cash plus exposure caps.
@@ -208,7 +208,7 @@ docker compose run --rm api
 - Agent-aligned backtest loads per-symbol CSVs from `backtest.data_dir` (legacy SMA engine uses the first matching CSV).
 - API `/config` masks Alpaca keys before returning; `/config/update` accepts YAML updates and `/restart` triggers a graceful container restart.
 - Grafana auto-provisions the "Fricktrade Overview" dashboard with trade counts/rates, PnL, and drawdown.
-- Per-account dashboards are dynamically generated from `.env` by `scripts/generate_grafana_dashboards.py` (called by `compose_up.sh` before stack start). Template: `grafana/provisioning/dashboards/_template_account.json.template`.
+- Per-account dashboards are dynamically generated from `.env` by `scripts/generate_grafana_dashboards.py` (called by `compose_up.sh` before stack start). Template: `grafana/provisioning/dashboards/_template_account.json.template`. All account dashboards include a top row: Broker Market Status (w=12), Connectivity stat (green/red, broker API call count), and API Errors 1h (green/yellow/red). Account-specific JSONs for Alpaca accounts are now git-tracked (force-added).
 - Dashboard also shows active symbols, active broker, and account equity/cash/invested from broker account data. Skipped orders are available via `orders_skipped_total` metrics.
 
 ## LLM Integration (`app/llm/`)
@@ -217,16 +217,17 @@ Claude and Gemini are used on slow, non-critical paths — never in the real-tim
 
 | Module | Backend | Trigger | Purpose |
 |--------|---------|---------|---------|
-| `client.py` | Both | On demand | Unified LLMClient with daily budget circuit breaker ($5/day default), retry/backoff, `critical=True` bypass for risk calls |
-| `sentiment.py` | Claude | Per-symbol, market hours | Scores news sentiment −1.0→+1.0; injects `llm_sentiment`, `llm_sentiment_bias`, `llm_risk_flag` into `market_state` |
-| `symbols_filter.py` | Gemini | Pre-market (optional) | Selects top N symbols from candidates with sector/momentum context |
+| `client.py` | Both | On demand | Unified LLMClient with daily budget circuit breaker ($5/day default), retry/backoff, `critical=True` bypass for risk calls. Default backends: `ClaudeBackend` (`claude-sonnet-4-6`) and `GeminiBackend` (`gemini-2.5-flash`, thinking disabled). |
+| `sentiment.py` | Gemini | Per-symbol, market hours | Scores news sentiment −1.0→+1.0; injects `llm_sentiment`, `llm_sentiment_bias`, `llm_risk_flag` into `market_state` |
+| `macro_regime.py` | Gemini | 4h TTL cache | Classifies macro regime (5 states) using FRED data (VIX, DGS10, DXY) + Gemini; overrides strategy weights per regime |
+| `symbols_filter.py` | Gemini | Pre-market (optional, disabled) | Selects top N symbols from candidates with sector/momentum context |
 | `post_session.py` | Gemini | After market close | Grades session, identifies findings with PnL impact estimates, saves JSON report |
-| `meta_orchestrator.py` | Claude | Weekly (Sunday) | Reviews session reports, recommends strategy weight changes (human confirmation required) |
-| `risk_interpreter.py` | Claude | On risk alert | Triages drift/drawdown alerts: structural break vs noise; recommends action |
+| `meta_orchestrator.py` | Gemini | Weekly (Sunday, disabled until 3+ reports) | Reviews session reports, recommends strategy weight changes (human confirmation required) |
+| `risk_interpreter.py` | Gemini | On risk alert | Triages drift/drawdown alerts: structural break vs noise; recommends action |
 
 **Config keys:** `llm.enabled`, `llm.sentiment.enabled`, `llm.post_session.enabled`, etc.
 
-**Required env vars:** `ANTHROPIC_API_KEY` (Claude), `GOOGLE_GEMINI_API_KEY` (Gemini).
+**Required env vars:** `ANTHROPIC_API_KEY` (Claude, optional if all backends are Gemini), `GOOGLE_GEMINI_API_KEY` (Gemini). Gemini 2.5 Flash is the default for all modules; Claude Sonnet 4.6 is the fallback if `LLM_CLAUDE_MODEL` is set.
 
 **Sentiment pipeline:** `news.enabled: true` → `_refresh_news_cache()` fetches both catalyst bools AND raw articles → `_enrich_market_state()` calls `NewsSentimentAnalyzer` per symbol (15-min TTL cache) → injects into `market_state` for strategy consumption.
 
@@ -242,7 +243,7 @@ Claude and Gemini are used on slow, non-critical paths — never in the real-tim
 
 ## Testing
 
-Pytest covers core components. For changes, run:
+Pytest covers core components (182 passed, 17 skipped without tensorflow/prometheus). For changes, run:
 - `pytest` or `python -m pytest` (local/testenv).
 - `python -m app.main backtest` in Docker.
 - `/health` and `/config` endpoints via the `api` service.
@@ -1016,3 +1017,33 @@ See `docs/STATUS.md` for the full detail. Summary:
 8. Intent semantic separation: `enter_long` / `exit_long` / `enter_short` / `exit_short`
 9. OMS pending-qty validation to prevent oversell at queue level
 10. Extended-hours wiring for earnings-drift pre-market execution
+
+---
+
+## Session Log — 2026-03-07
+
+**Gemini 2.5 Flash migration** (`app/llm/client.py`): Switched default Gemini model from `gemini-2.5-pro` to `gemini-2.5-flash`. Gemini 2.5 Pro mandates thinking mode (`thinking_budget: 0` is rejected with HTTP 400); Flash supports disabling thinking and is ~33× cheaper (INPUT $0.075/M, OUTPUT $0.30/M). Updated pricing constants. Added fallback text extraction from `response.candidates[].content.parts[]` when `response.text` is None (thinking-mode artefact). All LLM module backends switched to `gemini` in config.
+
+**RL policy enabled** (`config/config.yaml`, `app/strategies/rl_policy.py`): Added `rl_policy` to `strategy.names` with orchestrator weight 0.04. Fixed repeat-buy bug: `RLPolicyStrategy.generate_signal()` now syncs `self.position` from `market_state["portfolio"]["positions"][symbol]["qty"]` before building the observation — prevents the shared instance treating already-held symbols as unowned after a container restart.
+
+**Vote-based signal combination** (`app/agents/trader.py`): Added `combine: vote` mode to `_combine_signals()`. Each selected strategy casts one vote (buy/sell/hold); majority wins. On a tie, `rl_policy`'s signal is used as the tiebreaker (it's already generated, zero cost); if `rl_policy` was not selected or also tied, the fallback is `hold`. Switched `strategy.combine` from `weight` to `vote` in config.
+
+**Binance dust conversion** (`app/brokers/binance.py`): In `_spot_close_position()`, when `free_qty < LOT_SIZE step`, now calls `client.transfer_dust(asset=[base])` to convert the stranded amount to BNB instead of silently skipping. Graceful fallback on API failure.
+
+**Binance OHLCV coverage** (`app/data/binance_market_data.py`, `app/main.py`, `app/data/ai_filter.py`): New module providing `fetch_binance_bars()`, `BinanceMarketDataProvider`, and `_HybridMarketDataProvider`. All `/USDT`-quoted symbols (DOT/USDT, ADA/USDT, LDO/USDT …) now get bar data via Binance `get_klines()`. The hybrid provider is wired in `app/main.py` and the AI filter. Training scripts (`collect_crypto_training_data.py`, `collect_return_ranker_data.py`) also have Binance fallback paths.
+
+**API descriptions** (`app/api/server.py`): Added ~25 missing `_DESCRIPTIONS` entries for `brokers.binance.*`, `risk.crypto.*`, `risk.pdt.*`, and several `data.*` keys.
+
+**Grafana dashboards**: Added "Connectivity" (green/red) and "API Errors 1h" (green/yellow/red) stat panels to all account dashboards. Template updated; `account_alpaca_higher.json` and `account_alpaca_realistic.json` now git-tracked. All three account dashboards have the same top-row layout: Broker Market Status (w=12) + Connectivity (w=6) + API Errors (w=6).
+
+**Ollama restarted**: `fricktrade-ollama-1` was down (DNS resolution failure logged as `WARNING` every ~2.5 min). Container restarted; `llama3.2:3b` loaded on GPU with 24h keep-alive. Return ranker catalyst scoring restored.
+
+**P1 items resolved this session**:
+- RL policy repeat-buy bug fixed (position sync from portfolio)
+- Vote mode eliminates weight-sum noise; `rl_policy` acts as lightweight tiebreaker
+
+**Known open issues**:
+- Binance portfolio fully deployed (rl_policy cash exhaustion Mar 3); recovering as positions close
+- `RLStrategyOrchestrator` LSTM outputs near-uniform probabilities (untrained); consider disabling until sufficient training data
+- `stat_arb_pairs` produced zero signals all week — investigate pair config
+- Memory growth +2–4 MB/min in long-running trader process
