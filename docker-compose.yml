@@ -15,6 +15,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    entrypoint: ["/bin/sh", "-c", "sleep 20 && exec /bin/ollama serve"]
     environment:
       - OLLAMA_KEEP_ALIVE=24h  # Keep model loaded in memory; don't unload after 5-min default
       # CUDA_VISIBLE_DEVICES/NVIDIA_VISIBLE_DEVICES set by docker-compose.gpu.yml when GPU present
@@ -28,7 +29,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 120s
 
   trader:
     build:
