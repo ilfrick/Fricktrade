@@ -39,6 +39,11 @@ _BINANCE_STABLECOINS = frozenset([
     "PYUSD", "GUSD", "EUR", "EURI", "GBP", "TRY", "BRL", "ARS",
 ])
 
+# USD-pegged stablecoins counted at 1:1 in equity (subset of _BINANCE_STABLECOINS)
+_USD_PEGGED_STABLECOINS = frozenset([
+    "USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDS", "USDP", "PYUSD", "GUSD",
+])
+
 
 def _to_binance_symbol(symbol: str) -> str:
     """Convert 'BTC/USD' or 'BTC/USDT' → 'BTCUSDT'."""
@@ -242,6 +247,7 @@ class BinanceBroker(Broker):
             self._name, "get_account", self.client.get_account
         )
         usdt_free = usdt_locked = 0.0
+        usd_stable_free = usd_stable_locked = 0.0
         non_stable: list[tuple[str, float]] = []
         for balance in account.get("balances", []):
             asset = balance.get("asset", "")
@@ -250,13 +256,16 @@ class BinanceBroker(Broker):
             qty = free + locked
             if qty < 1e-8:
                 continue
-            if asset == "USDT":
-                usdt_free = free
-                usdt_locked = locked
+            if asset in _USD_PEGGED_STABLECOINS:
+                usd_stable_free += free
+                usd_stable_locked += locked
+                if asset == "USDT":
+                    usdt_free = free
+                    usdt_locked = locked
             elif asset not in _BINANCE_STABLECOINS:
                 non_stable.append((asset, qty))
 
-        equity = usdt_free + usdt_locked
+        equity = usd_stable_free + usd_stable_locked
         # Add market value of held crypto assets so equity doesn't appear to
         # drop when USDT is spent buying — this prevents false VaR spikes.
         for asset, qty in non_stable:
