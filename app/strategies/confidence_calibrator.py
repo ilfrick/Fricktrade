@@ -24,6 +24,34 @@ class ConfidenceCalibrator:
         # cached bin edges and win rates
         self._bin_edges: list[float] = [i / n_bins for i in range(n_bins + 1)]
 
+    def to_dict(self) -> dict:
+        """Serialize state for checkpoint persistence."""
+        return {
+            "window": self._window,
+            "n_bins": self._n_bins,
+            "min_samples": self._min_samples,
+            "history": {
+                strategy: list(buf)
+                for strategy, buf in self._history.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ConfidenceCalibrator":
+        """Restore state from a checkpoint dict."""
+        obj = cls(
+            window=data.get("window", 200),
+            n_bins=data.get("n_bins", 5),
+            min_samples=data.get("min_samples", 30),
+        )
+        for strategy, entries in data.get("history", {}).items():
+            buf: deque[tuple[float, bool]] = deque(maxlen=obj._window)
+            for item in entries:
+                if isinstance(item, (list, tuple)) and len(item) == 2:
+                    buf.append((float(item[0]), bool(item[1])))
+            obj._history[strategy] = buf
+        return obj
+
     def record(self, strategy: str, raw_confidence: float, was_profitable: bool) -> None:
         buf = self._history.setdefault(strategy, deque(maxlen=self._window))
         buf.append((max(0.0, min(1.0, raw_confidence)), was_profitable))

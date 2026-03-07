@@ -3000,6 +3000,7 @@ class TradingAgent:
             "equity_start": self._account_metrics.equity_start,
             "equity_peak": self._account_metrics.equity_peak,
             "broker_states": broker_states_payload,
+            "confidence_calibrator": self._confidence_calibrator.to_dict(),
         }
         self._checkpoint_at = maybe_save_checkpoint("trader", payload, self.cfg, self._checkpoint_at)
 
@@ -3034,6 +3035,9 @@ class TradingAgent:
                 disabled = state.get("disabled_strategies")
                 if isinstance(disabled, list):
                     broker_state.disabled_strategies = {str(item) for item in disabled}
+        calibrator_data = payload.get("confidence_calibrator")
+        if isinstance(calibrator_data, dict):
+            self._confidence_calibrator = ConfidenceCalibrator.from_dict(calibrator_data)
         legacy_last_trade_at = _dt_from_str(payload.get("last_trade_at"))
         if legacy_last_trade_at and self._broker_name in self._broker_states:
             broker_state = self._broker_states[self._broker_name]
