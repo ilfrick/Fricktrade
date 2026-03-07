@@ -15,10 +15,16 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    entrypoint: ["/bin/sh", "-c", "sleep 20 && exec /bin/ollama serve"]
+    # Wait for trader to be healthy before starting: ensures CUDA is fully
+    # initialised by trader before Ollama competes for VRAM on this 6 GB GPU.
+    # Also removes the fixed-sleep hack that was previously needed.
+    depends_on:
+      trader:
+        condition: service_healthy
     environment:
       - OLLAMA_KEEP_ALIVE=24h  # Keep model loaded in memory; don't unload after 5-min default
-      # CUDA_VISIBLE_DEVICES/NVIDIA_VISIBLE_DEVICES set by docker-compose.gpu.yml when GPU present
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
       - ./ollama:/root/.ollama
     ports:
