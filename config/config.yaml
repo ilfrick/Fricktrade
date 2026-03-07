@@ -283,7 +283,7 @@ strategy:
   - gap_reversal
   - earnings_drift
   - rl_policy
-  combine: weight
+  combine: vote
   min_conviction: 0.12
   single_sided_conviction_multiplier: 0.4
   fee_aware:

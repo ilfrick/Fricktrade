@@ -2639,6 +2639,32 @@ class TradingAgent:
                         reduce_pct = float(signal.get("reduce_pct", 1.0))
                         return action, reduce_pct, name
             return "hold", 1.0, None
+        if mode == "vote":
+            vote_counts: dict[str, int] = {"buy": 0, "sell": 0, "hold": 0}
+            for signal in signals:
+                a = signal.get("action", "hold")
+                if a in vote_counts:
+                    vote_counts[a] += 1
+            max_votes = max(vote_counts.values())
+            winners = [a for a, v in vote_counts.items() if v == max_votes]
+            if len(winners) == 1:
+                winning_action = winners[0]
+            else:
+                # RL tiebreak: if rl_policy voted for one of the tied actions, follow it
+                rl_sig = next((s for s in signals if s.get("name") == "rl_policy"), None)
+                if rl_sig and rl_sig.get("action", "hold") in winners:
+                    winning_action = rl_sig.get("action", "hold")
+                    logging.debug("Vote tie %s broken by rl_policy → %s", winners, winning_action)
+                else:
+                    winning_action = "hold"
+            if winning_action == "hold":
+                return "hold", 1.0, None
+            winning_sigs = [s for s in signals if s.get("action") == winning_action]
+            best = max(winning_sigs, key=lambda s: float(s.get("confidence", 0.0)))
+            if winning_action == "sell":
+                reduce_pct = max(float(s.get("reduce_pct", 1.0)) for s in winning_sigs)
+                return "sell", reduce_pct, best.get("name")
+            return winning_action, 1.0, best.get("name")
         weights = weights or {}
         # Orchestrator returns uniform 1.0 when disabled — use config weights instead
         if self._config_strategy_weights and (

@@ -338,7 +338,16 @@ class BinanceBroker(Broker):
         step = _get_lot_step(self.client, binance_sym)
         sell_qty = _floor_to_step(free_qty, step)
         if sell_qty < step:
-            logging.info("Binance close_position %s: qty %s below step %s, skipping.", symbol, free_qty, step)
+            # Qty is below LOT_SIZE step — attempt Binance dust conversion to BNB
+            logging.info(
+                "Binance close_position %s: qty %s below step %s, attempting dust conversion.",
+                symbol, free_qty, step,
+            )
+            try:
+                self.client.transfer_dust(asset=[base])
+                logging.info("Binance dust conversion succeeded for %s.", base)
+            except Exception as exc:
+                logging.warning("Binance dust conversion failed for %s: %s", base, exc)
             return
         try:
             order = record_broker_call(
