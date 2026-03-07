@@ -409,7 +409,7 @@ orchestrator:
     earnings_drift: 0.04
     rl_policy: 0.04
   rl:
-    enabled: true
+    enabled: false
     model_type: lstm
     device: auto
     hidden_dim: 32
