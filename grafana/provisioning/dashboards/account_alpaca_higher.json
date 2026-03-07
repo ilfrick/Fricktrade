@@ -43,10 +43,9 @@
       }
     },
     {
-      "id": 1,
       "type": "stat",
-      "title": "Alpaca Connectivity",
-      "description": "Total successful API calls to Higher. Non-zero = connected.",
+      "title": "Connectivity",
+      "description": "Total successful API calls. Non-zero = connected.",
       "gridPos": {
         "x": 12,
         "y": 0,
@@ -62,9 +61,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         },
         "colorMode": "background"
       },
@@ -73,14 +70,8 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
             ]
           },
           "mappings": []
@@ -89,7 +80,6 @@
       }
     },
     {
-      "id": 2,
       "type": "stat",
       "title": "API Errors (1h)",
       "gridPos": {
@@ -107,9 +97,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         },
         "colorMode": "background"
       },
@@ -118,18 +106,9 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 10
-              }
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 10}
             ]
           }
         },
