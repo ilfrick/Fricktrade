@@ -144,7 +144,6 @@ brokers:
     accounts:
     - name: Realistic
       risk:
-        trailing_stop_pct: 0.5
         hard_stop_pct: 1.0
       reward:
         time_penalty_weight: 0.8
@@ -308,6 +307,7 @@ strategy:
     entry_threshold_pct: 0.5
     exit_threshold_pct: 0.15
     position_horizon_minutes: 20
+    min_hold_minutes: 15        # suppress all stop/take-profit exits for 15 min after entry
     allow_shorts: true
     trend_following:
       fast_window: 10

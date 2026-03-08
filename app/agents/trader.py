@@ -748,6 +748,16 @@ class TradingAgent:
         avg_entry = float(avg_entry)
         risk_cfg = broker_state.risk.cfg
 
+        # Minimum hold time: suppress ALL exits for N minutes after position opens.
+        # Prevents stop-outs from bid-ask spread noise on the first few bars.
+        min_hold_minutes = float(self._strategy_params.get("min_hold_minutes", 0) or 0)
+        if min_hold_minutes > 0:
+            opened_at = pos.get("opened_at")
+            if opened_at is not None:
+                elapsed = (datetime.now(timezone.utc) - opened_at).total_seconds()
+                if elapsed < min_hold_minutes * 60:
+                    return False, ""
+
         # ATR-based stop: supersedes hard_stop when ATR is available
         if market_state is not None:
             indicators = market_state.get("indicators") or {}
