@@ -22,9 +22,8 @@ flowchart LR
         Strategies[10 Active Strategies]
         Calibrator[Confidence Calibrator]
         EnrichSignals[_enrich_signals\ncontext multipliers]
-        LLMOrch[LLMStrategyOrchestrator\nGemini per-symbol]
+        PortOrch[LLMPortfolioOrchestrator\nGemini ONE call/cycle\nall symbols]
         CombineSignals[_combine_signals\nweighted fallback]
-        Guardrail[Guardrail\nIntradayMomentum]
         Risk[Risk Manager]
         SmartRouter[Smart Order Router\nTWAP/VWAP/POV]
         Exec[Execution Engine]
@@ -82,12 +81,12 @@ flowchart LR
     Trader --> OpenOrders
     Trader --> AccMetrics
     Trader --> Indicators --> Strategies
-    Strategies --> Calibrator --> EnrichSignals --> LLMOrch
-    LLMOrch -- BUY/SELL --> Guardrail
-    LLMOrch -- hold/fail --> CombineSignals --> Guardrail
-    Guardrail --> Risk --> SmartRouter --> Exec --> Queue --> BrokerRouter
+    Strategies --> Calibrator --> EnrichSignals --> PortOrch
+    PortOrch -- cached decision BUY/SELL --> Risk
+    PortOrch -- hold/fail → fallback --> CombineSignals --> Risk
+    Risk --> SmartRouter --> Exec --> Queue --> BrokerRouter
     TCA --> Trader
-    LLMOrch --> LLMClient
+    PortOrch --> LLMClient
     Sentiment --> LLMClient
     MacroRegime --> LLMClient
     RiskInterp --> LLMClient
@@ -160,16 +159,17 @@ flowchart LR
 4. **Confidence calibration** → calibrated_confidence per signal
 5. **Signal bias guard** → block directional override abuse
 6. **`_enrich_signals`** → multiply confidence by regime × sentiment × vol × crypto-alt-data multipliers; add `context_mult` to trace
-7. **LLM orchestrator** (`LLMStrategyOrchestrator`) → Gemini synthesises full context → buy/sell/hold + reduce_pct
-8. **Fallback** → `_combine_signals()` weighted sum if LLM skips/fails
-9. **Guardrail** (`IntradayMomentumStrategy`, `confirm` or `veto` mode)
+7. **`update_signals()`** → accumulate enriched signals into `LLMPortfolioOrchestrator` buffer (thread-safe)
+8. **`get_decision()`** → apply cached portfolio-level decision from previous cycle; fallback to `_combine_signals()` if hold/miss
+9. *(After full batch)* **`run_portfolio_cycle()`** → ONE Gemini call with all symbols visible → updates decision cache for next cycle
 
 ---
 
 ## LLM Layer
 
 - `app/llm/client.py`: `LLMClient` — unified backend (ClaudeBackend, GeminiBackend); daily $5 budget circuit breaker; retry with backoff; per-call `model` override.
-- `app/llm/strategy_orchestrator.py`: `LLMStrategyOrchestrator` — per-symbol Gemini call synthesising regime + indicators + alt-data + strategy signals + rolling P&L → buy/sell/hold decision. Backed by rolling `pnl_history_size=20` completed trades.
+- `app/llm/portfolio_orchestrator.py`: **`LLMPortfolioOrchestrator`** (active) — accumulates signals from all symbols per cycle via `update_signals()`, then fires ONE Gemini call (`run_portfolio_cycle()`) with the full cross-symbol picture (regime, indicators, alt-data, signals, portfolio state, P&L history). Returns buy/sell/hold for each symbol. Decisions cached for the next cycle; falls back to `_combine_signals()` on skip/fail.
+- `app/llm/strategy_orchestrator.py`: `LLMStrategyOrchestrator` (available, mode `per_symbol`) — per-symbol Gemini call; disabled when `mode: portfolio`.
 - `app/llm/sentiment.py`: per-symbol news sentiment scoring (Gemini, 30-min TTL).
 - `app/llm/macro_regime.py`: 5-regime classification using FRED VIX/DGS10/DXY (Gemini, 4h TTL).
 - `app/llm/risk_interpreter.py`: Gemini-based risk commentary.

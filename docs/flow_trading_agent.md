@@ -23,7 +23,8 @@ flowchart TD
     I --> J
     J --> K[Macro Regime + Weights\nGemini 4h TTL cache]
     K --> L[Per-Symbol Execution\n_check_execution_for_symbol\nparallel ThreadPool]
-    L --> M[Metrics + Trace Flush\nPrometheus · decision trace · audit]
+    L --> P[Portfolio LLM Cycle\nrun_portfolio_cycle ONE Gemini call\nall symbols → decisions cached for next cycle]
+    P --> M[Metrics + Trace Flush\nPrometheus · decision trace · audit]
     M --> N[Wait Interval\n300s default]
     N --> A
 ```
@@ -39,16 +40,13 @@ flowchart TD
     C --> D[Run All Strategies\n10 active strategies in parallel]
     D --> E[Signal Bias Guard\nblock directional override abuse]
     E --> F[_enrich_signals\nApply context multipliers to confidence\nregime × sentiment × vol × fear/greed/OI/RSI/insider]
-    F --> G[LLM Strategy Orchestrator\nGemini per-symbol call]
-    G --> H{LLM Decision\nor skip/fail?}
-    H -- BUY/SELL --> I[Use LLM action + reduce_pct]
-    H -- HOLD or fail --> J[_combine_signals\nweighted sum fallback]
+    F --> G[update_signals\naccumulate into portfolio LLM buffer]
+    G --> H[get_decision\napply cached portfolio decision\nfrom previous cycle]
+    H -- BUY/SELL cached --> I[Use portfolio action]
+    H -- hold / no cache --> J[_combine_signals\nweighted sum fallback]
     I --> K
     J --> K
-    K[Guardrail Check\nIntradayMomentum confirm/veto] --> L{Guardrail\npasses?}
-    L -- No --> HOLD[Hold]
-    L -- Yes --> M[Account Flags + PDT Guard]
-    M --> N[Risk Manager\nVaR · exposure · daily loss · leverage]
+    K[Account Flags + PDT Guard] --> N[Risk Manager\nVaR · exposure · daily loss · leverage]
     N --> O{Risk OK?}
     O -- No --> SKIP[Skip / record_skip]
     O -- Yes --> P[_size_order\nHalf-Kelly · ATR stop · fractional]
@@ -78,40 +76,24 @@ flowchart LR
 
 ---
 
-## LLM Strategy Orchestrator
+## Portfolio LLM Orchestrator
+
+Fires **once per cycle** after all symbols are processed, with the full cross-symbol picture visible.
 
 ```mermaid
 flowchart TD
-    A[Enriched Signals] --> B{Any signal confidence\n≥ min_signal_score 3%?}
-    B -- No --> C[Cost Guard: skip LLM\nreturn hold → fallback to _combine_signals]
-    B -- Yes --> D[Build Prompt ~400 tokens\nSymbol · Regime · RSI/ATR/VWAP/Hurst\nSentiment · FearGreed · OI\nStrategies+weights\nLast 5 P&L trades]
-    D --> E[Gemini Flash API Call\ngemini-2.5-flash · temp=0.1]
-    E --> F{JSON Response\naction · reduce_pct · reasoning}
-    F -- parse OK --> G{action?}
-    F -- parse fail --> H[Warning → return hold\nfallback to _combine_signals]
-    G -- buy/sell --> I[Return action + reduce_pct\n+ best-matching strategy_name]
-    G -- hold --> J[Return hold → fallback to _combine_signals]
-    I --> K[Log: 'LLM orch → BUY/SELL symbol ...']
+    A[Signal Buffer\nall symbols accumulated via update_signals] --> B{Any symbol has confidence\n≥ min_signal_score 3%?}
+    B -- No --> C[Cost Guard: skip\nkeep previous cycle decisions]
+    B -- Yes --> D[Build Portfolio Prompt ~1500 tokens\nRegime · FearGreed · OI · Portfolio equity\nOpen positions · Recent P&L\nPer-symbol: RSI ATR VWAP Hurst + signals]
+    D --> E[Gemini Flash API Call\ngemini-2.5-flash · temp=0.1 · max_tokens=2048]
+    E --> F{JSON Response\ndecisions map + reasoning}
+    F -- parse OK --> G[Update decision cache\nfor all symbols]
+    F -- parse fail --> H[Warning: keep previous cache\nnext cycle uses stale decisions]
+    G --> I[Log: Portfolio LLM → N symbols: X buy Y sell Z hold]
 ```
 
----
-
-## Guardrail
-
-```mermaid
-flowchart TD
-    A[Main Decision: buy/sell/hold] --> B{Guardrail Enabled?}
-    B -- No --> Z[Pass Through]
-    B -- Yes --> C{mode?}
-    C -- confirm --> D[Run IntradayMomentum\nindependent instance]
-    C -- veto --> D
-    D --> E{Guardrail signal?}
-    E -- confirm mode:\nboth agree → pass --> Z
-    E -- confirm mode:\ndisagree → hold --> HOLD[Hold]
-    E -- veto mode:\nguardrail=sell & main=buy → hold --> HOLD
-    E -- veto mode:\notherwise → pass --> Z
-    D --> F[entry_threshold_pct: 0.8%\n30-min lookback\nmomentum must exceed threshold]
-```
+Decisions are applied in the **next** cycle via `get_decision(symbol)` (previous-cycle cache).
+On any failure the previous cycle's cache is kept; symbols with no cached decision fall back to `_combine_signals()`.
 
 ---
 
