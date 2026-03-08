@@ -758,37 +758,42 @@ class TradingAgent:
                 if elapsed < min_hold_minutes * 60:
                     return False, ""
 
+        is_crypto = "/" in symbol
+
         # ATR-based stop: supersedes hard_stop when ATR is available
         if market_state is not None:
             indicators = market_state.get("indicators") or {}
             atr = float(indicators.get("atr", 0.0) or 0.0)
             if atr > 0 and avg_entry > 0:
-                is_crypto = "/" in symbol
                 atr_mult = 2.5 if is_crypto else 1.5
                 atr_stop_price = avg_entry - atr * atr_mult
                 if last_price <= atr_stop_price:
                     return True, "atr_stop"
 
+        # Resolve crypto-specific stop/profit thresholds (wider bands than equity).
+        # risk.crypto.* values take precedence for crypto symbols; equity values used otherwise.
+        _crypto_cfg = (risk_cfg.get("crypto") or {}) if is_crypto else {}
+        hard_stop = float(_crypto_cfg.get("hard_stop_pct") or risk_cfg.get("hard_stop_pct", 0) or 0)
+        trailing_stop = float(_crypto_cfg.get("trailing_stop_pct") or risk_cfg.get("trailing_stop_pct", 0) or 0)
+        take_profit_pct = float(_crypto_cfg.get("take_profit_pct") or risk_cfg.get("take_profit_pct", 0) or 0)
+        partial_tp_pct = float(_crypto_cfg.get("partial_take_profit_pct") or risk_cfg.get("partial_take_profit_pct", 0) or 0)
+
         # Hard stop: price dropped X% from entry (fallback when ATR unavailable)
-        hard_stop = float(risk_cfg.get("hard_stop_pct", 0) or 0)
         if hard_stop > 0 and last_price <= avg_entry * (1 - hard_stop / 100.0):
             return True, "hard_stop"
 
         # Trailing stop: price dropped X% from peak since entry
-        trailing_stop = float(risk_cfg.get("trailing_stop_pct", 0) or 0)
         peak = float(pos.get("peak_price") or avg_entry)
         if trailing_stop > 0 and peak > avg_entry:
             if last_price <= peak * (1 - trailing_stop / 100.0):
                 return True, "trailing_stop"
 
         # Take-profit: full exit when price >= entry * (1 + take_profit_pct/100)
-        take_profit_pct = float(risk_cfg.get("take_profit_pct", 0) or 0)
         if take_profit_pct > 0 and last_price >= avg_entry * (1 + take_profit_pct / 100.0):
             TAKE_PROFIT_EXITS.labels(symbol=symbol, reason="take_profit").inc()
             return True, "take_profit"
 
         # Partial take-profit: sell a fraction when first target hit, let rest run
-        partial_tp_pct = float(risk_cfg.get("partial_take_profit_pct", 0) or 0)
         if partial_tp_pct > 0 and not pos.get("took_partial"):
             if last_price >= avg_entry * (1 + partial_tp_pct / 100.0):
                 pos["took_partial"] = True
