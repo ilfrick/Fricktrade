@@ -1340,6 +1340,16 @@ class TradingAgent:
                 if _cqty <= 0:
                     # Position gone — evict from dust blacklist so symbol trades normally again
                     self._dust_blacklist.discard((broker_name, symbol))
+                elif (broker_name, symbol) in self._dust_blacklist:
+                    # Position still exists but may have appreciated above min_notional (e.g. price spike)
+                    _min_notional = float(self.cfg.get("trading_limits", {}).get("min_notional", 1.0))
+                    _lp_evict = market_state.get("last_price") or 0
+                    if float(_lp_evict) > 0 and _cqty * float(_lp_evict) >= _min_notional:
+                        logging.info(
+                            "Dust position %s/%s value recovered (%.4g × %.2f = $%.4f >= $%.2f); evicting from blacklist",
+                            broker_name, symbol, _cqty, float(_lp_evict), _cqty * float(_lp_evict), _min_notional,
+                        )
+                        self._dust_blacklist.discard((broker_name, symbol))
                 if _cqty > 0:
                     # Dust blacklist: broker can't close this position (sub-minimum qty) — skip silently
                     if (broker_name, symbol) in self._dust_blacklist:
@@ -1411,8 +1421,17 @@ class TradingAgent:
                 if _exit_qty <= 0:
                     self._dust_blacklist.discard((broker_name, symbol))
                 elif (broker_name, symbol) in self._dust_blacklist:
-                    self._emit_decision_trace(trace, "skip", "dust_blacklist", "sizing")
-                    return None
+                    _min_notional = float(self.cfg.get("trading_limits", {}).get("min_notional", 1.0))
+                    _lp_evict = market_state.get("last_price") or 0
+                    if float(_lp_evict) > 0 and _exit_qty * float(_lp_evict) >= _min_notional:
+                        logging.info(
+                            "Dust position %s/%s value recovered ($%.4f >= $%.2f); evicting from blacklist",
+                            broker_name, symbol, _exit_qty * float(_lp_evict), _min_notional,
+                        )
+                        self._dust_blacklist.discard((broker_name, symbol))
+                    else:
+                        self._emit_decision_trace(trace, "skip", "dust_blacklist", "sizing")
+                        return None
                 # PDT guard: don't close equity positions that would trigger a day-trade violation
                 if (broker_name, symbol) in self._pdt_blocked or self._would_trigger_pdt_swing(broker_name, symbol, market_state):
                     _slog.event("debug", "pdt_swing_hold", symbol=symbol, broker=broker_name,
@@ -2233,6 +2252,18 @@ class TradingAgent:
                 # Dust: positive holding too small to sell via qty-based order
                 if qty == 0 and current_qty > 0 and current_qty < 1e-6:
                     return (0, "dust_position")
+                # Avoid leaving a sub-notional remainder: if the unsold fraction would be
+                # worth less than min_notional, sell the full position instead.
+                # This prevents partial exits from creating un-closeable dust.
+                if qty > 0 and qty < current_qty:
+                    min_notional_usd = float(self.cfg.get("trading_limits", {}).get("min_notional", 1.0))
+                    remainder_value = (current_qty - qty) * last_price
+                    if 0 < remainder_value < min_notional_usd:
+                        # Round up to full position — use same precision flooring
+                        if self._is_fractional(symbol):
+                            qty = math.floor(current_qty * factor) / factor
+                        else:
+                            qty = int(current_qty)
                 return (qty, None) if qty > 0 else (0, "position_limit")
             if not allow_shorts or not self._can_short(symbol, portfolio):
                 return 0, "shorting_disabled"
