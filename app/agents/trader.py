@@ -886,7 +886,7 @@ class TradingAgent:
 
     def _signal_summary(self, signal: dict, include_features: bool = False) -> dict:
         summary = {"name": signal.get("name"), "action": signal.get("action")}
-        for key in ("score", "confidence", "strength", "reason", "weight", "signal_bias", "signal_bias_block", "value_estimate", "action_probs"):
+        for key in ("score", "confidence", "strength", "reason", "weight", "signal_bias", "signal_bias_block", "value_estimate", "action_probs", "context_mult"):
             if key in signal:
                 summary[key] = signal.get(key)
         if include_features and "features" in signal:
@@ -1591,7 +1591,8 @@ class TradingAgent:
                 return None
             slices = []
             algo_label = str(algo_name or "").lower()
-            if order_type == "market" and algo_label not in {"none", "off"}:
+            # Crypto: always single market order (24/7, fractional, broker symbol format constraints)
+            if order_type == "market" and algo_label not in {"none", "off"} and not _is_crypto_symbol:
                 slices = self._plan_execution(action, qty, last_price, market_state, algo_name)
 
             order_notional = qty * last_price

@@ -112,9 +112,9 @@ class LLMStrategyOrchestrator:
             if action == "hold":
                 # Explicit LLM hold — return None so caller falls back
                 return ("hold", 1.0, None)
-            logger.debug(
-                "LLM orch %s → %s (reduce=%.2f, strat=%s) | %s",
-                symbol, action, reduce_pct, strategy_name, reasoning,
+            logger.info(
+                "LLM orch → %s %s (reduce=%.2f, strat=%s) | %s",
+                action.upper(), symbol, reduce_pct, strategy_name, reasoning,
             )
             return (action, reduce_pct, strategy_name)
         except Exception as exc:
