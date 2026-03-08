@@ -186,6 +186,7 @@ flowchart LR
 - PDT guard: `_would_trigger_pdt_swing()` — equity only; equity ≤ $2,500; daytrades ≥ 3.
 - Pending dedup: `_pending_buy_symbols` per (broker, symbol) — 900s window; `_pending_notional` atomic reserve.
 - Stuck cooldown: `_stuck_cooldown` (15 min) + `_symbol_stuck_blacklist` (1h after 2 consecutive timeouts).
+- Position exit guards (in `_check_position_exit`): minimum hold time (`strategy.params.min_hold_minutes`); ATR stop (2.5× crypto / 1.5× equity); hard stop / trailing stop / take-profit read from `risk.crypto.*` for crypto symbols, flat `risk.*` for equities.
 
 ---
 
