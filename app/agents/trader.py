@@ -1337,6 +1337,9 @@ class TradingAgent:
             if action in ("hold", "buy"):
                 _positions = market_state.get("portfolio", {}).get("positions", {})
                 _cqty = float(_positions.get(symbol, {}).get("qty", 0) or 0)
+                if _cqty <= 0:
+                    # Position gone — evict from dust blacklist so symbol trades normally again
+                    self._dust_blacklist.discard((broker_name, symbol))
                 if _cqty > 0:
                     # Dust blacklist: broker can't close this position (sub-minimum qty) — skip silently
                     if (broker_name, symbol) in self._dust_blacklist:
@@ -1402,7 +1405,12 @@ class TradingAgent:
                 return None
             if action == "exit":
                 # Dust blacklist: broker can't close this position (sub-minimum qty) — skip silently
-                if (broker_name, symbol) in self._dust_blacklist:
+                # Evict if portfolio no longer shows the position (Alpaca cleaned it up)
+                _exit_positions = market_state.get("portfolio", {}).get("positions", {})
+                _exit_qty = float(_exit_positions.get(symbol, {}).get("qty", 0) or 0)
+                if _exit_qty <= 0:
+                    self._dust_blacklist.discard((broker_name, symbol))
+                elif (broker_name, symbol) in self._dust_blacklist:
                     self._emit_decision_trace(trace, "skip", "dust_blacklist", "sizing")
                     return None
                 # PDT guard: don't close equity positions that would trigger a day-trade violation
