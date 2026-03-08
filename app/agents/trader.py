@@ -1394,10 +1394,18 @@ class TradingAgent:
                 self._emit_decision_trace(trace, "hold", "strategies_hold", "signal")
                 return None
             if action == "exit":
-                # Honour exit backoff (set when a previous close attempt failed)
-                if self._should_skip_exit(broker_name, symbol):
-                    _slog.event("debug", "exit_backoff_active", symbol=symbol, broker=broker_name)
-                    self._emit_decision_trace(trace, "hold", "exit_backoff", "signal")
+                # Skip if position value is below min_notional — broker cannot fill the order.
+                # This is a value check, NOT the generic exit backoff, so it never blocks normal positions.
+                _exit_pos = market_state.get("portfolio", {}).get("positions", {})
+                _exit_qty = float(_exit_pos.get(symbol, {}).get("qty", 0) or 0)
+                _exit_lp = float(market_state.get("last_price") or 0)
+                _min_notional = float(self.cfg.get("trading_limits", {}).get("min_notional", 1.0))
+                if _exit_qty > 0 and _exit_lp > 0 and _exit_qty * _exit_lp < _min_notional:
+                    logging.debug(
+                        "Sub-minimum position %s/%s value $%.6f < $%.2f — skipping exit",
+                        broker_name, symbol, _exit_qty * _exit_lp, _min_notional,
+                    )
+                    self._emit_decision_trace(trace, "skip", "sub_min_qty", "sizing")
                     return None
                 # PDT guard: don't close equity positions that would trigger a day-trade violation
                 if (broker_name, symbol) in self._pdt_blocked or self._would_trigger_pdt_swing(broker_name, symbol, market_state):
@@ -1410,16 +1418,9 @@ class TradingAgent:
                 try:
                     self.broker.close_position(symbol, broker=broker_name)
                 except Exception as _ce:
-                    _ce_str = str(_ce)
-                    if "40310000" in _ce_str or "minimal qty" in _ce_str.lower():
-                        logging.warning(
-                            "Sub-minimum position %s/%s cannot be closed by broker — backing off",
-                            broker_name, symbol,
-                        )
-                    else:
-                        logging.warning("Exit close_position failed %s/%s: %s", broker_name, symbol, _ce)
+                    logging.warning("Exit close_position failed %s/%s: %s", broker_name, symbol, _ce)
                     self._record_exit_failure(broker_name, symbol)
-                    self._emit_decision_trace(trace, "skip", "sub_min_qty", "sizing")
+                    self._emit_decision_trace(trace, "skip", "close_failed", "sizing")
                     return None
                 self._emit_decision_trace(trace, "exit", "strategy_exit", "signal")
                 return None
@@ -1549,14 +1550,12 @@ class TradingAgent:
                 trace["haircuts"] = self._haircut_snapshot(market_state)
             if qty <= 0:
                 if skip_reason == "dust_position":
-                    # Position is below broker minimum qty — cannot be closed via API.
-                    # Record exit failure so exit backoff suppresses retries (1→2→4→8→15 min).
-                    # The new _size_order remainder check prevents future dust from partial sells.
-                    logging.warning(
-                        "Dust position %s/%s qty=%.2e below broker minimum — backing off",
+                    # Position qty is below broker minimum — cannot be closed via API.
+                    # Skip silently; _size_order remainder guard prevents future dust creation.
+                    logging.debug(
+                        "Dust position %s/%s qty=%.2e — skipping (sub-minimum)",
                         broker_name, symbol, current_qty,
                     )
-                    self._record_exit_failure(broker_name, symbol)
                     self._emit_decision_trace(trace, "skip", "sub_min_qty", "sizing")
                     return None
                 if skip_reason:
