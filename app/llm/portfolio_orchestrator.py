@@ -191,7 +191,10 @@ class LLMPortfolioOrchestrator:
                 new_decisions[sym] = (action, 1.0, strategy_name)
 
             self._decisions = new_decisions
-            # Store reference prices for cache invalidation in get_decision()
+            # Store reference prices for cache invalidation; prune stale symbols
+            for sym in list(self._decision_prices):
+                if sym not in new_decisions:
+                    del self._decision_prices[sym]
             for sym in new_decisions:
                 ms = buffer.get(sym, {}).get("market_state", {}) or {}
                 lp = float(ms.get("last_price") or 0)

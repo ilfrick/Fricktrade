@@ -1022,11 +1022,14 @@ class TradingAgent:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(payload) + "\n")
+            # Recover silently if a previous write had failed
+            if self._decision_trace_blocked:
+                logging.info("Decision trace write recovered")
+                self._decision_trace_blocked = False
         except OSError as exc:
             if not self._decision_trace_blocked:
-                logging.warning("Decision trace write failed; disabling trace output: %s", exc)
-            self._decision_trace_blocked = True
-            self._decision_trace_enabled = False
+                logging.warning("Decision trace write failed (will retry): %s", exc)
+                self._decision_trace_blocked = True
         except Exception as exc:
             logging.warning("Decision trace write failed: %s", exc)
 
