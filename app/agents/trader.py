@@ -398,15 +398,20 @@ class TradingAgent:
             )
         except Exception as exc:
             logging.warning("LLM init failed (check API keys): %s", exc)
-        # LLM Strategy Orchestrator (separate from RL orchestrator — makes final trade decisions)
+        # LLM Strategy/Portfolio Orchestrator (makes final trade decisions)
         self._llm_orchestrator = None
+        self._portfolio_orchestrator = None
         _orch_cfg = self.cfg.get("llm_orchestrator", {}) or {}
         if _orch_cfg.get("enabled", False) and self._llm_client is not None:
             try:
-                from app.llm.strategy_orchestrator import LLMStrategyOrchestrator as _LLMOrch
-                self._llm_orchestrator = _LLMOrch(self._llm_client, _orch_cfg)
+                if _orch_cfg.get("mode", "per_symbol") == "portfolio":
+                    from app.llm.portfolio_orchestrator import LLMPortfolioOrchestrator as _PortOrch
+                    self._portfolio_orchestrator = _PortOrch(self._llm_client, _orch_cfg)
+                else:
+                    from app.llm.strategy_orchestrator import LLMStrategyOrchestrator as _LLMOrch
+                    self._llm_orchestrator = _LLMOrch(self._llm_client, _orch_cfg)
             except Exception as exc:
-                logging.warning("LLM strategy orchestrator init failed: %s", exc)
+                logging.warning("LLM orchestrator init failed: %s", exc)
 
     def _init_quote_stream(self) -> None:
         """Initialise real-time quote stream if quote_stream.enabled is true."""
@@ -1177,7 +1182,16 @@ class TradingAgent:
             _cs_qty = float(_cs_positions.get(symbol, {}).get("qty", 0) or 0)
             if _cs_qty <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
                 filtered_signals = [s for s in filtered_signals if s.get("action") != "sell"]
-            if self._llm_orchestrator is not None:
+            if self._portfolio_orchestrator is not None:
+                # Accumulate signals for this cycle's batch-level LLM call
+                self._portfolio_orchestrator.update_signals(symbol, filtered_signals, market_state)
+                # Apply cached decision from previous cycle
+                action, reduce_pct, action_strategy = self._portfolio_orchestrator.get_decision(symbol)
+                if action == "hold" and action_strategy is None:
+                    action, reduce_pct, action_strategy = self._combine_signals(
+                        filtered_signals, weights, order=names, market_state=market_state
+                    )
+            elif self._llm_orchestrator is not None:
                 action, reduce_pct, action_strategy = self._llm_orchestrator.decide(
                     symbol, market_state, filtered_signals, weights
                 )
@@ -1223,7 +1237,13 @@ class TradingAgent:
                 filtered_weights = weights
                 if isinstance(weights, dict):
                     filtered_weights = {name: weights.get(name, 1.0) for name in allowed_names}
-                if self._llm_orchestrator is not None:
+                if self._portfolio_orchestrator is not None:
+                    action, reduce_pct, action_strategy = self._portfolio_orchestrator.get_decision(symbol)
+                    if action == "hold" and action_strategy is None:
+                        action, reduce_pct, action_strategy = self._combine_signals(
+                            filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
+                        )
+                elif self._llm_orchestrator is not None:
                     action, reduce_pct, action_strategy = self._llm_orchestrator.decide(
                         symbol, market_state, filtered_signals, filtered_weights
                     )
@@ -1953,17 +1973,18 @@ class TradingAgent:
                     except (AttributeError, TypeError, ValueError):
                         pass
                 # LLM orchestrator P&L tracking
-                if self._llm_orchestrator is not None and status == "completed":
+                _active_orch = self._portfolio_orchestrator or self._llm_orchestrator
+                if _active_orch is not None and status == "completed":
                     try:
                         _fill_p = float(getattr(response, "filled_avg_price", 0) or 0)
                         if _fill_p > 0:
                             if side == "buy":
                                 _strat = str(getattr(response, "strategy", "") or "")
-                                self._llm_orchestrator.record_entry(
+                                _active_orch.record_entry(
                                     response.symbol, response.broker, _strat, _fill_p
                                 )
                             elif side == "sell":
-                                self._llm_orchestrator.record_exit(response.symbol, _fill_p)
+                                _active_orch.record_exit(response.symbol, _fill_p)
                     except (AttributeError, TypeError, ValueError):
                         pass
                 try:
@@ -3053,7 +3074,32 @@ class TradingAgent:
             symbol_batches = self._build_symbol_batches(symbols)
             for _, broker_override, batch in symbol_batches:
                 self._run_symbol_batch(batch, portfolio, market_data_provider, broker_override)
+            # Portfolio-level LLM: fire ONE call after all symbols processed
+            if self._portfolio_orchestrator is not None:
+                try:
+                    _port_ctx = self._build_portfolio_context(portfolio)
+                    self._portfolio_orchestrator.run_portfolio_cycle(_port_ctx)
+                except Exception as exc:
+                    logging.warning("Portfolio orchestrator cycle failed: %s", exc)
             time.sleep(interval_seconds)
+
+    def _build_portfolio_context(self, portfolio: dict) -> dict:
+        """Build the context dict passed to LLMPortfolioOrchestrator.run_portfolio_cycle()."""
+        equity = float(portfolio.get("equity", 0.0) or 0.0)
+        cash = float(portfolio.get("cash", 0.0) or 0.0)
+        positions = portfolio.get("positions", {}) or {}
+        crypto_val = sum(
+            float(info.get("value", 0) or 0)
+            for sym, info in positions.items()
+            if "/" in sym
+        )
+        crypto_pct = (crypto_val / equity * 100.0) if equity else 0.0
+        return {
+            "equity": equity,
+            "cash": cash,
+            "crypto_exposure_pct": crypto_pct,
+            "positions": positions,
+        }
 
     def _ops_state_blocks_run(self) -> bool:
         ms_cfg = self.cfg.get("healthwatch", {}).get("market_shutdown", {}) or {}

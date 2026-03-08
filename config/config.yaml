@@ -521,7 +521,7 @@ learning:
     baseline_max_samples: 5000
     baseline_stride: 5
   guardrail:
-    enabled: true
+    enabled: false
     mode: confirm
     params:
       lookback_minutes: 30
@@ -1110,8 +1110,9 @@ quote_stream:
 
 llm_orchestrator:
   enabled: true
+  mode: portfolio           # portfolio: one call/cycle for all symbols; per_symbol: one call/symbol
   provider: gemini
   model: gemini-2.5-flash  # flash: reliable JSON output, <1s latency, 33x cheaper than pro
-  max_tokens: 1024
-  min_signal_score: 0.03   # skip LLM if no strategy has confidence > 3%
+  max_tokens: 2048          # larger: portfolio response covers all symbols
+  min_signal_score: 0.03   # skip LLM if no symbol has confidence > 3%
   pnl_history_size: 20     # completed trades kept in rolling window for prompt
