@@ -1201,11 +1201,20 @@ class TradingAgent:
                 # Accumulate signals for this cycle's batch-level LLM call
                 self._portfolio_orchestrator.update_signals(symbol, filtered_signals, market_state)
                 # Apply cached decision from previous cycle
-                action, reduce_pct, action_strategy = self._portfolio_orchestrator.get_decision(symbol)
-                if action == "hold" and action_strategy is None:
-                    action, reduce_pct, action_strategy = self._combine_signals(
-                        filtered_signals, weights, order=names, market_state=market_state
-                    )
+                last_price = float(market_state.get("last_price") or 0)
+                action, reduce_pct, action_strategy = self._portfolio_orchestrator.get_decision(
+                    symbol, last_price
+                )
+                # Shadow: always compute combine so we can compare outcomes later
+                shadow_action, shadow_reduce, shadow_strategy = self._combine_signals(
+                    filtered_signals, weights, order=names, market_state=market_state
+                )
+                llm_active = action != "hold" or action_strategy is not None
+                if not llm_active:
+                    action, reduce_pct, action_strategy = shadow_action, shadow_reduce, shadow_strategy
+                if trace:
+                    trace["shadow_combine"] = shadow_action
+                    trace["llm_override"] = llm_active and (action != shadow_action)
             elif self._llm_orchestrator is not None:
                 action, reduce_pct, action_strategy = self._llm_orchestrator.decide(
                     symbol, market_state, filtered_signals, weights
@@ -1253,7 +1262,10 @@ class TradingAgent:
                 if isinstance(weights, dict):
                     filtered_weights = {name: weights.get(name, 1.0) for name in allowed_names}
                 if self._portfolio_orchestrator is not None:
-                    action, reduce_pct, action_strategy = self._portfolio_orchestrator.get_decision(symbol)
+                    last_price = float(market_state.get("last_price") or 0)
+                    action, reduce_pct, action_strategy = self._portfolio_orchestrator.get_decision(
+                        symbol, last_price
+                    )
                     if action == "hold" and action_strategy is None:
                         action, reduce_pct, action_strategy = self._combine_signals(
                             filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
@@ -3100,6 +3112,7 @@ class TradingAgent:
 
     def _build_portfolio_context(self, portfolio: dict) -> dict:
         """Build the context dict passed to LLMPortfolioOrchestrator.run_portfolio_cycle()."""
+        from app.agents.performance import PerformanceTracker as _PT  # lazy to avoid circular
         equity = float(portfolio.get("equity", 0.0) or 0.0)
         cash = float(portfolio.get("cash", 0.0) or 0.0)
         positions = portfolio.get("positions", {}) or {}
@@ -3109,11 +3122,28 @@ class TradingAgent:
             if "/" in sym
         )
         crypto_pct = (crypto_val / equity * 100.0) if equity else 0.0
+
+        # Aggregate strategy trades across all brokers for win-rate stats
+        strat_trades: dict[str, list] = {}
+        for bs in self._broker_states.values():
+            for sname, trades in (bs.strategy_trades or {}).items():
+                strat_trades.setdefault(sname, []).extend(trades)
+        strategy_win_rates = {}
+        for sname, trades in strat_trades.items():
+            if len(trades) >= 5:
+                stats = _PT.compute_trade_stats(trades)
+                strategy_win_rates[sname] = {
+                    "n": stats["trades"],
+                    "win_rate": round(stats["win_rate"], 3),
+                    "avg_pnl": round(stats["avg_pnl_pct"], 2),
+                }
+
         return {
             "equity": equity,
             "cash": cash,
             "crypto_exposure_pct": crypto_pct,
             "positions": positions,
+            "strategy_win_rates": strategy_win_rates,
         }
 
     def _ops_state_blocks_run(self) -> bool:

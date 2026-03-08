@@ -1115,4 +1115,5 @@ llm_orchestrator:
   model: gemini-2.5-flash  # flash: reliable JSON output, <1s latency, 33x cheaper than pro
   max_tokens: 2048          # larger: portfolio response covers all symbols
   min_signal_score: 0.03   # skip LLM if no symbol has confidence > 3%
-  pnl_history_size: 20     # completed trades kept in rolling window for prompt
+  pnl_history_size: 100    # completed trades kept in rolling window for strategy win-rate stats
+  price_invalidation_pct: 0.01  # invalidate cached decision if price moves ≥ 1% since last LLM call

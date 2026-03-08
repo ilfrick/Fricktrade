@@ -65,6 +65,7 @@ class LLMPortfolioOrchestrator:
         self._min_signal_score: float = float(cfg.get("min_signal_score", 0.03))
 
         _history_size: int = int(cfg.get("pnl_history_size", 20))
+        self._price_invalidation_pct: float = float(cfg.get("price_invalidation_pct", 0.01))
 
         # Thread-safe accumulator: filled by update_signals() during each cycle
         self._signal_buffer: dict[str, dict] = {}
@@ -72,6 +73,8 @@ class LLMPortfolioOrchestrator:
 
         # Decision cache: written by run_portfolio_cycle(), read by get_decision()
         self._decisions: dict[str, tuple[str, float, str | None]] = {}
+        # Reference prices at time of last LLM decision (for cache invalidation)
+        self._decision_prices: dict[str, float] = {}
 
         # P&L tracking (same semantics as LLMStrategyOrchestrator)
         self._open_entries: dict[str, dict] = {}
@@ -104,14 +107,32 @@ class LLMPortfolioOrchestrator:
     # Decision read-back (called per-symbol during execution)
     # ------------------------------------------------------------------
 
-    def get_decision(self, symbol: str) -> tuple[str, float, str | None]:
+    def get_decision(
+        self, symbol: str, current_price: float | None = None
+    ) -> tuple[str, float, str | None]:
         """
         Return the portfolio-level decision for this symbol from the last cycle.
 
-        Returns ("hold", 1.0, None) when no cached decision exists so the
-        caller falls back to _combine_signals().
+        If current_price is provided and has moved ≥ price_invalidation_pct from
+        the reference price stored at decision time, the cached decision is expired
+        and ("hold", 1.0, None) is returned so the caller falls back to _combine_signals().
+
+        Returns ("hold", 1.0, None) when no cached decision exists.
         """
-        return self._decisions.get(symbol, ("hold", 1.0, None))
+        cached = self._decisions.get(symbol)
+        if cached is None:
+            return ("hold", 1.0, None)
+        if current_price and current_price > 0 and self._price_invalidation_pct > 0:
+            ref = self._decision_prices.get(symbol, 0)
+            if ref > 0 and abs(current_price - ref) / ref >= self._price_invalidation_pct:
+                logger.debug(
+                    "Decision invalidated %s: price moved %.2f%% from ref %.4f",
+                    symbol,
+                    abs(current_price - ref) / ref * 100,
+                    ref,
+                )
+                return ("hold", 1.0, None)
+        return cached
 
     # ------------------------------------------------------------------
     # Portfolio LLM call (called once after each batch)
@@ -170,6 +191,12 @@ class LLMPortfolioOrchestrator:
                 new_decisions[sym] = (action, 1.0, strategy_name)
 
             self._decisions = new_decisions
+            # Store reference prices for cache invalidation in get_decision()
+            for sym in new_decisions:
+                ms = buffer.get(sym, {}).get("market_state", {}) or {}
+                lp = float(ms.get("last_price") or 0)
+                if lp > 0:
+                    self._decision_prices[sym] = lp
             n_buy = sum(1 for a, _, _ in new_decisions.values() if a == "buy")
             n_sell = sum(1 for a, _, _ in new_decisions.values() if a == "sell")
             logger.info(
@@ -259,6 +286,17 @@ class LLMPortfolioOrchestrator:
         else:
             pnl_line = "Recent P&L: no closed trades yet"
 
+        # Strategy win rates
+        strat_wr = portfolio_ctx.get("strategy_win_rates") or {}
+        if strat_wr:
+            parts = [
+                f"{s}:{v['win_rate']*100:.0f}%({v['n']})"
+                for s, v in sorted(strat_wr.items(), key=lambda x: -x[1]["n"])
+            ]
+            strat_line = "Strategy win rates: " + " | ".join(parts) + "\n"
+        else:
+            strat_line = ""
+
         # Build per-symbol lines — compact format
         sym_lines: list[str] = []
         for sym in sorted(buffer):
@@ -296,6 +334,7 @@ class LLMPortfolioOrchestrator:
             f"Portfolio equity: ${equity:.0f} | Crypto exposure: {crypto_pct:.1f}% (cap 50%)\n"
             f"Open positions: {pos_line}\n"
             f"{pnl_line}\n"
+            f"{strat_line}"
             f"\n--- {len(sym_lines)} symbols (full universe) ---\n"
             + "\n".join(sym_lines)
             + "\n\n"
