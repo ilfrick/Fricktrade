@@ -218,7 +218,8 @@ Claude and Gemini are used on slow, non-critical paths — never in the real-tim
 | Module | Backend | Trigger | Purpose |
 |--------|---------|---------|---------|
 | `client.py` | Both | On demand | Unified LLMClient with daily budget circuit breaker ($5/day default), retry/backoff, `critical=True` bypass for risk calls. `complete()` accepts `model=` kwarg to override per-call. Default backends: `ClaudeBackend` (`claude-sonnet-4-6`) and `GeminiBackend` (`gemini-2.5-flash`, thinking disabled for flash; pro auto-detects thinking support). |
-| `strategy_orchestrator.py` | Gemini 2.5 Pro | Per-symbol, every cycle | **Final trade decision-maker**: synthesises regime, indicators, alt-data, strategy signals, and rolling P&L into a single buy/sell/hold + reduce_pct. Falls back to `_combine_signals()` on skip/failure. Config: `llm_orchestrator.*`. |
+| `portfolio_orchestrator.py` | Gemini 2.5 Flash | Once per cycle (all symbols) | **Active default** (`llm_orchestrator.mode: portfolio`). One Gemini call sees the full universe: regime, alt-data, portfolio state, P&L history, per-symbol RSI/ATR/VWAP/Hurst + strategy signals. Returns buy/sell/hold for every symbol simultaneously. Decisions cached; `get_decision(symbol, current_price)` serves them next cycle. Cache expires if price moves ≥ `price_invalidation_pct` (default 1%) since decision time — falls back to `_combine_signals()` immediately. Prompt includes live strategy win-rate stats (from `PerformanceTracker`, ≥5 trades per strategy) so the model knows which strategies are working. ~$0.0002/call, ~1.7s latency. |
+| `strategy_orchestrator.py` | Gemini 2.5 Flash | Per-symbol, every cycle | **Per-symbol mode** (`llm_orchestrator.mode: per_symbol`). Synthesises regime, indicators, alt-data, strategy signals, and rolling P&L into a single buy/sell/hold + reduce_pct per symbol. Falls back to `_combine_signals()` on skip/failure. Mutually exclusive with portfolio mode. |
 | `sentiment.py` | Gemini | Per-symbol, market hours | Scores news sentiment −1.0→+1.0; injects `llm_sentiment`, `llm_sentiment_bias`, `llm_risk_flag` into `market_state` |
 | `macro_regime.py` | Gemini | 4h TTL cache | Classifies macro regime (5 states) using FRED data (VIX, DGS10, DXY) + Gemini; overrides strategy weights per regime |
 | `symbols_filter.py` | Gemini | Pre-market (optional, disabled) | Selects top N symbols from candidates with sector/momentum context |
@@ -228,9 +229,11 @@ Claude and Gemini are used on slow, non-critical paths — never in the real-tim
 
 **Signal enrichment:** `_enrich_signals()` in `trader.py` adjusts every strategy's `confidence` in-place (before combine) using regime multiplier, LLM sentiment, fear/greed, OI change, RSI extremes, ATR volatility, and insider sentiment. Adds `context_mult` field to each signal for trace debugging. No strategy files modified.
 
-**Config keys:** `llm.enabled`, `llm.sentiment.enabled`, `llm.post_session.enabled`, `llm_orchestrator.enabled`, etc.
+**A/B shadow tracking:** In the first portfolio-orchestrator block of `_check_execution_for_symbol()`, `_combine_signals()` is always called as a free shadow computation alongside the LLM decision. Every decision trace record contains `shadow_combine` (what combine would have decided) and `llm_override` (true when LLM diverged from combine). Post-analysis: filter `llm_override=true` records and compare fill P&L to measure LLM alpha.
 
-**Required env vars:** `ANTHROPIC_API_KEY` (Claude, optional if all backends are Gemini), `GOOGLE_GEMINI_API_KEY` (Gemini). Loaded automatically via Docker `env_file: .env`. Gemini 2.5 Flash is the default for all modules; `strategy_orchestrator` uses `gemini-2.5-pro` (most capable, supports thinking mode natively).
+**Config keys:** `llm.enabled`, `llm.sentiment.enabled`, `llm.post_session.enabled`, `llm_orchestrator.enabled`, `llm_orchestrator.mode` (`portfolio`|`per_symbol`), `llm_orchestrator.price_invalidation_pct`, `llm_orchestrator.pnl_history_size`.
+
+**Required env vars:** `ANTHROPIC_API_KEY` (Claude, optional if all backends are Gemini), `GOOGLE_GEMINI_API_KEY` (Gemini). Loaded automatically via Docker `env_file: .env`. Default backend for all modules: Gemini 2.5 Flash.
 
 **Sentiment pipeline:** `news.enabled: true` → `_refresh_news_cache()` fetches both catalyst bools AND raw articles → `_enrich_market_state()` calls `NewsSentimentAnalyzer` per symbol (15-min TTL cache) → injects into `market_state` for strategy consumption.
 
