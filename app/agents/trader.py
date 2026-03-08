@@ -302,6 +302,9 @@ class TradingAgent:
         # Per-symbol stuck-count: blacklist symbol for 1h after 2 consecutive stuck buy timeouts
         self._stuck_timeout_counts: dict[tuple[str, str], int] = {}
         self._symbol_stuck_blacklist: dict[tuple[str, str], datetime] = {}
+        # Dust blacklist: permanently skip symbols that fail close_position with min_qty error
+        # (sub-minimum positions that the broker API can never close — retry every cycle is wasteful)
+        self._dust_blacklist: set[tuple[str, str]] = set()
         # PDT-blocked symbols: suppress sell retries until next trading day
         self._pdt_blocked: set[tuple[str, str]] = set()
         self._pdt_blocked_date: date | None = None
@@ -1335,6 +1338,10 @@ class TradingAgent:
                 _positions = market_state.get("portfolio", {}).get("positions", {})
                 _cqty = float(_positions.get(symbol, {}).get("qty", 0) or 0)
                 if _cqty > 0:
+                    # Dust blacklist: broker can't close this position (sub-minimum qty) — skip silently
+                    if (broker_name, symbol) in self._dust_blacklist:
+                        self._emit_decision_trace(trace, "skip", "dust_blacklist", "sizing")
+                        return None
                     # PDT-blocked symbols: suppress sell retries until next day
                     if (broker_name, symbol) in self._pdt_blocked:
                         _slog.event("debug", "pdt_blocked", symbol=symbol, broker=broker_name)
@@ -1394,6 +1401,10 @@ class TradingAgent:
                 self._emit_decision_trace(trace, "hold", "strategies_hold", "signal")
                 return None
             if action == "exit":
+                # Dust blacklist: broker can't close this position (sub-minimum qty) — skip silently
+                if (broker_name, symbol) in self._dust_blacklist:
+                    self._emit_decision_trace(trace, "skip", "dust_blacklist", "sizing")
+                    return None
                 # PDT guard: don't close equity positions that would trigger a day-trade violation
                 if (broker_name, symbol) in self._pdt_blocked or self._would_trigger_pdt_swing(broker_name, symbol, market_state):
                     _slog.event("debug", "pdt_swing_hold", symbol=symbol, broker=broker_name,
@@ -1402,7 +1413,21 @@ class TradingAgent:
                     return None
                 if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
                     self._open_order_mgr.remove_pending(symbol, broker=broker_name)
-                self.broker.close_position(symbol, broker=broker_name)
+                try:
+                    self.broker.close_position(symbol, broker=broker_name)
+                except Exception as _ce:
+                    _ce_str = str(_ce)
+                    if "40310000" in _ce_str or "minimal qty" in _ce_str.lower():
+                        self._dust_blacklist.add((broker_name, symbol))
+                        logging.warning(
+                            "Dust position blacklisted %s/%s — broker cannot close (sub-minimum); "
+                            "suppressing future attempts until restart",
+                            broker_name, symbol,
+                        )
+                        self._emit_decision_trace(trace, "skip", "dust_blacklist", "sizing")
+                    else:
+                        logging.warning("Exit close_position failed %s/%s: %s", broker_name, symbol, _ce)
+                    return None
                 self._emit_decision_trace(trace, "exit", "strategy_exit", "signal")
                 return None
 
@@ -1540,7 +1565,17 @@ class TradingAgent:
                                 broker_name, symbol, current_qty,
                             )
                     except Exception as _de:
-                        logging.warning("Dust close failed %s/%s: %s", broker_name, symbol, _de)
+                        _de_str = str(_de)
+                        # 40310000 = min_qty violation: position is permanently un-closeable via API
+                        if "40310000" in _de_str or "minimal qty" in _de_str.lower():
+                            self._dust_blacklist.add((broker_name, symbol))
+                            logging.warning(
+                                "Dust position blacklisted %s/%s qty=%.2e — broker cannot close (sub-minimum); "
+                                "suppressing future attempts until restart",
+                                broker_name, symbol, current_qty,
+                            )
+                        else:
+                            logging.warning("Dust close failed %s/%s: %s", broker_name, symbol, _de)
                     return None
                 if skip_reason:
                     self._record_risk_outcome(symbol, action, False, str(skip_reason), broker_name)
