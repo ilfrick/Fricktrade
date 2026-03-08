@@ -217,7 +217,8 @@ Claude and Gemini are used on slow, non-critical paths — never in the real-tim
 
 | Module | Backend | Trigger | Purpose |
 |--------|---------|---------|---------|
-| `client.py` | Both | On demand | Unified LLMClient with daily budget circuit breaker ($5/day default), retry/backoff, `critical=True` bypass for risk calls. Default backends: `ClaudeBackend` (`claude-sonnet-4-6`) and `GeminiBackend` (`gemini-2.5-flash`, thinking disabled). |
+| `client.py` | Both | On demand | Unified LLMClient with daily budget circuit breaker ($5/day default), retry/backoff, `critical=True` bypass for risk calls. `complete()` accepts `model=` kwarg to override per-call. Default backends: `ClaudeBackend` (`claude-sonnet-4-6`) and `GeminiBackend` (`gemini-2.5-flash`, thinking disabled for flash; pro auto-detects thinking support). |
+| `strategy_orchestrator.py` | Gemini 2.5 Pro | Per-symbol, every cycle | **Final trade decision-maker**: synthesises regime, indicators, alt-data, strategy signals, and rolling P&L into a single buy/sell/hold + reduce_pct. Falls back to `_combine_signals()` on skip/failure. Config: `llm_orchestrator.*`. |
 | `sentiment.py` | Gemini | Per-symbol, market hours | Scores news sentiment −1.0→+1.0; injects `llm_sentiment`, `llm_sentiment_bias`, `llm_risk_flag` into `market_state` |
 | `macro_regime.py` | Gemini | 4h TTL cache | Classifies macro regime (5 states) using FRED data (VIX, DGS10, DXY) + Gemini; overrides strategy weights per regime |
 | `symbols_filter.py` | Gemini | Pre-market (optional, disabled) | Selects top N symbols from candidates with sector/momentum context |
@@ -225,9 +226,11 @@ Claude and Gemini are used on slow, non-critical paths — never in the real-tim
 | `meta_orchestrator.py` | Gemini | Weekly (Sunday, disabled until 3+ reports) | Reviews session reports, recommends strategy weight changes (human confirmation required) |
 | `risk_interpreter.py` | Gemini | On risk alert | Triages drift/drawdown alerts: structural break vs noise; recommends action |
 
-**Config keys:** `llm.enabled`, `llm.sentiment.enabled`, `llm.post_session.enabled`, etc.
+**Signal enrichment:** `_enrich_signals()` in `trader.py` adjusts every strategy's `confidence` in-place (before combine) using regime multiplier, LLM sentiment, fear/greed, OI change, RSI extremes, ATR volatility, and insider sentiment. Adds `context_mult` field to each signal for trace debugging. No strategy files modified.
 
-**Required env vars:** `ANTHROPIC_API_KEY` (Claude, optional if all backends are Gemini), `GOOGLE_GEMINI_API_KEY` (Gemini). Gemini 2.5 Flash is the default for all modules; Claude Sonnet 4.6 is the fallback if `LLM_CLAUDE_MODEL` is set.
+**Config keys:** `llm.enabled`, `llm.sentiment.enabled`, `llm.post_session.enabled`, `llm_orchestrator.enabled`, etc.
+
+**Required env vars:** `ANTHROPIC_API_KEY` (Claude, optional if all backends are Gemini), `GOOGLE_GEMINI_API_KEY` (Gemini). Loaded automatically via Docker `env_file: .env`. Gemini 2.5 Flash is the default for all modules; `strategy_orchestrator` uses `gemini-2.5-pro` (most capable, supports thinking mode natively).
 
 **Sentiment pipeline:** `news.enabled: true` → `_refresh_news_cache()` fetches both catalyst bools AND raw articles → `_enrich_market_state()` calls `NewsSentimentAnalyzer` per symbol (15-min TTL cache) → injects into `market_state` for strategy consumption.
 

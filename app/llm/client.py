@@ -37,7 +37,9 @@ class LLMResponse:
 
     def parse_json(self) -> dict:
         """Extract JSON from response, handling markdown fences."""
-        text = self.content.strip()
+        text = (self.content or "").strip()
+        if not text:
+            raise ValueError("Empty LLM response")
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
             text = text.rsplit("```", 1)[0]
@@ -97,6 +99,7 @@ class LLMBackend(ABC):
         user_prompt: str,
         max_tokens: int = 4096,
         temperature: float = 0.2,
+        model: Optional[str] = None,
     ) -> LLMResponse: ...
 
 
@@ -122,10 +125,12 @@ class ClaudeBackend(LLMBackend):
         user_prompt: str,
         max_tokens: int = 4096,
         temperature: float = 0.2,
+        model: Optional[str] = None,
     ) -> LLMResponse:
         t0 = time.monotonic()
+        effective_model = model or self.model
         response = self.client.messages.create(
-            model=self.model,
+            model=effective_model,
             max_tokens=max_tokens,
             temperature=temperature,
             system=system_prompt,
@@ -142,7 +147,7 @@ class ClaudeBackend(LLMBackend):
 
         return LLMResponse(
             content=response.content[0].text,
-            model=self.model,
+            model=effective_model,
             input_tokens=input_tok,
             output_tokens=output_tok,
             latency_ms=round(latency, 1),
@@ -173,16 +178,21 @@ class GeminiBackend(LLMBackend):
         user_prompt: str,
         max_tokens: int = 4096,
         temperature: float = 0.2,
+        model: Optional[str] = None,
     ) -> LLMResponse:
         t0 = time.monotonic()
+        effective_model = model or self.model
+        # gemini-2.5-pro supports thinking; disabling it (budget=0) is rejected
+        use_thinking = "pro" in effective_model
+        thinking_cfg = {} if use_thinking else {"thinking_config": {"thinking_budget": 0}}
         response = self.client.models.generate_content(
-            model=self.model,
+            model=effective_model,
             contents=user_prompt,
             config={
                 "system_instruction": system_prompt,
                 "max_output_tokens": max_tokens,
                 "temperature": temperature,
-                "thinking_config": {"thinking_budget": 0},
+                **thinking_cfg,
             },
         )
         latency = (time.monotonic() - t0) * 1000
@@ -194,20 +204,23 @@ class GeminiBackend(LLMBackend):
             + output_tok * self.OUTPUT_COST_PER_M / 1_000_000
         )
 
-        # response.text can be None when thinking consumes all tokens; fall back to parts
+        # response.text can be None when thinking consumes all tokens; fall back to parts.
+        # Skip thought=True parts (internal reasoning) — only take the actual response part.
         content = response.text
-        if content is None:
+        if not content:
             for candidate in (response.candidates or []):
                 for part in getattr(getattr(candidate, "content", None), "parts", None) or []:
-                    if getattr(part, "text", None):
+                    if getattr(part, "text", None) and not getattr(part, "thought", False):
                         content = part.text
                         break
-                if content is not None:
+                if content:
                     break
+        if not content:
+            content = ""
 
         return LLMResponse(
             content=content,
-            model=self.model,
+            model=effective_model,
             input_tokens=input_tok,
             output_tokens=output_tok,
             latency_ms=round(latency, 1),
@@ -256,6 +269,7 @@ class LLMClient:
         retries: int = 3,
         retry_delay: float = 2.0,
         critical: bool = False,
+        model: Optional[str] = None,
     ) -> LLMResponse:
         """
         Send a completion request with automatic retries.
@@ -284,7 +298,7 @@ class LLMClient:
         for attempt in range(retries):
             try:
                 response = b.complete(
-                    system_prompt, user_prompt, max_tokens, temperature
+                    system_prompt, user_prompt, max_tokens, temperature, model=model
                 )
                 tracker.record(response)
                 logger.info(

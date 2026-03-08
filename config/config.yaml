@@ -1107,3 +1107,11 @@ quote_stream:
   enabled: false   # disabled: websockets version incompatible with alpaca-py (extra_headers kwarg)
   feed: iex
   crypto: true
+
+llm_orchestrator:
+  enabled: true
+  provider: gemini
+  model: gemini-2.5-flash  # flash: reliable JSON output, <1s latency, 33x cheaper than pro
+  max_tokens: 1024
+  min_signal_score: 0.03   # skip LLM if no strategy has confidence > 3%
+  pnl_history_size: 20     # completed trades kept in rolling window for prompt
