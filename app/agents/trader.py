@@ -1220,7 +1220,8 @@ class TradingAgent:
                 # exiting profitable positions the vote wants to hold (bad).
                 if llm_active and action in ("sell", "exit") and shadow_action == "hold":
                     _llm_exit_allowed = False
-                    _pos_st = broker_state.position_state.get(symbol) or {}
+                    # broker_state not yet resolved here — read avg_entry from market_state
+                    _pos_st = (market_state.get("portfolio") or {}).get("positions", {}).get(symbol) or {}
                     _avg_entry = _pos_st.get("avg_entry")
                     _lp = float(market_state.get("last_price") or 0)
                     if _avg_entry and float(_avg_entry) > 0 and _lp > 0:
