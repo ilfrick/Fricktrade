@@ -1337,7 +1337,7 @@ class TradingAgent:
             if action in ("hold", "buy"):
                 _positions = market_state.get("portfolio", {}).get("positions", {})
                 _cqty = float(_positions.get(symbol, {}).get("qty", 0) or 0)
-                if _cqty > 0:
+                if _cqty >= 1e-6:  # skip dust positions — cannot be closed via API
                     # PDT-blocked symbols: suppress sell retries until next day
                     if (broker_name, symbol) in self._pdt_blocked:
                         _slog.event("debug", "pdt_blocked", symbol=symbol, broker=broker_name)
