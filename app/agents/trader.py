@@ -2847,9 +2847,6 @@ class TradingAgent:
     ) -> tuple[str, float, str | None]:
         if not signals:
             return "hold", 1.0, None
-        for signal in signals:
-            if signal.get("action") == "exit":
-                return "exit", 1.0, signal.get("name")
         mode = self._combine_mode
         if mode == "priority":
             order = order or self._strategy_names
@@ -2864,6 +2861,8 @@ class TradingAgent:
             vote_counts: dict[str, int] = {"buy": 0, "sell": 0, "hold": 0}
             for signal in signals:
                 a = signal.get("action", "hold")
+                if a == "exit":
+                    a = "sell"  # exit is a sell vote; no pre-emption in vote mode
                 if a in vote_counts:
                     vote_counts[a] += 1
             max_votes = max(vote_counts.values())
