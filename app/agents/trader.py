@@ -1103,6 +1103,10 @@ class TradingAgent:
                     allowed = strategy_symbols.get(name)
                     if isinstance(allowed, list) and allowed and symbol not in allowed:
                         continue
+                # factor_model is an equity mean-reversion strategy; not suitable for
+                # crypto momentum assets — skip it for all crypto symbols.
+                if "/" in symbol and name == "factor_model":
+                    continue
                 strategy = self._get_strategy(strategy_broker, symbol, name)
                 if not strategy:
                     continue
@@ -1210,7 +1214,12 @@ class TradingAgent:
                     filtered_signals, weights, order=names, market_state=market_state
                 )
                 llm_active = action != "hold" or action_strategy is not None
-                if not llm_active:
+                # LLM exit constraint: only allow LLM to exit when signals also say
+                # sell/exit. If signals say hold but LLM says sell, use hold.
+                if llm_active and action in ("sell", "exit") and shadow_action == "hold":
+                    action, reduce_pct, action_strategy = shadow_action, shadow_reduce, shadow_strategy
+                    llm_active = False
+                elif not llm_active:
                     action, reduce_pct, action_strategy = shadow_action, shadow_reduce, shadow_strategy
                 if trace:
                     trace["shadow_combine"] = shadow_action
@@ -1257,10 +1266,14 @@ class TradingAgent:
                     action, reduce_pct, action_strategy = self._portfolio_orchestrator.get_decision(
                         symbol, last_price
                     )
+                    _shadow2, _red2, _strat2 = self._combine_signals(
+                        filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
+                    )
                     if action == "hold" and action_strategy is None:
-                        action, reduce_pct, action_strategy = self._combine_signals(
-                            filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
-                        )
+                        action, reduce_pct, action_strategy = _shadow2, _red2, _strat2
+                    elif action in ("sell", "exit") and _shadow2 == "hold":
+                        # LLM exit constraint: signals say hold, don't exit
+                        action, reduce_pct, action_strategy = _shadow2, _red2, _strat2
                 else:
                     action, reduce_pct, action_strategy = self._combine_signals(
                         filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
