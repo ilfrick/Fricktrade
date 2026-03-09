@@ -1337,6 +1337,17 @@ class TradingAgent:
             if action in ("hold", "buy"):
                 _positions = market_state.get("portfolio", {}).get("positions", {})
                 _cqty = float(_positions.get(symbol, {}).get("qty", 0) or 0)
+                if 0 < _cqty < 1e-6:
+                    # Dust position — sub-minimum qty, cannot close via normal order.
+                    # For Binance, attempt transfer_dust() to convert to BNB once per cycle.
+                    try:
+                        _broker_obj = self._broker_map.get(broker_name)
+                        if _broker_obj is not None and hasattr(_broker_obj, "client"):
+                            _base = symbol.split("/")[0].upper() if "/" in symbol else symbol.upper()
+                            _broker_obj.client.transfer_dust(asset=[_base])
+                            logging.info("Dust conversion triggered for %s/%s (qty=%.2e)", broker_name, symbol, _cqty)
+                    except Exception:
+                        pass  # dust conversion is best-effort; silently skip if unsupported
                 if _cqty >= 1e-6:  # skip dust positions — cannot be closed via API
                     # PDT-blocked symbols: suppress sell retries until next day
                     if (broker_name, symbol) in self._pdt_blocked:

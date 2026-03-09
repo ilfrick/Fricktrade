@@ -98,6 +98,20 @@ def _floor_to_step(qty: float, step: float) -> float:
     return math.floor(qty * factor) / factor
 
 
+def _qty_str(qty: float, step: float) -> str:
+    """Format quantity with the exact decimal precision implied by LOT_SIZE step.
+
+    Binance rejects orders with -1111 ('too much precision') when str(float)
+    produces extra decimal places from floating-point arithmetic.  Deriving
+    the number of decimal places from the step string avoids this.
+    """
+    if step <= 0 or step >= 1.0:
+        return str(int(qty))
+    step_s = f"{step:.10f}".rstrip("0")
+    decimals = len(step_s.split(".")[-1]) if "." in step_s else 0
+    return f"{qty:.{decimals}f}"
+
+
 class BinanceBroker(Broker):
     """Broker adapter for Binance Spot or Futures (FAPI) trading."""
 
@@ -364,11 +378,11 @@ class BinanceBroker(Broker):
                     raise ValueError("limit_price required for limit orders")
                 return self.client.order_limit(
                     symbol=binance_sym, side=side_upper,
-                    quantity=str(adj_qty), price=str(float(limit_price)),
+                    quantity=_qty_str(adj_qty, step), price=str(float(limit_price)),
                     timeInForce="GTC",
                 )
             return self.client.order_market(
-                symbol=binance_sym, side=side_upper, quantity=str(adj_qty)
+                symbol=binance_sym, side=side_upper, quantity=_qty_str(adj_qty, step)
             )
 
         order = record_broker_call(self._name, "place_order", _submit)
@@ -405,7 +419,7 @@ class BinanceBroker(Broker):
             order = record_broker_call(
                 self._name, "close_position_sell",
                 lambda: self.client.order_market_sell(
-                    symbol=binance_sym, quantity=str(sell_qty)
+                    symbol=binance_sym, quantity=_qty_str(sell_qty, step)
                 ),
             )
             self._register_order(order, binance_sym)
