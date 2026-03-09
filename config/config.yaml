@@ -306,7 +306,7 @@ strategy:
     lookback_minutes: 10
     entry_threshold_pct: 0.5
     exit_threshold_pct: 0.15
-    position_horizon_minutes: 20
+    position_horizon_minutes: 0    # disabled — hard/trailing stops and TP handle exits
     min_hold_minutes: 15        # suppress all stop/take-profit exits for 15 min after entry
     allow_shorts: true
     trend_following:
