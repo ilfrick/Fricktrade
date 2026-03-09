@@ -1214,11 +1214,31 @@ class TradingAgent:
                     filtered_signals, weights, order=names, market_state=market_state
                 )
                 llm_active = action != "hold" or action_strategy is not None
-                # LLM exit constraint: only allow LLM to exit when signals also say
-                # sell/exit. If signals say hold but LLM says sell, use hold.
+                # LLM exit constraint: LLM may exit against a hold vote only when the
+                # position is already in drawdown past the configured threshold.
+                # This lets the LLM cut losses (good) while preventing it from
+                # exiting profitable positions the vote wants to hold (bad).
                 if llm_active and action in ("sell", "exit") and shadow_action == "hold":
-                    action, reduce_pct, action_strategy = shadow_action, shadow_reduce, shadow_strategy
-                    llm_active = False
+                    _llm_exit_allowed = False
+                    _pos_st = broker_state.position_state.get(symbol) or {}
+                    _avg_entry = _pos_st.get("avg_entry")
+                    _lp = float(market_state.get("last_price") or 0)
+                    if _avg_entry and float(_avg_entry) > 0 and _lp > 0:
+                        _dd = (_lp - float(_avg_entry)) / float(_avg_entry)
+                        _orch_cfg = self.cfg.get("llm_orchestrator", {}) or {}
+                        if "/" in symbol:
+                            _dd_thresh = -float(_orch_cfg.get("exit_drawdown_pct_crypto", 1.5)) / 100.0
+                        else:
+                            _dd_thresh = -float(_orch_cfg.get("exit_drawdown_pct_equity", 0.5)) / 100.0
+                        _llm_exit_allowed = _dd <= _dd_thresh
+                        if _llm_exit_allowed:
+                            logging.debug(
+                                "LLM exit allowed (vote=hold, drawdown=%.2f%% <= %.2f%%) %s",
+                                _dd * 100, _dd_thresh * 100, symbol,
+                            )
+                    if not _llm_exit_allowed:
+                        action, reduce_pct, action_strategy = shadow_action, shadow_reduce, shadow_strategy
+                        llm_active = False
                 elif not llm_active:
                     action, reduce_pct, action_strategy = shadow_action, shadow_reduce, shadow_strategy
                 if trace:
@@ -1272,8 +1292,21 @@ class TradingAgent:
                     if action == "hold" and action_strategy is None:
                         action, reduce_pct, action_strategy = _shadow2, _red2, _strat2
                     elif action in ("sell", "exit") and _shadow2 == "hold":
-                        # LLM exit constraint: signals say hold, don't exit
-                        action, reduce_pct, action_strategy = _shadow2, _red2, _strat2
+                        # LLM exit constraint: allow only when position is in drawdown
+                        _llm_exit2_allowed = False
+                        _pos_st2 = broker_state.position_state.get(symbol) or {}
+                        _avg_entry2 = _pos_st2.get("avg_entry")
+                        _lp2 = float(market_state.get("last_price") or 0)
+                        if _avg_entry2 and float(_avg_entry2) > 0 and _lp2 > 0:
+                            _dd2 = (_lp2 - float(_avg_entry2)) / float(_avg_entry2)
+                            _orch_cfg2 = self.cfg.get("llm_orchestrator", {}) or {}
+                            if "/" in symbol:
+                                _dd_thresh2 = -float(_orch_cfg2.get("exit_drawdown_pct_crypto", 1.5)) / 100.0
+                            else:
+                                _dd_thresh2 = -float(_orch_cfg2.get("exit_drawdown_pct_equity", 0.5)) / 100.0
+                            _llm_exit2_allowed = _dd2 <= _dd_thresh2
+                        if not _llm_exit2_allowed:
+                            action, reduce_pct, action_strategy = _shadow2, _red2, _strat2
                 else:
                     action, reduce_pct, action_strategy = self._combine_signals(
                         filtered_signals, filtered_weights, order=allowed_names, market_state=market_state

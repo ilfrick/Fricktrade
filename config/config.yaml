@@ -1054,3 +1054,5 @@ llm_orchestrator:
   min_signal_score: 0.03   # skip LLM if no symbol has confidence > 3%
   pnl_history_size: 100    # completed trades kept in rolling window for strategy win-rate stats
   price_invalidation_pct: 0.01  # invalidate cached decision if price moves ≥ 1% since last LLM call
+  exit_drawdown_pct_crypto: 1.5   # LLM may exit against hold vote when crypto position is down ≥ 1.5%
+  exit_drawdown_pct_equity: 0.5   # LLM may exit against hold vote when equity position is down ≥ 0.5%
