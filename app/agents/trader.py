@@ -1999,8 +1999,18 @@ class TradingAgent:
                     if status == "completed":
                         self._clear_exit_backoff(response.broker, response.symbol)
                     elif status == "rejected":
-                        self._record_exit_failure(response.broker, response.symbol)
-                        if getattr(response, "reason", "") == "pdt_protection":
+                        _rej_reason = getattr(response, "reason", "")
+                        if _rej_reason == "floors_to_zero":
+                            # Sub-step dust: can never close via place_order; suppress for 8h
+                            _bk = (response.broker, response.symbol)
+                            self._exit_backoff_until[_bk] = datetime.now(timezone.utc) + timedelta(hours=8)
+                            logging.warning(
+                                "floors_to_zero dust %s/%s — exit suppressed for 8h",
+                                response.broker, response.symbol,
+                            )
+                        else:
+                            self._record_exit_failure(response.broker, response.symbol)
+                        if _rej_reason == "pdt_protection":
                             self._pdt_blocked.add((response.broker, response.symbol))
                             logging.warning("PDT block recorded for %s/%s — suppressing sell retries", response.broker, response.symbol)
                 # TCA slippage tracking on completed fills
