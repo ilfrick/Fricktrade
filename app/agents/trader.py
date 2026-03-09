@@ -1158,7 +1158,9 @@ class TradingAgent:
                         signal["signal_bias_block"] = "positive_bias"
         
         # Enrich signal confidences with all available context data (regime, sentiment, alt-data, indicators)
-        self._enrich_signals(signals, market_state, symbol)
+        # Skip in vote mode — combine only counts action direction, never reads confidence
+        if self._combine_mode != "vote":
+            self._enrich_signals(signals, market_state, symbol)
 
         if trace:
             trace["signals"] = [
@@ -1333,6 +1335,10 @@ class TradingAgent:
                 trace["action_strategy"] = action_strategy
                 trace["broker"] = broker_name
 
+            # PDT swing is equity-only — compute once here for all exit/sell checks below.
+            # Crypto symbols always False (short-circuit). Equities: checked once, cached.
+            _pdt_swing = "/" not in symbol and self._would_trigger_pdt_swing(broker_name, symbol, market_state)
+
             # Position-aware exit: override hold/buy to sell_to_close for held positions
             if action in ("hold", "buy"):
                 _positions = market_state.get("portfolio", {}).get("positions", {})
@@ -1353,7 +1359,7 @@ class TradingAgent:
                     if (broker_name, symbol) in self._pdt_blocked:
                         _slog.event("debug", "pdt_blocked", symbol=symbol, broker=broker_name)
                     # PDT force-swing: hold overnight instead of triggering a day-trade violation
-                    elif self._would_trigger_pdt_swing(broker_name, symbol, market_state):
+                    elif _pdt_swing:
                         _slog.event("debug", "pdt_swing_hold", symbol=symbol, broker=broker_name,
                                     daytrade_count=(market_state.get("account_flags") or {}).get("daytrade_count"))
                     # Check exit backoff before evaluating exit
@@ -1422,7 +1428,7 @@ class TradingAgent:
                     self._emit_decision_trace(trace, "skip", "sub_min_qty", "sizing")
                     return None
                 # PDT guard: don't close equity positions that would trigger a day-trade violation
-                if (broker_name, symbol) in self._pdt_blocked or self._would_trigger_pdt_swing(broker_name, symbol, market_state):
+                if (broker_name, symbol) in self._pdt_blocked or _pdt_swing:
                     _slog.event("debug", "pdt_swing_hold", symbol=symbol, broker=broker_name,
                                 daytrade_count=(market_state.get("account_flags") or {}).get("daytrade_count"))
                     self._emit_decision_trace(trace, "hold", "pdt_swing", "signal")
@@ -1448,7 +1454,7 @@ class TradingAgent:
 
             # PDT guard for sell actions (covers strategies returning "sell" directly)
             if action == "sell" and "/" not in symbol:
-                if (broker_name, symbol) in self._pdt_blocked or self._would_trigger_pdt_swing(broker_name, symbol, market_state):
+                if (broker_name, symbol) in self._pdt_blocked or _pdt_swing:
                     _slog.event("debug", "pdt_swing_hold", symbol=symbol, broker=broker_name,
                                 daytrade_count=(market_state.get("account_flags") or {}).get("daytrade_count"))
                     self._emit_decision_trace(trace, "hold", "pdt_swing", "signal")

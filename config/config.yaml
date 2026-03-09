@@ -952,7 +952,7 @@ execution:
     enabled: true
     interval_seconds: 30
     skip_if_pending: true
-    missing_grace_seconds: 30
+    missing_grace_seconds: 5   # Alpaca/Binance market fills in <1s; 30 was doubling detection lag
   algos:
     enabled: true
     default: twap
