@@ -1677,21 +1677,23 @@ class TradingAgent:
             # Pending sell qty check: prevent sell orders from overshooting past zero
             _pending_sell_key: tuple[str, str] | None = None
             if action == "sell" and _is_closing_position:
-                _can_short_here = self._can_short(symbol, portfolio)
-                if not _can_short_here:
-                    _pending_sell_key = (broker_name, symbol)
-                    _pending_sells = self._pending_sell_qty.get(_pending_sell_key, 0.0)
-                    _available_qty = current_qty - _pending_sells
-                    if _available_qty <= 0:
-                        self._record_skip(symbol, action, "pending_sell_covers_position", broker_name)
-                        self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
-                        return None
-                    qty = min(qty, int(_available_qty))
-                    if qty <= 0:
-                        self._record_skip(symbol, action, "pending_sell_covers_position", broker_name)
-                        self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
-                        return None
-                    order_notional = qty * last_price
+                # Always guard position-exit sells to prevent duplicate orders every cycle.
+                # Previously only guarded when _can_short() was False, but _can_short()
+                # returns True whenever current_qty > 0, so the guard was never applied
+                # for normal position closes — causing infinite sell stacking in the queue.
+                _pending_sell_key = (broker_name, symbol)
+                _pending_sells = self._pending_sell_qty.get(_pending_sell_key, 0.0)
+                _available_qty = current_qty - _pending_sells
+                if _available_qty <= 0:
+                    self._record_skip(symbol, action, "pending_sell_covers_position", broker_name)
+                    self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
+                    return None
+                qty = min(qty, _available_qty)  # preserve fractional qty (no int() truncation)
+                if qty <= 0:
+                    self._record_skip(symbol, action, "pending_sell_covers_position", broker_name)
+                    self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
+                    return None
+                order_notional = qty * last_price
 
             # Block duplicate buys while an order for this symbol is still pending
             if action == "buy" and not _is_closing_position:
@@ -2001,7 +2003,7 @@ class TradingAgent:
                             response.broker, response.symbol, blacklist_hours, _stuck_count,
                         )
                 # Release pending sell qty on terminal sell responses
-                if side == "sell" and status in ("completed", "rejected", "canceled"):
+                if side == "sell" and status in ("completed", "rejected", "canceled", "timed_out"):
                     _ps_key = (response.broker, response.symbol)
                     _ps_resp_qty = float(response.qty or 0)
                     if _ps_resp_qty > 0 and _ps_key in self._pending_sell_qty:
