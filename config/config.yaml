@@ -283,12 +283,8 @@ strategy:
   - earnings_drift
   - rl_policy
   combine: vote
-  min_conviction: 0.12
-  single_sided_conviction_multiplier: 0.4
-  fee_aware:
-    min_edge_pct: 0.005
-    edge_multiplier: 0.5
-    min_notional: 50.0
+  # min_conviction / single_sided_conviction_multiplier / fee_aware are weighted-mode only;
+  # unused in vote mode (votes are unweighted action counts).
   signal_bias_guard:
     enabled: true
     threshold: 0.65
@@ -397,67 +393,8 @@ orchestrator:
   mode: select
   top_k: 99
   min_score: 0.0
-  strategy_weights:
-    trend_following: 0.15
-    factor_model: 0.13
-    pattern_trading: 0.15
-    stat_arb_pairs: 0.07
-    top_movers_rf: 0.14   # reduced from 0.42 — equity-only RF model should not dominate when crypto is in universe
-    crypto_momentum: 0.13
-    crypto_mean_reversion: 0.08
-    gap_reversal: 0.07
-    earnings_drift: 0.04
-    rl_policy: 0.04
-  rl:
-    enabled: false
-    model_type: lstm
-    device: auto
-    hidden_dim: 32
-    dropout: 0.1
-    num_layers: 1
-    seq_len: 10
-    model_path: /data/orchestrator_model.pt
-    best_model_path: /data/orchestrator_model_best.pt
-    use_best_model: true
-    best_score_path: /data/orchestrator_model_best_score.json
-    learning_rate: 0.001
-    weight_decay: 0.0001
-    batch_size: 64
-    buffer_size: 5000
-    update_steps_per_bar: 1
-    epsilon: 0.2
-    min_price_move_pct: 0.02
-    reward_mode: policy
-    reward_scale: 1.0
-    entropy_coef: 0.01
-    baseline_alpha: 0.1
-    max_grad_norm: 1.0
-    save_interval_seconds: 60
-    score_ema_alpha: 0.1
-    time_penalty_per_bar: 0.15
-    global_time_penalty:
-      enabled: true
-      max_idle_minutes: 15.0
-      penalty_scale: 0.03
-      penalty_type: exponential
-    pretrain:
-      enabled: true
-      in_trader: false
-      provider: alpaca
-      alpaca_api_key: ${ALPACA_API_KEY}
-      alpaca_api_secret: ${ALPACA_API_SECRET}
-      lookback_days: 60
-      interval: 5m
-      window_days: 60
-      coverage_days: 365
-      step_days: 30
-      max_symbols: 100
-      max_samples: 8000
-      epochs: 3
-      warmup_bars: 50
-      symbols_source: alpaca_active_random
-      timeout_seconds: 15
-      retries: 2
+  # strategy_weights and rl sections removed — strategy_weights are ignored in vote mode,
+  # and the LSTM RL orchestrator is disabled. Both were dead config.
 learning:
   enabled: true
   model_path: /app/models/ppo_policy.zip

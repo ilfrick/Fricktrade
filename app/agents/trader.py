@@ -398,18 +398,13 @@ class TradingAgent:
             )
         except Exception as exc:
             logging.warning("LLM init failed (check API keys): %s", exc)
-        # LLM Strategy/Portfolio Orchestrator (makes final trade decisions)
-        self._llm_orchestrator = None
+        # LLM Portfolio Orchestrator (makes final trade decisions)
         self._portfolio_orchestrator = None
         _orch_cfg = self.cfg.get("llm_orchestrator", {}) or {}
         if _orch_cfg.get("enabled", False) and self._llm_client is not None:
             try:
-                if _orch_cfg.get("mode", "per_symbol") == "portfolio":
-                    from app.llm.portfolio_orchestrator import LLMPortfolioOrchestrator as _PortOrch
-                    self._portfolio_orchestrator = _PortOrch(self._llm_client, _orch_cfg)
-                else:
-                    from app.llm.strategy_orchestrator import LLMStrategyOrchestrator as _LLMOrch
-                    self._llm_orchestrator = _LLMOrch(self._llm_client, _orch_cfg)
+                from app.llm.portfolio_orchestrator import LLMPortfolioOrchestrator as _PortOrch
+                self._portfolio_orchestrator = _PortOrch(self._llm_client, _orch_cfg)
             except Exception as exc:
                 logging.warning("LLM orchestrator init failed: %s", exc)
 
@@ -1220,15 +1215,6 @@ class TradingAgent:
                 if trace:
                     trace["shadow_combine"] = shadow_action
                     trace["llm_override"] = llm_active and (action != shadow_action)
-            elif self._llm_orchestrator is not None:
-                action, reduce_pct, action_strategy = self._llm_orchestrator.decide(
-                    symbol, market_state, filtered_signals, weights
-                )
-                if action == "hold" and action_strategy is None:
-                    # LLM skipped/failed — use normal combine
-                    action, reduce_pct, action_strategy = self._combine_signals(
-                        filtered_signals, weights, order=names, market_state=market_state
-                    )
             else:
                 action, reduce_pct, action_strategy = self._combine_signals(
                     filtered_signals, weights, order=names, market_state=market_state
@@ -1270,14 +1256,6 @@ class TradingAgent:
                     last_price = float(market_state.get("last_price") or 0)
                     action, reduce_pct, action_strategy = self._portfolio_orchestrator.get_decision(
                         symbol, last_price
-                    )
-                    if action == "hold" and action_strategy is None:
-                        action, reduce_pct, action_strategy = self._combine_signals(
-                            filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
-                        )
-                elif self._llm_orchestrator is not None:
-                    action, reduce_pct, action_strategy = self._llm_orchestrator.decide(
-                        symbol, market_state, filtered_signals, filtered_weights
                     )
                     if action == "hold" and action_strategy is None:
                         action, reduce_pct, action_strategy = self._combine_signals(
@@ -2038,7 +2016,7 @@ class TradingAgent:
                     except (AttributeError, TypeError, ValueError):
                         pass
                 # LLM orchestrator P&L tracking
-                _active_orch = self._portfolio_orchestrator or self._llm_orchestrator
+                _active_orch = self._portfolio_orchestrator
                 if _active_orch is not None and status == "completed":
                     try:
                         _fill_p = float(getattr(response, "filled_avg_price", 0) or 0)
