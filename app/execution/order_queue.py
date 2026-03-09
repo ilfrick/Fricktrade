@@ -369,6 +369,8 @@ def _reject_reason(code: str, exc: Exception) -> str:
     text = str(exc).lower()
     # Text checks take priority — Alpaca reuses code 40310000 for both
     # "cost basis < $10" and "insufficient balance for USDC/USDT".
+    if "floors to 0" in text or "floors to zero" in text:
+        return "floors_to_zero"  # sub-step qty — will never succeed, do not retry
     if "pattern day trading" in text or "pdt" in text:
         return "pdt_protection"
     if "insufficient balance for" in text:
