@@ -1491,6 +1491,19 @@ class TradingAgent:
             _is_closing_position = action == "sell" and float(
                 portfolio.get("positions", {}).get(symbol, {}).get("qty", 0) or 0
             ) > 0
+            # Min-hold guard on signal-path sells: same rule as _check_position_exit.
+            # Prevents LLM/vote sell signals from exiting a position that was just opened.
+            if _is_closing_position:
+                _min_hold = float(self._strategy_params.get("min_hold_minutes", 0) or 0)
+                if _min_hold > 0:
+                    _pos_state = broker_state.position_state.get(symbol) or {}
+                    _opened_at = _pos_state.get("opened_at")
+                    if _opened_at is not None:
+                        _held_secs = (datetime.now(timezone.utc) - _opened_at).total_seconds()
+                        if _held_secs < _min_hold * 60:
+                            self._record_skip(symbol, action, "min_hold_active", broker_name)
+                            self._emit_decision_trace(trace, "skip", "min_hold_active", "risk")
+                            return None
             if self._is_account_blocked(broker_name):
                 self._record_risk_outcome(symbol, action, False, "account_blocked", broker_name)
                 self._record_skip(symbol, action, "account_blocked", broker_name)
@@ -1987,7 +2000,14 @@ class TradingAgent:
                             response.broker, response.symbol, blacklist_hours, _stuck_count,
                         )
                 # Release pending sell qty on terminal sell responses
-                if side == "sell" and status in ("completed", "rejected", "canceled", "timed_out"):
+                # floors_to_zero: don't release — position can't be closed via place_order;
+                # keep pending_sell_qty set so the guard blocks future signal-path sell attempts
+                _floors_to_zero = (
+                    side == "sell"
+                    and status == "rejected"
+                    and getattr(response, "reason", "") == "floors_to_zero"
+                )
+                if side == "sell" and not _floors_to_zero and status in ("completed", "rejected", "canceled", "timed_out"):
                     _ps_key = (response.broker, response.symbol)
                     _ps_resp_qty = float(response.qty or 0)
                     if _ps_resp_qty > 0 and _ps_key in self._pending_sell_qty:
