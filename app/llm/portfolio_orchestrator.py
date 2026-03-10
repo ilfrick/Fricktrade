@@ -326,9 +326,22 @@ class LLMPortfolioOrchestrator:
             held = positions.get(sym, {})
             held_str = f" [pos:{float(held.get('qty',0)):.4g}]" if held else ""
 
+            # News pipeline: Ollama catalyst flag + Gemini sentiment score
+            news_str = ""
+            if ms.get("catalyst"):
+                news_str += " CAT"
+            sent = ms.get("llm_sentiment") or {}
+            if sent:
+                sent_bias = str(sent.get("bias", "neutral") or "neutral")[:4]
+                sent_score = float(sent.get("score", 0.5) or 0.5)
+                sent_rf = str(sent.get("risk_flag", "none") or "none")
+                news_str += f" SENT={sent_bias}:{sent_score:.2f}"
+                if sent_rf not in ("none", ""):
+                    news_str += f"[{sent_rf[:4]}]"
+
             sym_lines.append(
                 f"{sym:<14} RSI={rsi:.0f} ATR={atr_pct:.1f}% VWAP={vwap_dev:+.1f}% H={hurst:.2f}"
-                f"{held_str} | {sig_str}"
+                f"{held_str}{news_str} | {sig_str}"
             )
 
         prompt = (
