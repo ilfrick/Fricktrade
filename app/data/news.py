@@ -13,6 +13,16 @@ import requests
 from app.brokers.config_utils import get_alpaca_account_cfg
 
 
+def _to_alpaca_ticker(sym: str) -> str:
+    """Convert internal symbol to Alpaca news ticker format. BTC/USD → BTCUSD."""
+    return sym.replace("/", "")
+
+
+def _alpaca_reverse_map(symbols: list[str]) -> dict[str, str]:
+    """Build {alpaca_ticker: internal_symbol} for reverse-mapping returned tickers."""
+    return {s.replace("/", ""): s for s in symbols}
+
+
 def fetch_catalyst_symbols(
     symbols: Iterable[str],
     provider: str,
@@ -110,7 +120,8 @@ def _fetch_alpaca_news(
     retries: int,
 ) -> dict[str, bool]:
     url = f"{base_url.rstrip('/')}/v1beta1/news"
-    params = {"symbols": ",".join(symbols), "limit": 50}
+    rev = _alpaca_reverse_map(symbols)
+    params = {"symbols": ",".join(_to_alpaca_ticker(s) for s in symbols), "limit": 50}
     headers = {
         "APCA-API-KEY-ID": api_key,
         "APCA-API-SECRET-KEY": api_secret,
@@ -154,8 +165,9 @@ def _fetch_alpaca_news(
             if keywords_lower and not any(k in headline for k in keywords_lower):
                 continue
         for sym in item.get("symbols", []) or []:
-            if sym in catalysts:
-                catalysts[sym] = True
+            internal = rev.get(sym, sym)
+            if internal in catalysts:
+                catalysts[internal] = True
     return catalysts
 
 
@@ -205,12 +217,13 @@ def fetch_news_features(
         headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret}
 
         result: dict[str, dict] = {s: {"catalyst": False, "article_count": 0, "recency_hours": float(lookback_hours)} for s in symbols}
+        rev = _alpaca_reverse_map(symbols)
 
         # Chunk symbols so each group gets a fair share of API results
         chunk_size = 50
         for chunk_start in range(0, len(symbols), chunk_size):
             chunk = symbols[chunk_start : chunk_start + chunk_size]
-            params: dict = {"symbols": ",".join(chunk), "limit": 50}
+            params: dict = {"symbols": ",".join(_to_alpaca_ticker(s) for s in chunk), "limit": 50}
             if as_of is not None:
                 end_dt = as_of if as_of.tzinfo else as_of.replace(tzinfo=timezone.utc)
                 start_dt = end_dt - timedelta(hours=lookback_hours)
@@ -248,13 +261,14 @@ def fetch_news_features(
                 age_hours = float((ref_time - created_at).total_seconds() / 3600.0) if created_at else float(lookback_hours)
                 age_hours = min(age_hours, float(lookback_hours))
                 for sym in item.get("symbols", []) or []:
-                    if sym not in result:
+                    internal = rev.get(sym, sym)
+                    if internal not in result:
                         continue
-                    result[sym]["article_count"] += 1
+                    result[internal]["article_count"] += 1
                     if is_catalyst:
-                        result[sym]["catalyst"] = True
-                    if age_hours < result[sym]["recency_hours"]:
-                        result[sym]["recency_hours"] = age_hours
+                        result[internal]["catalyst"] = True
+                    if age_hours < result[internal]["recency_hours"]:
+                        result[internal]["recency_hours"] = age_hours
 
         return result
     except Exception as exc:
@@ -356,11 +370,12 @@ def _fetch_alpaca_raw_articles(
     }
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     result: dict[str, list[dict]] = {s: [] for s in symbols}
+    rev = _alpaca_reverse_map(symbols)
 
     chunk_size = 50
     for idx in range(0, len(symbols), chunk_size):
         chunk = symbols[idx : idx + chunk_size]
-        params = {"symbols": ",".join(chunk), "limit": 50}
+        params = {"symbols": ",".join(_to_alpaca_ticker(s) for s in chunk), "limit": 50}
         payload = None
         for attempt in range(retries + 1):
             try:
@@ -386,8 +401,9 @@ def _fetch_alpaca_raw_articles(
                 "published_at": created_at_str,
             }
             for sym in item.get("symbols", []) or []:
-                if sym in result and len(result[sym]) < max_per_symbol:
-                    result[sym].append(article)
+                internal = rev.get(sym, sym)
+                if internal in result and len(result[internal]) < max_per_symbol:
+                    result[internal].append(article)
     return result
 
 
