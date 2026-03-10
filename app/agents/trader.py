@@ -726,13 +726,18 @@ class TradingAgent:
         return action
 
     def _check_position_exit(
-        self, symbol: str, last_price: float, broker_state, market_state: dict | None = None
+        self,
+        symbol: str,
+        last_price: float,
+        broker_state,
+        market_state: dict | None = None,
+        signals: list[dict] | None = None,
     ) -> tuple[bool, str]:
         """Check if a held long position should be exited based on risk rules.
 
         Returns (should_exit, reason) where reason is one of:
-            hard_stop, atr_stop, trailing_stop, time_exit, take_profit,
-            partial_take_profit, or empty string.
+            hard_stop, atr_stop, trailing_stop, take_profit, partial_take_profit,
+            alpha_decay, time_exit, opportunity_cost, or empty string.
         """
         pos = broker_state.position_state.get(symbol)
         if not pos or float(pos.get("qty", 0)) <= 0:
@@ -795,12 +800,63 @@ class TradingAgent:
                 TAKE_PROFIT_EXITS.labels(symbol=symbol, reason="partial_take_profit").inc()
                 return True, "partial_take_profit"
 
-        # Time-based exit: held longer than position_horizon_minutes
-        horizon = float(self._strategy_params.get("position_horizon_minutes", 0) or 0)
+        # --- Alpha Decay Exit ---
+        # Exit when the strategy that created this position now actively signals sell.
+        # Only fires when the entry strategy is currently bearish (not merely neutral),
+        # so profitable positions are never cut just because the strategy paused.
         opened_at = pos.get("opened_at")
-        if horizon > 0 and opened_at is not None:
-            if (datetime.now(timezone.utc) - opened_at).total_seconds() > horizon * 60:
-                return True, "time_exit"
+        _alpha_cfg = self._strategy_params.get("alpha_decay_exit") or {}
+        if _alpha_cfg.get("enabled") and signals:
+            _entry_strat = pos.get("strategy")
+            _alpha_min_hold = float(_alpha_cfg.get("min_hold_minutes", 0) or 0)
+            _alpha_elapsed = (datetime.now(timezone.utc) - opened_at).total_seconds() if opened_at else 0
+            if _entry_strat and _alpha_elapsed >= _alpha_min_hold * 60:
+                for _sig in signals:
+                    if _sig.get("name") == _entry_strat and _sig.get("action") == "sell":
+                        return True, "alpha_decay"
+
+        # --- Regime-Conditional Time Exit ---
+        # Extends hold time in trending markets (high Hurst), shortens it in mean-reverting ones.
+        # Falls back to the original fixed position_horizon_minutes when disabled.
+        _rh_cfg = self._strategy_params.get("regime_hold_minutes") or {}
+        if _rh_cfg.get("enabled"):
+            _rh_base = float(_rh_cfg.get("base_minutes", 120) or 120)
+            _hurst = float(
+                (market_state or {}).get("indicators", {}).get("hurst", 0.5) or 0.5
+            )
+            if _hurst > float(_rh_cfg.get("hurst_trending_threshold", 0.6)):
+                _rh_horizon = _rh_base * float(_rh_cfg.get("trending_multiplier", 2.0))
+            elif _hurst < float(_rh_cfg.get("hurst_mr_threshold", 0.45)):
+                _rh_horizon = _rh_base * float(_rh_cfg.get("mean_reverting_multiplier", 0.5))
+            else:
+                _rh_horizon = _rh_base
+            if opened_at is not None:
+                if (datetime.now(timezone.utc) - opened_at).total_seconds() > _rh_horizon * 60:
+                    return True, "time_exit"
+        else:
+            # Original fixed time exit
+            horizon = float(self._strategy_params.get("position_horizon_minutes", 0) or 0)
+            if horizon > 0 and opened_at is not None:
+                if (datetime.now(timezone.utc) - opened_at).total_seconds() > horizon * 60:
+                    return True, "time_exit"
+
+        # --- Opportunity Cost Exit ---
+        # Frees stale flat positions when the portfolio is near full exposure,
+        # making room for stronger setups elsewhere.
+        _opp_cfg = self._strategy_params.get("opportunity_cost_exit") or {}
+        if _opp_cfg.get("enabled") and market_state is not None:
+            _opp_elapsed = (datetime.now(timezone.utc) - opened_at).total_seconds() if opened_at else 0
+            if _opp_elapsed >= float(_opp_cfg.get("min_hold_minutes", 60)) * 60:
+                _port = market_state.get("portfolio") or {}
+                _equity = float(_port.get("equity") or _port.get("account_value") or 1.0)
+                _gross = float(_port.get("gross_exposure") or 0.0)
+                _total_exp_pct = (_gross / _equity * 100.0) if _equity > 0 else 0.0
+                if _total_exp_pct >= float(_opp_cfg.get("exposure_threshold_pct", 80)):
+                    _ind = market_state.get("indicators") or {}
+                    _atr_pct = float(_ind.get("atr_pct", 0.01) or 0.01)
+                    _pnl_pct = (last_price - avg_entry) / avg_entry if avg_entry > 0 else 0.0
+                    if abs(_pnl_pct) < float(_opp_cfg.get("flat_atr_multiplier", 0.5)) * _atr_pct:
+                        return True, "opportunity_cost"
 
         return False, ""
 
@@ -1397,7 +1453,8 @@ class TradingAgent:
                             _lp = _pp[-1] if _pp else None
                         if _lp is not None:
                             _should_exit, _exit_reason = self._check_position_exit(
-                                symbol, float(_lp), broker_state, market_state=market_state
+                                symbol, float(_lp), broker_state,
+                                market_state=market_state, signals=signals,
                             )
                             if _should_exit:
                                 action = "sell_to_close"

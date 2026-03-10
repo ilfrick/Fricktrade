@@ -304,6 +304,21 @@ strategy:
     exit_threshold_pct: 0.15
     position_horizon_minutes: 0    # disabled — hard/trailing stops and TP handle exits
     min_hold_minutes: 15        # suppress all stop/take-profit exits for 15 min after entry
+    alpha_decay_exit:
+      enabled: false            # exit when the entry strategy actively signals sell
+      min_hold_minutes: 30      # don't check alpha decay before this time
+    regime_hold_minutes:
+      enabled: false            # replace fixed position_horizon_minutes with Hurst-scaled hold
+      base_minutes: 120         # baseline; replaces position_horizon_minutes when enabled
+      trending_multiplier: 2.0  # H > hurst_trending_threshold → hold up to 240 min
+      mean_reverting_multiplier: 0.5  # H < hurst_mr_threshold → hold 60 min
+      hurst_trending_threshold: 0.60
+      hurst_mr_threshold: 0.45
+    opportunity_cost_exit:
+      enabled: false            # eject flat stale positions when at exposure cap
+      min_hold_minutes: 60      # don't eject positions younger than this
+      flat_atr_multiplier: 0.5  # "flat" = |pnl_pct| < 0.5 × atr_pct
+      exposure_threshold_pct: 80  # only trigger when portfolio ≥ 80% of max exposure
     allow_shorts: true
     trend_following:
       fast_window: 10
