@@ -1734,6 +1734,11 @@ class TradingAgent:
                     self._emit_decision_trace(trace, "skip", "exposure_cap", "risk")
                     return None
                 crypto_cfg = self.cfg.get("risk", {}).get("crypto", {}) or {}
+                # Allow per-broker override of crypto exposure cap (e.g. Binance is crypto-only)
+                _broker_base = broker_name.split(":")[0]
+                _broker_risk = (self.cfg.get("brokers", {}).get(_broker_base, {}) or {}).get("risk", {}) or {}
+                if _broker_risk:
+                    crypto_cfg = {**crypto_cfg, **_broker_risk}
                 if crypto_cfg:
                     blocked_crypto, crypto_reason = RiskManager.check_crypto_exposure(
                         symbol, action, qty, last_price, portfolio, crypto_cfg,

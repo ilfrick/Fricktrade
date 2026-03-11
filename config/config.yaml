@@ -163,6 +163,8 @@ brokers:
     api_key: ${BINANCE_API_KEY}
     api_secret: ${BINANCE_API_SECRET}
     accounts: []             # optional: named sub-accounts (same structure as alpaca.accounts)
+    risk:
+      max_crypto_exposure_pct: 95.0  # crypto-only broker — global 50% cap doesn't apply here
     fees:
       commission_pct: 0.05  # 0.05% standard futures taker; 0.02% maker
       per_trade_fee: 0.0
