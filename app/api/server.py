@@ -680,7 +680,7 @@ def _merge_secrets(target: dict, source: dict) -> None:
             new_val = target
             for key in path[:-1]:
                 new_val = new_val[key]
-            if new_val[path[-1]] == "***":
+            if new_val[path[-1]] == "***" and current:
                 new_val[path[-1]] = current
         except Exception:
             continue

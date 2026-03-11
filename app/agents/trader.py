@@ -1340,15 +1340,13 @@ class TradingAgent:
                     filtered_weights = {name: weights.get(name, 1.0) for name in allowed_names}
                 if self._portfolio_orchestrator is not None:
                     last_price = float(market_state.get("last_price") or 0)
-                    action, reduce_pct, action_strategy = self._portfolio_orchestrator.get_decision(
+                    _llm2_action, _llm2_reduce, _llm2_strategy = self._portfolio_orchestrator.get_decision(
                         symbol, last_price
                     )
                     _shadow2, _red2, _strat2 = self._combine_signals(
                         filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
                     )
-                    if action == "hold" and action_strategy is None:
-                        action, reduce_pct, action_strategy = _shadow2, _red2, _strat2
-                    elif action in ("sell", "exit") and _shadow2 == "hold":
+                    if _llm2_action in ("sell", "exit") and _shadow2 == "hold":
                         # LLM exit constraint: allow only when position is in drawdown
                         _llm_exit2_allowed = False
                         _pos_st2 = broker_state.position_state.get(symbol) or {}
@@ -1362,8 +1360,14 @@ class TradingAgent:
                             else:
                                 _dd_thresh2 = -float(_orch_cfg2.get("exit_drawdown_pct_equity", 0.5)) / 100.0
                             _llm_exit2_allowed = _dd2 <= _dd_thresh2
-                        if not _llm_exit2_allowed:
+                        if _llm_exit2_allowed:
+                            action, reduce_pct, action_strategy = _llm2_action, _llm2_reduce, _llm2_strategy
+                        else:
                             action, reduce_pct, action_strategy = _shadow2, _red2, _strat2
+                    elif _llm2_action == "hold" and _llm2_strategy is None:
+                        action, reduce_pct, action_strategy = _shadow2, _red2, _strat2
+                    else:
+                        action, reduce_pct, action_strategy = _llm2_action, _llm2_reduce, _llm2_strategy
                 else:
                     action, reduce_pct, action_strategy = self._combine_signals(
                         filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
