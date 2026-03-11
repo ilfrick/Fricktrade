@@ -11,6 +11,7 @@ from typing import Iterable
 import requests
 
 from app.brokers.config_utils import get_alpaca_account_cfg
+from app.data.news_rss import fetch_multi_source_articles, fetch_multi_source_catalysts
 
 
 def _to_alpaca_ticker(sym: str) -> str:
@@ -72,39 +73,61 @@ def fetch_catalyst_symbols_for_config(
     news_cfg: dict,
     brokers_cfg: dict,
 ) -> dict[str, bool]:
+    symbols = list(symbols)
     provider = str(news_cfg.get("provider", "alpaca"))
     alpaca_cfg = get_alpaca_account_cfg(brokers_cfg if isinstance(brokers_cfg, dict) else {})
     api_key = str(news_cfg.get("api_key", "")) or str(alpaca_cfg.get("api_key", ""))
     api_secret = str(news_cfg.get("api_secret", "")) or str(alpaca_cfg.get("api_secret", ""))
+    lookback_hours = int(news_cfg.get("lookback_hours", 12))
+    keywords = list(news_cfg.get("keywords", []))
+    timeout_seconds = int(news_cfg.get("timeout_seconds", 10))
+    retries = int(news_cfg.get("retries", 2))
+    sources_cfg = list(news_cfg.get("sources", []) or [])
+
     if provider != "brokers":
-        return fetch_catalyst_symbols(
+        catalysts = fetch_catalyst_symbols(
             symbols,
             provider=provider,
             base_url=str(news_cfg.get("base_url", "https://data.alpaca.markets")),
             api_key=api_key,
             api_secret=api_secret,
-            lookback_hours=int(news_cfg.get("lookback_hours", 12)),
-            keywords=list(news_cfg.get("keywords", [])),
+            lookback_hours=lookback_hours,
+            keywords=keywords,
             llm_cfg=dict(news_cfg.get("llm", {}) or {}),
-            timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
-            retries=int(news_cfg.get("retries", 2)),
+            timeout_seconds=timeout_seconds,
+            retries=retries,
         )
-    catalysts = {s: False for s in symbols}
-    if alpaca_cfg.get("enabled", True):
-        alpaca = fetch_catalyst_symbols(
-            symbols,
-            provider="alpaca",
-            base_url=str(news_cfg.get("base_url", "https://data.alpaca.markets")),
-            api_key=api_key,
-            api_secret=api_secret,
-            lookback_hours=int(news_cfg.get("lookback_hours", 12)),
-            keywords=list(news_cfg.get("keywords", [])),
-            llm_cfg=dict(news_cfg.get("llm", {}) or {}),
-            timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
-            retries=int(news_cfg.get("retries", 2)),
-        )
-        for sym, is_cat in alpaca.items():
-            catalysts[sym] = catalysts.get(sym, False) or is_cat
+    else:
+        catalysts = {s: False for s in symbols}
+        if alpaca_cfg.get("enabled", True):
+            alpaca = fetch_catalyst_symbols(
+                symbols,
+                provider="alpaca",
+                base_url=str(news_cfg.get("base_url", "https://data.alpaca.markets")),
+                api_key=api_key,
+                api_secret=api_secret,
+                lookback_hours=lookback_hours,
+                keywords=keywords,
+                llm_cfg=dict(news_cfg.get("llm", {}) or {}),
+                timeout_seconds=timeout_seconds,
+                retries=retries,
+            )
+            for sym, is_cat in alpaca.items():
+                catalysts[sym] = catalysts.get(sym, False) or is_cat
+
+    # Merge additional sources (OR logic: any source finding a catalyst counts)
+    if sources_cfg:
+        try:
+            extra = fetch_multi_source_catalysts(
+                symbols, sources_cfg, lookback_hours, keywords,
+                timeout_seconds=timeout_seconds,
+            )
+            for sym, is_cat in extra.items():
+                if sym in catalysts:
+                    catalysts[sym] = catalysts[sym] or is_cat
+        except Exception as exc:
+            logging.warning("Multi-source catalyst fetch failed: %s", exc)
+
     return catalysts
 
 
@@ -334,22 +357,48 @@ def fetch_raw_articles_for_config(
     alpaca_cfg = get_alpaca_account_cfg(brokers_cfg if isinstance(brokers_cfg, dict) else {})
     api_key = str(news_cfg.get("api_key", "")) or str(alpaca_cfg.get("api_key", ""))
     api_secret = str(news_cfg.get("api_secret", "")) or str(alpaca_cfg.get("api_secret", ""))
-    if provider not in ("alpaca", "brokers") or not api_key or not api_secret:
-        return {}
-    try:
-        return _fetch_alpaca_raw_articles(
-            symbols=symbols,
-            base_url=str(news_cfg.get("base_url", "https://data.alpaca.markets")),
-            api_key=api_key,
-            api_secret=api_secret,
-            lookback_hours=int(news_cfg.get("lookback_hours", 12)),
-            timeout_seconds=int(news_cfg.get("timeout_seconds", 10)),
-            retries=int(news_cfg.get("retries", 2)),
-            max_per_symbol=max_per_symbol,
-        )
-    except Exception as exc:
-        logging.warning("fetch_raw_articles_for_config failed: %s", exc)
-        return {}
+    lookback_hours = int(news_cfg.get("lookback_hours", 12))
+    timeout_seconds = int(news_cfg.get("timeout_seconds", 10))
+    sources_cfg = list(news_cfg.get("sources", []) or [])
+
+    result: dict[str, list[dict]] = {s: [] for s in symbols}
+
+    # Alpaca primary provider
+    if provider in ("alpaca", "brokers") and api_key and api_secret:
+        try:
+            alpaca_articles = _fetch_alpaca_raw_articles(
+                symbols=symbols,
+                base_url=str(news_cfg.get("base_url", "https://data.alpaca.markets")),
+                api_key=api_key,
+                api_secret=api_secret,
+                lookback_hours=lookback_hours,
+                timeout_seconds=timeout_seconds,
+                retries=int(news_cfg.get("retries", 2)),
+                max_per_symbol=max_per_symbol,
+            )
+            for sym, arts in alpaca_articles.items():
+                if sym in result:
+                    result[sym].extend(arts)
+        except Exception as exc:
+            logging.warning("fetch_raw_articles_for_config (alpaca) failed: %s", exc)
+
+    # Additional sources — merged on top
+    if sources_cfg:
+        try:
+            extra = fetch_multi_source_articles(
+                symbols, sources_cfg, lookback_hours,
+                timeout_seconds=timeout_seconds,
+                max_per_symbol=max_per_symbol,
+            )
+            for sym, arts in extra.items():
+                if sym in result:
+                    slots = max_per_symbol - len(result[sym])
+                    if slots > 0:
+                        result[sym].extend(arts[:slots])
+        except Exception as exc:
+            logging.warning("fetch_raw_articles_for_config (multi-source) failed: %s", exc)
+
+    return result
 
 
 def _fetch_alpaca_raw_articles(

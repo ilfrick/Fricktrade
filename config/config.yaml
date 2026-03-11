@@ -870,6 +870,31 @@ news:
     timeout_seconds: 120  # CPU mode is slow, needs longer timeout
     max_items: 25
     max_text_chars: 800
+  sources:
+    # Additional freely available news sources beyond the primary Alpaca provider.
+    # Articles are fetched once per news cache TTL, merged with Alpaca results,
+    # then parsed by Ollama (catalyst) and Gemini (sentiment) each cycle.
+    - name: coindesk
+      enabled: true         # Crypto — broad coverage, low noise
+    - name: cointelegraph
+      enabled: true         # Crypto — high volume
+    - name: bitcoin_magazine
+      enabled: true         # BTC-focused
+    - name: the_block
+      enabled: true         # Institutional crypto news
+    - name: reuters_business
+      enabled: true         # Equities + macro
+    - name: globe_newswire
+      enabled: false        # Press releases — high volume, equity-focused
+    - name: pr_newswire
+      enabled: false        # Press releases — noisy
+    - name: cryptopanic
+      enabled: false        # Aggregator; free tier, no key required
+      api_key: ""
+    - name: yahoo_finance_rss
+      enabled: false        # Per-symbol RSS; adds latency (one request/symbol)
+    - name: google_news_rss
+      enabled: false        # Per-symbol Google News; rate-limit sensitive
 pattern_trading:
   selection:
     price_min: 2.0

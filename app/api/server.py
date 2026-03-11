@@ -635,8 +635,23 @@ def _mask_secrets(cfg: dict) -> None:
     except Exception:
         pass
     try:
+        binance_accounts = cfg.get("brokers", {}).get("binance", {}).get("accounts", []) or []
+        for acct in binance_accounts:
+            if isinstance(acct, dict):
+                for key in ("api_key", "api_secret"):
+                    if key in acct:
+                        acct[key] = "***"
+    except Exception:
+        pass
+    try:
         cfg["news"]["api_key"] = "***"
         cfg["news"]["api_secret"] = "***"
+    except Exception:
+        pass
+    try:
+        for src in (cfg.get("news", {}).get("sources", []) or []):
+            if isinstance(src, dict) and "api_key" in src:
+                src["api_key"] = "***"
     except Exception:
         pass
     try:
@@ -669,6 +684,41 @@ def _merge_secrets(target: dict, source: dict) -> None:
                 new_val[path[-1]] = current
         except Exception:
             continue
+    # Restore Binance account secrets
+    try:
+        current_bn = source.get("brokers", {}).get("binance", {}).get("accounts", []) or []
+        new_bn = target.get("brokers", {}).get("binance", {}).get("accounts", []) or []
+        current_bn_by_name = {
+            str(a.get("name")): a for a in current_bn if isinstance(a, dict) and a.get("name")
+        }
+        for idx, acct in enumerate(new_bn):
+            if not isinstance(acct, dict):
+                continue
+            cur = current_bn_by_name.get(str(acct.get("name", "")))
+            if cur is None and idx < len(current_bn) and isinstance(current_bn[idx], dict):
+                cur = current_bn[idx]
+            if not cur:
+                continue
+            for key in ("api_key", "api_secret"):
+                if acct.get(key) == "***":
+                    acct[key] = cur.get(key, "")
+    except Exception:
+        pass
+    # Restore news source api_keys
+    try:
+        current_srcs = source.get("news", {}).get("sources", []) or []
+        new_srcs = target.get("news", {}).get("sources", []) or []
+        cur_src_by_name = {
+            str(s.get("name")): s for s in current_srcs if isinstance(s, dict) and s.get("name")
+        }
+        for src in new_srcs:
+            if not isinstance(src, dict):
+                continue
+            cur = cur_src_by_name.get(str(src.get("name", "")))
+            if cur and src.get("api_key") == "***":
+                src["api_key"] = cur.get("api_key", "")
+    except Exception:
+        pass
     try:
         current_accounts = source.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
         new_accounts = target.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
