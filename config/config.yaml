@@ -269,6 +269,7 @@ trading_limits:
   min_price: 2.0
   fractional_shares: true   # enable fractional qty for crypto (always) and equities
   min_notional: 10.0         # minimum USD order value; Alpaca crypto minimum is $10
+  crypto_order_margin: 0.97  # safety haircut on crypto buy notional to absorb price drift between sizing and market-order fill
 strategy:
   name: trend_following
   names:
@@ -919,6 +920,7 @@ pattern_trading:
 execution:
   symbol_executor_workers: 4
   stuck_cooldown_minutes: 15
+  insufficient_stablecoin_cooldown_minutes: 5  # cooldown after insufficient_stablecoin rejection to stop per-cycle retry loop
   stuck_blacklist_after: 3      # consecutive timed-out buys before blacklist (raised from 2; demo API unreliable)
   stuck_blacklist_hours: 2      # hours to blacklist a symbol after repeated stuck orders
   limit_orders:

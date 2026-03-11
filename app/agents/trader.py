@@ -2077,6 +2077,21 @@ class TradingAgent:
                     if status == "completed":
                         # Successful fill resets the consecutive-stuck counter
                         self._stuck_timeout_counts.pop((response.broker, response.symbol), None)
+                # insufficient_stablecoin: price moved between sizing and fill; apply a short
+                # cooldown so the symbol doesn't hammer the broker every cycle until cash
+                # replenishes or the margin fix kicks in post-restart.
+                if (status == "rejected" and side == "buy"
+                        and getattr(response, "reason", "") == "insufficient_stablecoin"):
+                    _insuff_cool = int(
+                        self.cfg.get("execution", {}).get("insufficient_stablecoin_cooldown_minutes", 5)
+                    )
+                    self._stuck_cooldown[(response.broker, response.symbol)] = (
+                        datetime.now(timezone.utc) + timedelta(minutes=_insuff_cool)
+                    )
+                    logging.info(
+                        "insufficient_stablecoin cooldown: %s/%s suppressed for %d min",
+                        response.broker, response.symbol, _insuff_cool,
+                    )
                 # Set stuck-order cooldown on buy timeout; blacklist after 2 consecutive timeouts
                 if status == "timed_out" and side == "buy":
                     cooldown_min = int(
@@ -2303,6 +2318,13 @@ class TradingAgent:
             if remaining_value <= 0:
                 return 0, "position_limit"
             allowed_value = min(remaining_value, cash)
+            # Crypto market orders execute at market price, which can move 1-3% between
+            # sizing and fill. Apply a safety margin so the fill notional stays within
+            # available balance and avoids a chain of insufficient_stablecoin rejections.
+            if "/" in symbol:
+                allowed_value *= float(
+                    (self.cfg.get("trading_limits", {}) or {}).get("crypto_order_margin", 0.97)
+                )
             allowed_value, haircut_reasons, haircut_metrics = apply_haircuts(
                 self.cfg.get("risk", {}),
                 allowed_value,
