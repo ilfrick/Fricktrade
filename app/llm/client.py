@@ -113,7 +113,8 @@ class ClaudeBackend(LLMBackend):
     def __init__(self, model: Optional[str] = None):
         import anthropic
         self.client = anthropic.Anthropic(
-            api_key=os.environ["ANTHROPIC_API_KEY"]
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            default_headers={"Referer": "www.housefz.com"},
         )
         self.model = model or os.getenv(
             "LLM_CLAUDE_MODEL", "claude-sonnet-4-6"
@@ -166,7 +167,8 @@ class GeminiBackend(LLMBackend):
     def __init__(self, model: Optional[str] = None):
         from google import genai
         self.client = genai.Client(
-            api_key=os.environ["GOOGLE_GEMINI_API_KEY"]
+            api_key=os.environ["GOOGLE_GEMINI_API_KEY"],
+            http_options={"headers": {"Referer": "https://www.housefz.com"}},
         )
         self.model = model or os.getenv(
             "LLM_GEMINI_MODEL", "gemini-2.5-flash"
