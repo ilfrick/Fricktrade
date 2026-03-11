@@ -2335,6 +2335,12 @@ class TradingAgent:
                     precision = 8 if "/" in symbol else 3
                     factor = 10 ** precision
                     qty: float = math.floor(raw_qty * factor) / factor
+                    # Guard: float64 representation of current_qty can be marginally
+                    # larger than the broker's decimal storage, so floor may land at
+                    # or above current_qty → broker rejects with insufficient_balance.
+                    # Step back one tick to guarantee we never request more than held.
+                    if qty >= current_qty:
+                        qty = max(0.0, (math.floor(current_qty * factor) - 1) / factor)
                 else:
                     qty = int(raw_qty)
                 # Dust: positive holding too small to sell via qty-based order
