@@ -153,6 +153,32 @@ def _build_user_prompt(metrics: dict, bounds: dict, combine_mode: str) -> str:
     sw_min = bounds.get("strategy_weight_min", 0.03)
     sw_max = bounds.get("strategy_weight_max", 0.45)
 
+    # Strategic baseline corridors (if available)
+    strategic = metrics.get("strategic_baseline") or {}
+    baseline_weights = strategic.get("strategy_weights") or {}
+    corridors = strategic.get("weight_corridors") or {}
+    regime_forecast = strategic.get("regime_forecast", "")
+    strategic_notes = strategic.get("strategic_notes", "")
+    if baseline_weights:
+        corridor_lines = []
+        for name, bw in sorted(baseline_weights.items()):
+            cpct = corridors.get(name, 30)
+            lo = round(bw * (1 - cpct / 100), 4)
+            hi = round(bw * (1 + cpct / 100), 4)
+            corridor_lines.append(f"  {name:<28} baseline={bw:.3f}  allowed=[{lo:.3f},{hi:.3f}]")
+        strategic_block = (
+            f"\n── STRATEGIC BASELINES (from weekly review) ───────────────\n"
+            + "\n".join(corridor_lines)
+            + f"\nRegime forecast: {regime_forecast}\n"
+            + (f"Strategic notes: {strategic_notes[:120]}\n" if strategic_notes else "")
+            + "Weight changes MUST stay within the allowed corridors above.\n"
+        )
+    else:
+        strategic_block = (
+            "\n── STRATEGIC BASELINES ─────────────────────────────────────\n"
+            "No weekly baseline yet. Self-impose ±30% from current weights.\n"
+        )
+
     vote_note = ""
     if combine_mode == "vote":
         vote_note = (
@@ -164,7 +190,7 @@ def _build_user_prompt(metrics: dict, bounds: dict, combine_mode: str) -> str:
     return f"""\
 TACTICAL REVIEW — {ts} UTC  |  Window: last {window} min
 {'━'*65}
-{vote_note}
+{vote_note}{strategic_block}
 ── MACRO CONTEXT (regime classifier, age: {regime_age}min) ─────
 Regime:          {regime_name}  (confidence: {regime_conf:.0%})
 Rationale:       {regime_rat}
@@ -292,6 +318,8 @@ class TacticalMetaOrchestrator:
         self._lock = threading.Lock()
         # Reference to trader's live _config_strategy_weights dict (set externally)
         self._weights_ref: dict[str, float] | None = None
+        # Strategic baseline from StrategicOrchestrator (for corridor enforcement)
+        self._last_strategic_baseline: dict = {}
         # Order flow counters — reset by trader each call
         self._order_flow_window: dict[str, int] = {}
         logger.info("TacticalMetaOrchestrator initialised (interval=%smin, delay=%smin)",
@@ -328,6 +356,8 @@ class TacticalMetaOrchestrator:
             metrics = dict(metrics)
             metrics["timestamp"] = cycle_start.strftime("%Y-%m-%d %H:%M")
             metrics["window_minutes"] = self._interval_sec // 60
+            # Cache strategic baseline for corridor enforcement in _queue_changes
+            self._last_strategic_baseline = metrics.get("strategic_baseline") or {}
             # Inject last post-session report
             metrics.update(self._load_session_context())
             # Inject current config snapshot for bounds display
@@ -337,9 +367,9 @@ class TacticalMetaOrchestrator:
             prompt = _build_user_prompt(metrics, self._bounds, combine_mode)
             t0 = time.monotonic()
             response = self._llm.complete(
-                system=_SYSTEM_PROMPT,
-                user=prompt,
                 backend=self._backend,
+                system_prompt=_SYSTEM_PROMPT,
+                user_prompt=prompt,
                 model=self._model,
                 max_tokens=1024,
             )
@@ -347,7 +377,7 @@ class TacticalMetaOrchestrator:
             if _PROMETHEUS_OK:
                 _CYCLE_LATENCY.set(latency)
 
-            parsed = self._parse_response(response)
+            parsed = self._parse_response(response.content)
             if parsed:
                 with self._lock:
                     self._last_result = parsed
@@ -393,11 +423,27 @@ class TacticalMetaOrchestrator:
         weight_changes = parsed.get("proposed_weight_changes") or {}
         config_changes = parsed.get("proposed_config_changes") or []
 
+        # Build strategic corridors if available
+        strategic = getattr(self, "_last_strategic_baseline", {}) or {}
+        baseline_weights = strategic.get("strategy_weights") or {}
+        corridors = strategic.get("weight_corridors") or {}
+
         for param, new_val in weight_changes.items():
+            new_val = float(new_val)
+            # Enforce strategic corridor if baseline exists
+            if param in baseline_weights:
+                bw = float(baseline_weights[param])
+                cpct = float(corridors.get(param, 30)) / 100.0
+                lo = max(0.03, bw * (1 - cpct))
+                hi = min(0.45, bw * (1 + cpct))
+                if not (lo <= new_val <= hi):
+                    new_val = max(lo, min(hi, new_val))
+                    logger.debug("TacticalMetaOrch: clipped %s to strategic corridor [%.3f, %.3f] → %.3f",
+                                 param, lo, hi, new_val)
             self._enqueue_change(
                 param=f"orchestrator.strategy_weights.{param}",
-                new_val=float(new_val),
-                rationale=f"weight adjustment from tactical review",
+                new_val=new_val,
+                rationale="weight adjustment from tactical review",
                 now=now,
                 immediate=False,
             )

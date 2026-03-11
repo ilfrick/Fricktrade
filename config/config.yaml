@@ -1132,3 +1132,39 @@ tactical_meta_orchestrator:
     # Strategy weight bounds
     strategy_weight_min: 0.03
     strategy_weight_max: 0.45
+
+strategic_meta_orchestrator:
+  enabled: true
+  weekly_day: 6                 # 0=Mon … 6=Sun — runs Sunday
+  weekly_hour_utc: 6            # 06:00 UTC
+  emergency_threshold: 3        # trigger after 3 consecutive D/F session grades
+  min_reports: 3                # minimum reports needed before running
+  apply_delay_hours: 1          # 1-hour delay before baseline weight changes take effect
+  auto_apply: true
+  backend: gemini
+  model: gemini-2.5-flash
+  session_reports_dir: /data/reports/session
+  output_dir: /data/reports/meta_orch
+  tactical_changes_log: /data/reports/meta_orch/changes.jsonl
+  bounds:
+    # Same tunable params as tactical layer
+    trading_limits.crypto_order_margin:              [0.93, 0.99]
+    execution.stuck_cooldown_minutes:                [5, 30]
+    execution.insufficient_stablecoin_cooldown_minutes: [2, 15]
+    data.timeout_seconds:                            [15, 60]
+    strategy.params.min_hold_minutes:                [5, 30]
+    strategy.params.position_horizon_minutes:        [60, 480]
+    risk.hard_stop_pct:                              [0.5, 3.0]
+    risk.trailing_stop_pct:                          [2.0, 10.0]
+    risk.take_profit_pct:                            [0.5, 5.0]
+    risk.partial_take_profit_pct:                    [0.3, 3.0]
+    risk.crypto.hard_stop_pct:                       [1.5, 6.0]
+    risk.crypto.trailing_stop_pct:                   [2.0, 10.0]
+    risk.crypto.take_profit_pct:                     [2.0, 8.0]
+    llm_orchestrator.price_invalidation_pct:         [0.005, 0.03]
+    llm_orchestrator.exit_drawdown_pct_crypto:       [0.5, 5.0]
+    llm_orchestrator.exit_drawdown_pct_equity:       [0.2, 2.0]
+    # Strategy weight bounds
+    strategy_weight_min: 0.03
+    strategy_weight_max: 0.45
+    tactical_corridor_pct: 30   # default corridor width for tactical layer

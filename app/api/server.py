@@ -623,6 +623,27 @@ async def get_meta_orch_status():
     return {"last_result": last_result, "applied_changes": applied_log}
 
 
+@app.get("/strategic_orch")
+async def get_strategic_orch_status():
+    """Return the last Strategic Meta Orchestrator result and current baseline."""
+    import json as _json
+    result_path   = Path("/data/reports/meta_orch/strategic_last_result.json")
+    baseline_path = Path("/data/reports/meta_orch/strategic_baseline.json")
+    last_result: dict = {}
+    baseline: dict = {}
+    if result_path.exists():
+        try:
+            last_result = _json.loads(result_path.read_text())
+        except Exception:
+            pass
+    if baseline_path.exists():
+        try:
+            baseline = _json.loads(baseline_path.read_text())
+        except Exception:
+            pass
+    return {"last_result": last_result, "baseline": baseline}
+
+
 @app.get("/", response_class=HTMLResponse)
 @app.get("/ui", response_class=HTMLResponse)
 async def ui():

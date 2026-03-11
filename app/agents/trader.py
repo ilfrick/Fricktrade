@@ -417,6 +417,16 @@ class TradingAgent:
                 self._tactical_meta_orch.set_weights_ref(self._config_strategy_weights)
             except Exception as exc:
                 logging.warning("Tactical meta orchestrator init failed: %s", exc)
+        # Strategic Meta Orchestrator (weekly/emergency config rebalancer)
+        self._strategic_orch = None
+        _so_cfg = self.cfg.get("strategic_meta_orchestrator", {}) or {}
+        if _so_cfg.get("enabled", False) and self._llm_client is not None:
+            try:
+                from app.llm.meta_orchestrator import StrategicOrchestrator as _SO
+                self._strategic_orch = _SO(self._llm_client, self.cfg)
+                self._strategic_orch.set_weights_ref(self._config_strategy_weights)
+            except Exception as exc:
+                logging.warning("Strategic meta orchestrator init failed: %s", exc)
         # Rolling order-flow counters for TacticalMetaOrchestrator metrics snapshot
         self._tmo_counters: dict[str, int] = {
             "attempted": 0, "filled": 0, "rejected": 0,
@@ -3345,6 +3355,12 @@ class TradingAgent:
                     self._tactical_meta_orch.maybe_run(_tmo_metrics)
                 except Exception as exc:
                     logging.warning("Tactical meta orchestrator failed: %s", exc)
+            # Strategic Meta Orchestrator: weekly/emergency rebalancer (non-blocking)
+            if self._strategic_orch is not None:
+                try:
+                    self._strategic_orch.maybe_run()
+                except Exception as exc:
+                    logging.warning("Strategic meta orchestrator failed: %s", exc)
             time.sleep(interval_seconds)
 
     def _build_portfolio_context(self, portfolio: dict) -> dict:
@@ -3488,6 +3504,14 @@ class TradingAgent:
         filled    = flow.get("filled", 0)
         fill_rate = (filled / attempted * 100.0) if attempted else 0.0
 
+        # Strategic baseline (for tactical corridor enforcement)
+        strategic_baseline: dict = {}
+        if self._strategic_orch is not None:
+            try:
+                strategic_baseline = self._strategic_orch.get_baseline()
+            except Exception:
+                pass
+
         return {
             "equity": equity,
             "crypto_exposure_pct": crypto_pct,
@@ -3518,6 +3542,7 @@ class TradingAgent:
             "exit_backoffs": exit_backoffs,
             "dust_count": dust_count,
             "regime": regime_ctx,
+            "strategic_baseline": strategic_baseline,
         }
 
     def _ops_state_blocks_run(self) -> bool:
