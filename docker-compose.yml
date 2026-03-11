@@ -56,9 +56,9 @@ services:
     labels:
       - "autoheal=true"
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/metrics', timeout=120)\""]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request, os, time; urllib.request.urlopen('http://localhost:8001/metrics', timeout=10); cp='/data/checkpoints/trader.json'; age=time.time()-os.path.getmtime(cp) if os.path.exists(cp) else 0; assert age < 900, f'Loop stale {age:.0f}s'\""]
       interval: 30s
-      timeout: 120s
+      timeout: 15s
       retries: 3
     deploy:
       resources:

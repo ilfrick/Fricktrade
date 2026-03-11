@@ -140,7 +140,13 @@ class BinanceBroker(Broker):
         # Client(demo=True) automatically routes to API_DEMO_URL (spot) and
         # FUTURES_DEMO_URL (futures) — no manual URL overrides needed.
         _demo = bool(self._base_url and "demo" in self._base_url.lower())
-        self.client = Client(api_key, api_secret, testnet=testnet, demo=_demo)
+        # Set a 15-second read timeout on every python-binance request.
+        # Without this, calls like get_account()/get_positions() can hang
+        # indefinitely when the demo API degrades, deadlocking the main loop.
+        self.client = Client(
+            api_key, api_secret, testnet=testnet, demo=_demo,
+            requests_params={"timeout": 15},
+        )
         self._deposit_cache: tuple[float, float] | None = None  # (monotonic_ts, amount)
 
         _mode = ("futures" if futures else "spot") + (" demo" if _demo else " live")
