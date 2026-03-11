@@ -1372,7 +1372,7 @@ class TradingAgent:
                 if self._portfolio_orchestrator is not None:
                     last_price = float(market_state.get("last_price") or 0)
                     _llm2_action, _llm2_reduce, _llm2_strategy = self._portfolio_orchestrator.get_decision(
-                        symbol, last_price
+                        symbol, broker_name, last_price
                     )
                     _shadow2, _red2, _strat2 = self._combine_signals(
                         filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
@@ -3391,12 +3391,41 @@ class TradingAgent:
                     "avg_pnl": round(stats["avg_pnl_pct"], 2),
                 }
 
+        # Per-broker context (equity, cash, positions, constraints)
+        broker_context: dict = {}
+        max_crypto_pct = float(
+            self.cfg.get("risk", {}).get("crypto", {}).get("max_crypto_exposure_pct", 40.0) or 40.0
+        )
+        for bname, b_acct in (portfolio.get("brokers") or {}).items():
+            bs = self._broker_states.get(bname)
+            b_equity = float(b_acct.get("equity", 0) or 0)
+            b_cash   = float(b_acct.get("buying_power", 0) or 0)
+            b_pos    = b_acct.get("positions") or {}
+            b_crypto_val = sum(float(p.get("value", 0) or 0) for s, p in b_pos.items() if "/" in s)
+            b_crypto_pct = (b_crypto_val / b_equity * 100.0) if b_equity else 0.0
+            # Approximate day P&L from day_start_equity vs current
+            day_start = float(getattr(bs, "day_start_equity", None) or b_equity)
+            day_pnl_pct = ((b_equity - day_start) / day_start * 100.0) if day_start else 0.0
+            broker_context[bname] = {
+                "equity": b_equity,
+                "available_cash": b_cash,
+                "crypto_exposure_pct": b_crypto_pct,
+                "max_crypto_pct": max_crypto_pct,
+                "current_drawdown_pct": float(getattr(bs, "current_drawdown_pct", 0) or 0),
+                "day_pnl_pct": round(day_pnl_pct, 2),
+                "positions": {
+                    s: {"qty": p.get("qty"), "avg_entry": p.get("avg_entry"), "value": p.get("value")}
+                    for s, p in b_pos.items()
+                },
+            }
+
         return {
             "equity": equity,
             "cash": cash,
             "crypto_exposure_pct": crypto_pct,
             "positions": positions,
             "strategy_win_rates": strategy_win_rates,
+            "brokers": broker_context,
         }
 
     def _build_meta_orch_metrics(self, portfolio: dict) -> dict:
@@ -3512,6 +3541,35 @@ class TradingAgent:
             except Exception:
                 pass
 
+        # Per-broker breakdown for tactical orchestrator
+        tmo_broker_ctx: dict = {}
+        max_crypto_pct = float(
+            self.cfg.get("risk", {}).get("crypto", {}).get("max_crypto_exposure_pct", 40.0) or 40.0
+        )
+        for bname, bs in self._broker_states.items():
+            b_eq = float(getattr(bs, "buying_power", 0) or 0) + float(
+                sum(
+                    float(p.get("value", 0) or 0)
+                    for p in (bs.position_state or {}).values()
+                )
+            )
+            b_cash = float(getattr(bs, "buying_power", 0) or 0)
+            b_pos  = bs.position_state or {}
+            b_crypto_val = sum(
+                float(p.get("value", 0) or 0) for s, p in b_pos.items() if "/" in s
+            )
+            b_crypto_pct = (b_crypto_val / b_eq * 100.0) if b_eq else 0.0
+            n_pos = len([s for s, p in b_pos.items() if float(p.get("qty", 0) or 0) > 1e-6])
+            tmo_broker_ctx[bname] = {
+                "estimated_equity": round(b_eq, 0),
+                "available_cash": round(b_cash, 0),
+                "crypto_exposure_pct": round(b_crypto_pct, 1),
+                "max_crypto_pct": max_crypto_pct,
+                "open_positions": n_pos,
+                "current_drawdown_pct": round(float(getattr(bs, "current_drawdown_pct", 0) or 0), 2),
+                "disabled_strategies": list(bs.disabled_strategies or []),
+            }
+
         return {
             "equity": equity,
             "crypto_exposure_pct": crypto_pct,
@@ -3543,6 +3601,7 @@ class TradingAgent:
             "dust_count": dust_count,
             "regime": regime_ctx,
             "strategic_baseline": strategic_baseline,
+            "brokers": tmo_broker_ctx,
         }
 
     def _ops_state_blocks_run(self) -> bool:

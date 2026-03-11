@@ -75,6 +75,9 @@ class LLMPortfolioOrchestrator:
         self._decisions: dict[str, tuple[str, float, str | None]] = {}
         # Reference prices at time of last LLM decision (for cache invalidation)
         self._decision_prices: dict[str, float] = {}
+        # Per-broker decision cache (overrides symbol-level when broker is specified)
+        self._broker_decisions: dict[str, dict[str, tuple[str, float, str | None]]] = {}
+        self._broker_decision_prices: dict[str, dict[str, float]] = {}
 
         # P&L tracking (same semantics as LLMStrategyOrchestrator)
         self._open_entries: dict[str, dict] = {}
@@ -108,17 +111,32 @@ class LLMPortfolioOrchestrator:
     # ------------------------------------------------------------------
 
     def get_decision(
-        self, symbol: str, current_price: float | None = None
+        self, symbol: str, broker: str | None = None, current_price: float | None = None
     ) -> tuple[str, float, str | None]:
         """
-        Return the portfolio-level decision for this symbol from the last cycle.
+        Return the portfolio-level decision for this symbol.
 
-        If current_price is provided and has moved ≥ price_invalidation_pct from
-        the reference price stored at decision time, the cached decision is expired
-        and ("hold", 1.0, None) is returned so the caller falls back to _combine_signals().
-
-        Returns ("hold", 1.0, None) when no cached decision exists.
+        If broker is provided, return the broker-specific decision (if any), falling
+        back to the symbol-level aggregate decision when no broker-specific one exists.
+        If current_price is provided and has moved ≥ price_invalidation_pct from the
+        reference price, the cached decision is expired and ("hold", 1.0, None) returned.
         """
+        # Check broker-specific decision first
+        if broker is not None:
+            broker_cache = self._broker_decisions.get(broker, {})
+            if symbol in broker_cache:
+                cached = broker_cache[symbol]
+                if current_price and current_price > 0 and self._price_invalidation_pct > 0:
+                    ref = self._broker_decision_prices.get(broker, {}).get(symbol, 0)
+                    if ref <= 0 or abs(current_price - ref) / ref < self._price_invalidation_pct:
+                        return cached
+                    logger.debug(
+                        "Broker decision invalidated %s@%s: price moved %.2f%% from ref %.4f",
+                        symbol, broker, abs(current_price - ref) / ref * 100, ref,
+                    )
+                else:
+                    return cached
+        # Fall back to symbol-level aggregate
         cached = self._decisions.get(symbol)
         if cached is None:
             return ("hold", 1.0, None)
@@ -127,9 +145,7 @@ class LLMPortfolioOrchestrator:
             if ref > 0 and abs(current_price - ref) / ref >= self._price_invalidation_pct:
                 logger.debug(
                     "Decision invalidated %s: price moved %.2f%% from ref %.4f",
-                    symbol,
-                    abs(current_price - ref) / ref * 100,
-                    ref,
+                    symbol, abs(current_price - ref) / ref * 100, ref,
                 )
                 return ("hold", 1.0, None)
         return cached
@@ -178,20 +194,48 @@ class LLMPortfolioOrchestrator:
                 model=self._model,
             )
             parsed = response.parse_json()
-            decisions_raw = parsed.get("decisions", {})
 
             new_decisions: dict[str, tuple[str, float, str | None]] = {}
-            for sym, action_raw in decisions_raw.items():
-                action = str(action_raw).lower()
-                if action not in ("buy", "sell", "hold"):
-                    action = "hold"
-                strategy_name = self._best_strategy(
-                    buffer.get(sym, {}).get("signals", []), action
-                )
-                new_decisions[sym] = (action, 1.0, strategy_name)
+            new_broker_decisions: dict[str, dict[str, tuple[str, float, str | None]]] = {}
+
+            # Accept two response formats:
+            # 1. Per-broker: {"broker_decisions": {"alpaca:Higher": {"BTC/USD": "buy", ...}, ...}}
+            # 2. Aggregate:  {"decisions": {"BTC/USD": "buy", ...}}
+            broker_decisions_raw = parsed.get("broker_decisions") or {}
+            decisions_raw_fallback = parsed.get("decisions") or {}
+
+            # Parse per-broker decisions
+            for broker_name, sym_map in broker_decisions_raw.items():
+                if not isinstance(sym_map, dict):
+                    continue
+                new_broker_decisions[broker_name] = {}
+                for sym, action_raw in sym_map.items():
+                    action = str(action_raw).lower()
+                    if action not in ("buy", "sell", "hold"):
+                        action = "hold"
+                    strategy_name = self._best_strategy(
+                        buffer.get(sym, {}).get("signals", []), action
+                    )
+                    new_broker_decisions[broker_name][sym] = (action, 1.0, strategy_name)
+                    # Aggregate: most common action across brokers
+                    if sym not in new_decisions or action != "hold":
+                        new_decisions[sym] = (action, 1.0, strategy_name)
+
+            # If no per-broker format, fall back to aggregate
+            if not new_broker_decisions and decisions_raw_fallback:
+                for sym, action_raw in decisions_raw_fallback.items():
+                    action = str(action_raw).lower()
+                    if action not in ("buy", "sell", "hold"):
+                        action = "hold"
+                    strategy_name = self._best_strategy(
+                        buffer.get(sym, {}).get("signals", []), action
+                    )
+                    new_decisions[sym] = (action, 1.0, strategy_name)
 
             self._decisions = new_decisions
-            # Store reference prices for cache invalidation; prune stale symbols
+            self._broker_decisions = new_broker_decisions
+
+            # Store reference prices; prune stale symbols
             for sym in list(self._decision_prices):
                 if sym not in new_decisions:
                     del self._decision_prices[sym]
@@ -200,14 +244,29 @@ class LLMPortfolioOrchestrator:
                 lp = float(ms.get("last_price") or 0)
                 if lp > 0:
                     self._decision_prices[sym] = lp
+
+            # Per-broker reference prices
+            for broker_name, sym_map in new_broker_decisions.items():
+                if broker_name not in self._broker_decision_prices:
+                    self._broker_decision_prices[broker_name] = {}
+                # Prune stale
+                for sym in list(self._broker_decision_prices[broker_name]):
+                    if sym not in sym_map:
+                        del self._broker_decision_prices[broker_name][sym]
+                for sym in sym_map:
+                    ms = buffer.get(sym, {}).get("market_state", {}) or {}
+                    lp = float(ms.get("last_price") or 0)
+                    if lp > 0:
+                        self._broker_decision_prices[broker_name][sym] = lp
+
             n_buy = sum(1 for a, _, _ in new_decisions.values() if a == "buy")
             n_sell = sum(1 for a, _, _ in new_decisions.values() if a == "sell")
+            n_broker_specific = sum(len(v) for v in new_broker_decisions.values())
             logger.info(
-                "Portfolio LLM → %d symbols: %d buy, %d sell, %d hold | %s",
-                len(new_decisions),
-                n_buy,
-                n_sell,
+                "Portfolio LLM → %d symbols: %d buy, %d sell, %d hold | %d broker-specific | %s",
+                len(new_decisions), n_buy, n_sell,
                 len(new_decisions) - n_buy - n_sell,
+                n_broker_specific,
                 str(parsed.get("reasoning", ""))[:100],
             )
         except Exception as exc:
@@ -284,15 +343,30 @@ class LLMPortfolioOrchestrator:
         fear_greed = float(alt.get("fear_greed_index", 50) or 50)
         oi_change = float(alt.get("oi_change_pct", 0.0) or 0.0)
 
-        # Portfolio
+        # Portfolio totals
         equity = float(portfolio_ctx.get("equity", 0.0) or 0.0)
         crypto_pct = float(portfolio_ctx.get("crypto_exposure_pct", 0.0) or 0.0)
-        positions = portfolio_ctx.get("positions", {}) or {}
-        pos_strs = [
-            f"{sym}={float(info.get('qty', 0)):.4g}"
-            for sym, info in list(positions.items())[:12]
-        ]
-        pos_line = ", ".join(pos_strs) if pos_strs else "none"
+
+        # Per-broker section
+        broker_lines: list[str] = []
+        for bname, bdata in sorted((portfolio_ctx.get("brokers") or {}).items()):
+            b_eq   = float(bdata.get("equity", 0) or 0)
+            b_cash = float(bdata.get("available_cash", 0) or 0)
+            b_cpct = float(bdata.get("crypto_exposure_pct", 0) or 0)
+            b_cpct_cap = float(bdata.get("max_crypto_pct", 40) or 40)
+            b_dd   = float(bdata.get("current_drawdown_pct", 0) or 0)
+            b_pos  = bdata.get("positions") or {}
+            b_pos_str = " ".join(
+                f"{s}={float(p.get('qty',0)):.4g}"
+                for s, p in list(b_pos.items())[:8]
+            ) or "none"
+            broker_lines.append(
+                f"  {bname:<20} eq=${b_eq:,.0f}  cash=${b_cash:,.0f}"
+                f"  crypto={b_cpct:.1f}%/{b_cpct_cap:.0f}%  dd={b_dd:.1f}%"
+                f"  pos=[{b_pos_str}]"
+            )
+        brokers_block = "\n".join(broker_lines) if broker_lines else "  (no broker data)"
+        broker_names = sorted((portfolio_ctx.get("brokers") or {}).keys())
 
         # Recent P&L
         recent = list(self._completed_trades)[-5:]
@@ -338,11 +412,16 @@ class LLMPortfolioOrchestrator:
             ]
             sig_str = " | ".join(sig_parts) if sig_parts else "all_hold"
 
-            # Mark held positions
-            held = positions.get(sym, {})
-            held_str = f" [pos:{float(held.get('qty',0)):.4g}]" if held else ""
+            # Mark held positions per broker
+            held_parts = []
+            for bname, bdata in sorted((portfolio_ctx.get("brokers") or {}).items()):
+                b_pos = bdata.get("positions") or {}
+                if sym in b_pos:
+                    qty = float(b_pos[sym].get("qty", 0) or 0)
+                    held_parts.append(f"{bname}:{qty:.4g}")
+            held_str = f" [held: {', '.join(held_parts)}]" if held_parts else ""
 
-            # News pipeline: Ollama catalyst flag + Gemini sentiment score
+            # News pipeline
             news_str = ""
             if ms.get("catalyst"):
                 news_str += " CAT"
@@ -360,19 +439,29 @@ class LLMPortfolioOrchestrator:
                 f"{held_str}{news_str} | {sig_str}"
             )
 
+        broker_names_str = ", ".join(broker_names) if broker_names else "unknown"
+
         prompt = (
             f"Regime: {regime} (prob={regime_prob:.2f}) | "
             f"FearGreed={fear_greed:.0f} | OI_change={oi_change:+.1f}%\n"
             f"Portfolio equity: ${equity:.0f} | Crypto exposure: {crypto_pct:.1f}% (cap 50%)\n"
-            f"Open positions: {pos_line}\n"
-            f"{pnl_line}\n"
+            f"\n── Per-broker accounts ───────────────────────────────────\n"
+            f"{brokers_block}\n"
+            f"\n{pnl_line}\n"
             f"{strat_line}"
             f"\n--- {len(sym_lines)} symbols (full universe) ---\n"
             + "\n".join(sym_lines)
             + "\n\n"
-            "Using the complete cross-symbol picture above, decide buy/sell/hold for EACH symbol.\n"
-            "Rank opportunities — prefer the 1–5 strongest setups. Avoid buying into weakness.\n"
-            "Include ALL symbols in the response (even if hold).\n"
-            'Respond: {"decisions":{"SYMBOL":"buy|sell|hold",...},"reasoning":"<60 words>"}'
+            "Using the complete cross-symbol and cross-broker picture above, decide buy/sell/hold "
+            "for EACH symbol on EACH broker independently.\n"
+            "Consider: (1) which broker has available cash to buy; (2) which broker holds a position "
+            "that should be exited; (3) avoid duplicating positions across brokers unless justified.\n"
+            "Rank opportunities — prefer the 1–5 strongest setups per broker.\n"
+            f"Brokers to include: {broker_names_str}\n"
+            f"Include ALL symbols for ALL brokers (even if hold).\n"
+            'Respond: {"broker_decisions":{'
+            f'"<broker>": {{"<SYMBOL>": "buy|sell|hold", ...}}'
+            ', ...},'
+            '"reasoning":"<60 words>"}'
         )
         return prompt

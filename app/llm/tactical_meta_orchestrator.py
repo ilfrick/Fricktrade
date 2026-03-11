@@ -122,6 +122,23 @@ def _build_user_prompt(metrics: dict, bounds: dict, combine_mode: str) -> str:
     llm_ovr_win   = metrics.get("llm_override_win_rate", 0.0) * 100
     combine_win   = metrics.get("combine_win_rate", 0.0) * 100
 
+    # Per-broker breakdown
+    broker_rows = []
+    for bname, bd in sorted((metrics.get("brokers") or {}).items()):
+        b_eq   = bd.get("estimated_equity", 0)
+        b_cash = bd.get("available_cash", 0)
+        b_cpct = bd.get("crypto_exposure_pct", 0)
+        b_cap  = bd.get("max_crypto_pct", 40)
+        b_dd   = bd.get("current_drawdown_pct", 0)
+        b_n    = bd.get("open_positions", 0)
+        b_dis  = ", ".join(bd.get("disabled_strategies") or []) or "none"
+        broker_rows.append(
+            f"  {bname:<22} eq≈${b_eq:,.0f}  cash=${b_cash:,.0f}"
+            f"  crypto={b_cpct:.1f}%/{b_cap:.0f}%  dd={b_dd:.1f}%  pos={b_n}"
+            + (f"  disabled=[{b_dis}]" if b_dis != "none" else "")
+        )
+    brokers_str = "\n".join(broker_rows) if broker_rows else "  (no broker data)"
+
     # Indicators
     med_rsi   = metrics.get("median_rsi", 50)
     med_atr   = metrics.get("median_atr_pct", 1.0)
@@ -212,6 +229,9 @@ Crypto exposure:  {crypto_pct:.1f}% / {crypto_cap:.0f}% cap
 Open positions:   {pos_count}  ({pos_summary})
 Session P&L:      {session_pnl:+.2f}%
 LLM override rate:{llm_ovr_rate:.0f}%  win={llm_ovr_win:.0f}%  (baseline combine={combine_win:.0f}%)
+
+── BROKERS ─────────────────────────────────────────────────────
+{brokers_str}
 
 ── CURRENT INDICATORS (median across held positions) ───────────
 Median RSI:   {med_rsi:.0f}
