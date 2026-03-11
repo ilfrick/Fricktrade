@@ -1,0 +1,150 @@
+{
+  "id": null,
+  "uid": "fricktrade-meta-orch",
+  "title": "Tactical Meta Orchestrator",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "1m",
+  "timezone": "browser",
+  "tags": ["fricktrade", "meta"],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Health Grade",
+      "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "meta_orch_health_grade", "refId": "A", "instant": true}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "textMode": "value", "colorMode": "background"},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "GREEN",  "color": "green"},
+                                          "1": {"text": "YELLOW", "color": "yellow"},
+                                          "2": {"text": "RED",    "color": "red"}}},
+            {"type": "special", "options": {"match": "null", "result": {"text": "No data", "color": "blue"}}}
+          ],
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1},
+            {"color": "red", "value": 2}
+          ]}
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Pending Changes",
+      "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "meta_orch_pending_changes_count", "refId": "A", "instant": true}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1},
+            {"color": "orange", "value": 3}
+          ]},
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Changes Applied (session)",
+      "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "sum(meta_orch_changes_applied_total)", "refId": "A", "instant": true}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"},
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"},
+        "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}}
+    },
+    {
+      "type": "stat",
+      "title": "Cycle Latency",
+      "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "meta_orch_last_cycle_latency_seconds", "refId": "A", "instant": true}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"},
+      "fieldConfig": {
+        "defaults": {"unit": "s", "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null}, {"color": "yellow", "value": 3}, {"color": "red", "value": 8}
+          ]}}
+      }
+    },
+    {
+      "type": "stat",
+      "title": "LLM Override Win Rate",
+      "gridPos": {"x": 16, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "meta_orch_llm_override_win_rate * 100", "refId": "A", "instant": true}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+      "fieldConfig": {
+        "defaults": {"unit": "percent", "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null}, {"color": "yellow", "value": 45}, {"color": "green", "value": 55}
+          ]}}
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Combine Baseline Win Rate",
+      "gridPos": {"x": 20, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "meta_orch_combine_win_rate * 100", "refId": "A", "instant": true}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"},
+      "fieldConfig": {
+        "defaults": {"unit": "percent", "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null}, {"color": "yellow", "value": 45}, {"color": "green", "value": 55}
+          ]}}
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Strategy Weights Over Time",
+      "gridPos": {"x": 0, "y": 4, "w": 16, "h": 8},
+      "targets": [
+        {"expr": "meta_orch_strategy_weight", "refId": "A", "legendFormat": "{{strategy}}"}
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "right"}},
+      "fieldConfig": {
+        "defaults": {"custom": {"lineWidth": 2}, "unit": "short",
+          "min": 0, "max": 0.5,
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "LLM Override vs Baseline Win Rate",
+      "gridPos": {"x": 16, "y": 4, "w": 8, "h": 8},
+      "targets": [
+        {"expr": "meta_orch_llm_override_win_rate * 100", "refId": "A", "legendFormat": "LLM Override"},
+        {"expr": "meta_orch_combine_win_rate * 100",       "refId": "B", "legendFormat": "Combine Baseline"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "percent", "custom": {"lineWidth": 2},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Changes Applied per Parameter",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 7},
+      "targets": [
+        {"expr": "rate(meta_orch_changes_applied_total[15m]) * 900",
+         "refId": "A", "legendFormat": "{{parameter}}"}
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "right"}},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"lineWidth": 1}}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Health Grade History",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 7},
+      "targets": [{"expr": "meta_orch_health_grade", "refId": "A", "legendFormat": "grade (0=green 1=yellow 2=red)"}],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "min": 0, "max": 2,
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 2}
+          ]},
+          "custom": {"lineWidth": 2}}
+      }
+    }
+  ]
+}

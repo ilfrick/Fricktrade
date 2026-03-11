@@ -599,6 +599,30 @@ async def request_restart():
     return {"status": "ok"}
 
 
+@app.get("/meta_orch")
+async def get_meta_orch_status():
+    """Return the last Tactical Meta Orchestrator result and recent applied changes."""
+    import json as _json
+    result_path  = Path("/data/reports/meta_orch/last_result.json")
+    changes_path = Path("/data/reports/meta_orch/changes.jsonl")
+    last_result: dict = {}
+    applied_log: list = []
+    if result_path.exists():
+        try:
+            last_result = _json.loads(result_path.read_text())
+        except Exception:
+            pass
+    if changes_path.exists():
+        try:
+            lines = changes_path.read_text().splitlines()
+            for line in lines[-20:]:
+                if line.strip():
+                    applied_log.append(_json.loads(line))
+        except Exception:
+            pass
+    return {"last_result": last_result, "applied_changes": applied_log}
+
+
 @app.get("/", response_class=HTMLResponse)
 @app.get("/ui", response_class=HTMLResponse)
 async def ui():

@@ -243,6 +243,22 @@ class LLMPortfolioOrchestrator:
         })
         logger.debug("Portfolio orch P&L: %s %.2f%%", symbol, pnl_pct)
 
+    def get_stats(self) -> dict:
+        """Return runtime stats for TacticalMetaOrchestrator metrics snapshot."""
+        trades = list(self._completed_trades)
+        if trades:
+            wins = sum(1 for t in trades if t.get("pnl_pct", 0) > 0)
+            win_rate = wins / len(trades)
+        else:
+            win_rate = 0.0
+        return {
+            "completed_trades": len(trades),
+            "combine_win_rate": win_rate,
+            # Override stats are computed from decision trace — not tracked here
+            "override_rate": 0.0,
+            "override_win_rate": 0.0,
+        }
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

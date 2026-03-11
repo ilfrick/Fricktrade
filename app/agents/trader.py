@@ -407,6 +407,22 @@ class TradingAgent:
                 self._portfolio_orchestrator = _PortOrch(self._llm_client, _orch_cfg)
             except Exception as exc:
                 logging.warning("LLM orchestrator init failed: %s", exc)
+        # Tactical Meta Orchestrator (15-min config tuner + tactical strategist)
+        self._tactical_meta_orch = None
+        _tmo_cfg = self.cfg.get("tactical_meta_orchestrator", {}) or {}
+        if _tmo_cfg.get("enabled", False) and self._llm_client is not None:
+            try:
+                from app.llm.tactical_meta_orchestrator import TacticalMetaOrchestrator as _TMO
+                self._tactical_meta_orch = _TMO(self._llm_client, self.cfg)
+                self._tactical_meta_orch.set_weights_ref(self._config_strategy_weights)
+            except Exception as exc:
+                logging.warning("Tactical meta orchestrator init failed: %s", exc)
+        # Rolling order-flow counters for TacticalMetaOrchestrator metrics snapshot
+        self._tmo_counters: dict[str, int] = {
+            "attempted": 0, "filled": 0, "rejected": 0,
+            "insuff_stablecoin": 0, "insuff_cash": 0,
+            "pos_limit": 0, "leverage_cap": 0, "timedout": 0,
+        }
 
     def _init_quote_stream(self) -> None:
         """Initialise real-time quote stream if quote_stream.enabled is true."""
@@ -506,6 +522,11 @@ class TradingAgent:
         if broker_name:
             SKIPPED_ORDERS_BY_BROKER.labels(broker=broker_name, symbol=symbol, side=action, reason=reason).inc()
         _slog.event("info", "risk_blocked", symbol=symbol, action=action, reason=reason, broker=broker_name)
+        # Update rolling counters for TacticalMetaOrchestrator
+        if reason == "position_limit":
+            self._tmo_counters["pos_limit"] += 1
+        elif reason == "pending_leverage_cap":
+            self._tmo_counters["leverage_cap"] += 1
 
     def _broker_state(self, broker_name: str | None) -> BrokerState:
         if not broker_name:
@@ -2064,6 +2085,22 @@ class TradingAgent:
             if not responses:
                 continue
             for response in responses:
+                # Update rolling order-flow counters for TacticalMetaOrchestrator
+                _resp_status = str(getattr(response, "status", "") or "").lower()
+                _resp_side   = str(getattr(response, "side",   "") or "").lower()
+                if _resp_side in ("buy", "sell"):
+                    self._tmo_counters["attempted"] += 1
+                    if _resp_status == "completed":
+                        self._tmo_counters["filled"] += 1
+                    elif _resp_status == "rejected":
+                        self._tmo_counters["rejected"] += 1
+                        _rr = str(getattr(response, "reason", "") or "")
+                        if _rr == "insufficient_stablecoin":
+                            self._tmo_counters["insuff_stablecoin"] += 1
+                        elif _rr == "insufficient_cash":
+                            self._tmo_counters["insuff_cash"] += 1
+                    elif _resp_status == "timed_out":
+                        self._tmo_counters["timedout"] += 1
                 # Release pending notional for buy-side terminal responses
                 side = str(response.side or "").lower()
                 status = str(response.status or "").lower()
@@ -3301,6 +3338,13 @@ class TradingAgent:
                     self._portfolio_orchestrator.run_portfolio_cycle(_port_ctx)
                 except Exception as exc:
                     logging.warning("Portfolio orchestrator cycle failed: %s", exc)
+            # Tactical Meta Orchestrator: 15-min config tuner (non-blocking background call)
+            if self._tactical_meta_orch is not None:
+                try:
+                    _tmo_metrics = self._build_meta_orch_metrics(portfolio)
+                    self._tactical_meta_orch.maybe_run(_tmo_metrics)
+                except Exception as exc:
+                    logging.warning("Tactical meta orchestrator failed: %s", exc)
             time.sleep(interval_seconds)
 
     def _build_portfolio_context(self, portfolio: dict) -> dict:
@@ -3337,6 +3381,143 @@ class TradingAgent:
             "crypto_exposure_pct": crypto_pct,
             "positions": positions,
             "strategy_win_rates": strategy_win_rates,
+        }
+
+    def _build_meta_orch_metrics(self, portfolio: dict) -> dict:
+        """Build the metrics snapshot passed to TacticalMetaOrchestrator.maybe_run()."""
+        from app.agents.performance import PerformanceTracker as _PT
+        equity = float(portfolio.get("equity", 0.0) or 0.0)
+        positions = portfolio.get("positions", {}) or {}
+        crypto_val = sum(
+            float(p.get("value", 0) or 0) for sym, p in positions.items() if "/" in sym
+        )
+        crypto_pct = (crypto_val / equity * 100.0) if equity else 0.0
+        crypto_cap = float(
+            self.cfg.get("risk", {}).get("crypto", {}).get("max_crypto_exposure_pct", 50.0) or 50.0
+        )
+
+        # Strategy performance across all brokers
+        strat_trades: dict[str, list] = {}
+        for bs in self._broker_states.values():
+            for sname, trades in (bs.strategy_trades or {}).items():
+                strat_trades.setdefault(sname, []).extend(trades)
+        strat_perf: dict = {}
+        for sname, trades in strat_trades.items():
+            if trades:
+                stats = _PT.compute_trade_stats(trades)
+                strat_perf[sname] = {
+                    "n": stats["trades"],
+                    "win_rate": round(stats["win_rate"], 3),
+                    "avg_pnl_pct": round(stats["avg_pnl_pct"], 3),
+                    "avg_hold_min": round(stats.get("avg_hold_min", 0), 1),
+                }
+
+        # Median indicators across held positions
+        rsi_vals, atr_vals, hurst_vals = [], [], []
+        for bs in self._broker_states.values():
+            for sym, pos in (bs.position_state or {}).items():
+                ind = (pos.get("last_market_state") or {}).get("indicators") or {}
+                if ind.get("rsi"):    rsi_vals.append(float(ind["rsi"]))
+                if ind.get("atr_pct"): atr_vals.append(float(ind["atr_pct"]))
+                if ind.get("hurst"):  hurst_vals.append(float(ind["hurst"]))
+
+        def _median(lst):
+            if not lst: return None
+            s = sorted(lst)
+            n = len(s)
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+        # LLM orchestrator stats
+        llm_stats: dict = {}
+        if self._portfolio_orchestrator is not None:
+            try:
+                llm_stats = self._portfolio_orchestrator.get_stats()
+            except Exception:
+                pass
+
+        # Macro regime context
+        regime_ctx: dict = {}
+        if self._macro_regime is not None:
+            try:
+                cached = self._macro_regime._cache
+                if cached is not None:
+                    from datetime import timezone as _tz
+                    age_min = (datetime.now(_tz.utc) - cached.fetched_at).total_seconds() / 60
+                    regime_ctx = {
+                        "name": cached.name,
+                        "confidence": cached.confidence,
+                        "rationale": cached.rationale,
+                        "weight_overrides": cached.weight_overrides or {},
+                        "age_minutes": round(age_min, 1),
+                        "vix": cached.indicators.get("vix", "?") if hasattr(cached, "indicators") else "?",
+                        "dgs10": cached.indicators.get("dgs10", "?") if hasattr(cached, "indicators") else "?",
+                        "dxy": cached.indicators.get("dxy", "?") if hasattr(cached, "indicators") else "?",
+                    }
+            except Exception:
+                pass
+
+        # Session P&L
+        session_pnl = 0.0
+        for bs in self._broker_states.values():
+            session_pnl += float(getattr(bs, "day_pnl_pct", 0) or 0)
+
+        # Positions summary string (top 5 by P&L magnitude)
+        pos_items = []
+        for sym, p in positions.items():
+            pnl = float(p.get("unrealized_plpc", 0) or 0)
+            pos_items.append((sym, pnl))
+        pos_items.sort(key=lambda x: abs(x[1]), reverse=True)
+        pos_summary = " ".join(f"{s}({pnl:+.1f}%)" for s, pnl in pos_items[:5]) or "none"
+
+        # Exit backoffs and dust
+        now_utc = datetime.now(timezone.utc)
+        exit_backoffs = sum(
+            1 for t in self._exit_backoff_until.values() if t > now_utc
+        )
+        dust_count = sum(
+            1 for bs in self._broker_states.values()
+            for sym, pos in (bs.position_state or {}).items()
+            if float(pos.get("qty", 0) or 0) < 1e-6
+        )
+
+        # Consume and reset order flow counters
+        flow = dict(self._tmo_counters)
+        for k in self._tmo_counters:
+            self._tmo_counters[k] = 0
+        attempted = flow.get("attempted", 0)
+        filled    = flow.get("filled", 0)
+        fill_rate = (filled / attempted * 100.0) if attempted else 0.0
+
+        return {
+            "equity": equity,
+            "crypto_exposure_pct": crypto_pct,
+            "crypto_cap_pct": crypto_cap,
+            "positions_count": len(positions),
+            "positions_summary": pos_summary,
+            "session_pnl_pct": session_pnl,
+            "strategy_perf": strat_perf,
+            "current_weights": dict(self._config_strategy_weights),
+            "combine_mode": self._combine_mode,
+            "median_rsi": _median(rsi_vals) or 50.0,
+            "median_atr_pct": _median(atr_vals) or 1.0,
+            "median_hurst": _median(hurst_vals) or 0.5,
+            "llm_override_rate": float(llm_stats.get("override_rate", 0)),
+            "llm_override_win_rate": float(llm_stats.get("override_win_rate", 0)),
+            "combine_win_rate": float(llm_stats.get("combine_win_rate", 0)),
+            "orders_attempted": attempted,
+            "fill_rate_pct": fill_rate,
+            "orders_rejected": flow.get("rejected", 0),
+            "insuff_stablecoin": flow.get("insuff_stablecoin", 0),
+            "insuff_cash": flow.get("insuff_cash", 0),
+            "pos_limit_blocks": flow.get("pos_limit", 0),
+            "leverage_cap_blocks": flow.get("leverage_cap", 0),
+            "orders_timedout": flow.get("timedout", 0),
+            "stuck_cooldowns": sum(
+                1 for t in self._stuck_cooldown.values() if t > now_utc
+            ),
+            "exit_backoffs": exit_backoffs,
+            "dust_count": dust_count,
+            "regime": regime_ctx,
         }
 
     def _ops_state_blocks_run(self) -> bool:
