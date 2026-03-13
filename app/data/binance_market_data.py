@@ -15,6 +15,7 @@ app/main.py) to avoid circular imports.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -261,8 +262,7 @@ def fetch_binance_bars(
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     start_ms = int((datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp() * 1000)
 
-    result: dict[str, pd.DataFrame] = {}
-    for symbol in symbols:
+    def _fetch_one(symbol: str) -> tuple[str, pd.DataFrame | None]:
         bn_sym = _to_binance_symbol(symbol)
         try:
             klines = client.get_klines(
@@ -273,12 +273,9 @@ def fetch_binance_bars(
                 limit=1000,
             )
             if not klines:
-                log.debug("Binance bars: no data for %s", symbol)
-                continue
-            # kline format: [open_time, open, high, low, close, volume, close_time, ...]
+                return symbol, None
             rows = []
             for k in klines:
-                ts = pd.Timestamp(int(k[0]), unit="ms", tz="UTC")
                 rows.append({
                     "open": float(k[1]),
                     "high": float(k[2]),
@@ -291,11 +288,23 @@ def fetch_binance_bars(
                 [pd.Timestamp(int(k[0]), unit="ms", tz="UTC") for k in klines],
                 name="timestamp",
             )
-            df = df.sort_index()
-            result[symbol] = df
-            log.debug("Binance bars: %d bars for %s", len(df), symbol)
+            return symbol, df.sort_index()
         except Exception as exc:
             log.warning("Binance bars fetch failed for %s (%s): %s", symbol, bn_sym, exc)
+            return symbol, None
+
+    result: dict[str, pd.DataFrame] = {}
+    # Fetch all symbols concurrently (bounded by 15s per-request timeout on the client).
+    # Wall-clock capped at ~15s regardless of symbol count vs up to N×15s serial.
+    with ThreadPoolExecutor(max_workers=min(len(symbols), 10)) as pool:
+        futures = {pool.submit(_fetch_one, sym): sym for sym in symbols}
+        for fut in as_completed(futures, timeout=30):
+            try:
+                sym, df = fut.result()
+                if df is not None:
+                    result[sym] = df
+            except Exception as exc:
+                log.warning("Binance bars fetch thread error: %s", exc)
 
     log.info("Binance bars: fetched %d/%d symbols", len(result), len(symbols))
     return result
@@ -429,7 +438,8 @@ def _build_binance_client_from_cfg(cfg: dict) -> Any | None:
         base_url = str(acct.get("base_url", "") or "")
         demo = bool(base_url and "demo" in base_url.lower())
         testnet = bool(acct.get("testnet", False))
-        client = Client(api_key, api_secret, testnet=testnet, demo=demo)
+        client = Client(api_key, api_secret, testnet=testnet, demo=demo,
+                        requests_params={"timeout": 15})
         log.info("BinanceMarketDataProvider: client ready (demo=%s)", demo)
         return client
     except Exception as exc:
