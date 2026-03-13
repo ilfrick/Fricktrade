@@ -156,6 +156,15 @@ class BinanceBroker(Broker):
         # Maps order_id → Binance symbol string (required for cancel)
         self._order_symbol_map: dict[str, str] = {}
 
+        # Persistent single-worker pool for account/position/order fetches.
+        # max_workers=1 means at most one Binance call runs at a time; extra
+        # submits queue rather than spawning new threads.  We call
+        # future.result(timeout=N) and continue with cached data on timeout —
+        # the background thread keeps running but we don't block on it.
+        # Unlike 'with ThreadPoolExecutor', using the pool directly avoids the
+        # shutdown(wait=True) that blocks until the slow thread finishes.
+        self._broker_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"binance_{name}")
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -306,21 +315,20 @@ class BinanceBroker(Broker):
     # ------------------------------------------------------------------
 
     def _spot_account(self) -> dict:
-        # Wrap in a thread so we can enforce a strict wall-clock timeout.
-        # requests_params={"timeout": 15} only fires when NO bytes are received for
-        # 15s; slow/trickle Binance demo responses can still stall for minutes.
-        with ThreadPoolExecutor(max_workers=1) as _pool:
-            _fut = _pool.submit(self._spot_account_inner)
-            try:
-                return _fut.result(timeout=25)
-            except Exception as exc:
-                logging.warning("BinanceBroker: _spot_account timed out or failed: %s", exc)
-                # Return last cached value if available, else zeros
-                cached = getattr(self, "_last_spot_account", None)
-                return cached if cached is not None else {
-                    "equity": 0.0, "cash": 0.0, "buying_power": 0.0,
-                    "today_deposits": 0.0,
-                }
+        # Enforce a strict wall-clock timeout via the persistent broker pool.
+        # requests_params={"timeout": 15} only fires on zero-byte stalls; slow
+        # Binance demo responses that trickle data bypass it.  future.result(N)
+        # is a hard deadline regardless of what the thread is doing.
+        _fut = self._broker_pool.submit(self._spot_account_inner)
+        try:
+            return _fut.result(timeout=25)
+        except Exception as exc:
+            logging.warning("BinanceBroker: _spot_account timed out or failed: %s", exc)
+            cached = getattr(self, "_last_spot_account", None)
+            return cached if cached is not None else {
+                "equity": 0.0, "cash": 0.0, "buying_power": 0.0,
+                "today_deposits": 0.0,
+            }
 
     def _spot_account_inner(self) -> dict:
         account = record_broker_call(
@@ -366,13 +374,12 @@ class BinanceBroker(Broker):
         return result
 
     def _spot_positions(self) -> list[dict]:
-        with ThreadPoolExecutor(max_workers=1) as _pool:
-            _fut = _pool.submit(self._spot_positions_inner)
-            try:
-                return _fut.result(timeout=20)
-            except Exception as exc:
-                logging.warning("BinanceBroker: _spot_positions timed out or failed: %s", exc)
-                return getattr(self, "_last_spot_positions", [])
+        _fut = self._broker_pool.submit(self._spot_positions_inner)
+        try:
+            return _fut.result(timeout=20)
+        except Exception as exc:
+            logging.warning("BinanceBroker: _spot_positions timed out or failed: %s", exc)
+            return getattr(self, "_last_spot_positions", [])
 
     def _spot_positions_inner(self) -> list[dict]:
         account = record_broker_call(
@@ -399,15 +406,14 @@ class BinanceBroker(Broker):
         return positions
 
     def _spot_open_orders(self) -> list[dict]:
-        with ThreadPoolExecutor(max_workers=1) as _pool:
-            _fut = _pool.submit(
-                record_broker_call, self._name, "get_open_orders", self.client.get_open_orders
-            )
-            try:
-                orders = _fut.result(timeout=15)
-            except Exception as exc:
-                logging.warning("BinanceBroker: _spot_open_orders timed out or failed: %s", exc)
-                return []
+        _fut = self._broker_pool.submit(
+            record_broker_call, self._name, "get_open_orders", self.client.get_open_orders
+        )
+        try:
+            orders = _fut.result(timeout=15)
+        except Exception as exc:
+            logging.warning("BinanceBroker: _spot_open_orders timed out or failed: %s", exc)
+            return []
         return self._normalise_orders(orders)
 
     def _spot_place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
