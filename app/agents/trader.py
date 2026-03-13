@@ -1299,7 +1299,8 @@ class TradingAgent:
                 )
                 # Shadow: always compute combine so we can compare outcomes later
                 shadow_action, shadow_reduce, shadow_strategy = self._combine_signals(
-                    filtered_signals, weights, order=names, market_state=market_state
+                    filtered_signals, weights, order=names, market_state=market_state,
+                    is_held=(_cs_qty > 0),
                 )
                 llm_active = action != "hold" or action_strategy is not None
                 # LLM exit constraint: LLM may exit against a hold vote only when the
@@ -1335,7 +1336,8 @@ class TradingAgent:
                     trace["llm_override"] = llm_active and (action != shadow_action)
             else:
                 action, reduce_pct, action_strategy = self._combine_signals(
-                    filtered_signals, weights, order=names, market_state=market_state
+                    filtered_signals, weights, order=names, market_state=market_state,
+                    is_held=(_cs_qty > 0),
                 )
             # Track expected returns for portfolio optimizer / rebalance engine
             if action == "buy":
@@ -1376,7 +1378,8 @@ class TradingAgent:
                         symbol, broker_name, last_price
                     )
                     _shadow2, _red2, _strat2 = self._combine_signals(
-                        filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
+                        filtered_signals, filtered_weights, order=allowed_names, market_state=market_state,
+                        is_held=(_cs_qty > 0),
                     )
                     if _llm2_action in ("sell", "exit") and _shadow2 == "hold":
                         # LLM exit constraint: allow only when position is in drawdown
@@ -1402,7 +1405,8 @@ class TradingAgent:
                         action, reduce_pct, action_strategy = _llm2_action, _llm2_reduce, _llm2_strategy
                 else:
                     action, reduce_pct, action_strategy = self._combine_signals(
-                        filtered_signals, filtered_weights, order=allowed_names, market_state=market_state
+                        filtered_signals, filtered_weights, order=allowed_names, market_state=market_state,
+                        is_held=(_cs_qty > 0),
                     )
                 order_meta = self._select_order_meta(filtered_signals, allowed_names)
                 if not broker_override:
@@ -3020,6 +3024,7 @@ class TradingAgent:
         weights: dict[str, float] | None = None,
         order: list[str] | None = None,
         market_state: dict | None = None,
+        is_held: bool = False,
     ) -> tuple[str, float, str | None]:
         if not signals:
             return "hold", 1.0, None
@@ -3041,18 +3046,28 @@ class TradingAgent:
                     a = "sell"  # exit is a sell vote; no pre-emption in vote mode
                 if a in vote_counts:
                     vote_counts[a] += 1
-            max_votes = max(vote_counts.values())
-            winners = [a for a, v in vote_counts.items() if v == max_votes]
-            if len(winners) == 1:
-                winning_action = winners[0]
+            # When closing a held position, a lower sell-vote threshold applies so
+            # that 1-2 agreeing strategies can trigger an exit without needing a
+            # majority (which is almost never reached in sideways markets).
+            # Config: strategy.params.exit_vote_threshold (default 2).
+            # Buy entries still require strict majority — only exits are relaxed.
+            _strat_params = (self.cfg.get("strategy") or {}).get("params") or {}
+            _exit_threshold = int(_strat_params.get("exit_vote_threshold", 2))
+            if is_held and vote_counts["sell"] >= _exit_threshold:
+                winning_action = "sell"
             else:
-                # RL tiebreak: if rl_policy voted for one of the tied actions, follow it
-                rl_sig = next((s for s in signals if s.get("name") == "rl_policy"), None)
-                if rl_sig and rl_sig.get("action", "hold") in winners:
-                    winning_action = rl_sig.get("action", "hold")
-                    logging.debug("Vote tie %s broken by rl_policy → %s", winners, winning_action)
+                max_votes = max(vote_counts.values())
+                winners = [a for a, v in vote_counts.items() if v == max_votes]
+                if len(winners) == 1:
+                    winning_action = winners[0]
                 else:
-                    winning_action = "hold"
+                    # RL tiebreak: if rl_policy voted for one of the tied actions, follow it
+                    rl_sig = next((s for s in signals if s.get("name") == "rl_policy"), None)
+                    if rl_sig and rl_sig.get("action", "hold") in winners:
+                        winning_action = rl_sig.get("action", "hold")
+                        logging.debug("Vote tie %s broken by rl_policy → %s", winners, winning_action)
+                    else:
+                        winning_action = "hold"
             if winning_action == "hold":
                 return "hold", 1.0, None
             winning_sigs = [s for s in signals if s.get("action") == winning_action]

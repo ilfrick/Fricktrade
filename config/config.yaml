@@ -307,6 +307,7 @@ strategy:
     exit_threshold_pct: 0.15
     position_horizon_minutes: 0    # disabled — hard/trailing stops and TP handle exits
     min_hold_minutes: 15        # suppress all stop/take-profit exits for 15 min after entry
+    exit_vote_threshold: 2     # vote mode: exit a held position when ≥N strategies say sell/exit (vs majority for new entries)
     alpha_decay_exit:
       enabled: true            # exit when the entry strategy actively signals sell
       min_hold_minutes: 30      # don't check alpha decay before this time
