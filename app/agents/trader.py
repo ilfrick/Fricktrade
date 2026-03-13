@@ -401,7 +401,8 @@ class TradingAgent:
         # LLM Portfolio Orchestrator (makes final trade decisions)
         self._portfolio_orchestrator = None
         _orch_cfg = self.cfg.get("llm_orchestrator", {}) or {}
-        if _orch_cfg.get("enabled", False) and self._llm_client is not None:
+        _orch_mode = str(_orch_cfg.get("mode", "portfolio"))
+        if _orch_cfg.get("enabled", False) and _orch_mode != "vote" and self._llm_client is not None:
             try:
                 from app.llm.portfolio_orchestrator import LLMPortfolioOrchestrator as _PortOrch
                 self._portfolio_orchestrator = _PortOrch(self._llm_client, _orch_cfg)
