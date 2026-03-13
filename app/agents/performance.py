@@ -160,12 +160,15 @@ class PerformanceTracker:
                     strategy = self.consume_pending_entry_strategy(
                         symbol, broker_state, strategy_names
                     )
+                    # Use last_prices as fallback when broker doesn't provide avg_entry
+                    # (e.g. Binance Spot) so that stop-loss and trailing-stop logic works.
+                    effective_entry = curr_avg_entry or last_prices.get(symbol)
                     broker_state.position_state[symbol] = {
                         "qty": curr_qty,
-                        "avg_entry": curr_avg_entry,
+                        "avg_entry": effective_entry,
                         "strategy": strategy,
                         "opened_at": now,
-                        "peak_price": curr_avg_entry,
+                        "peak_price": effective_entry,
                         "took_partial": False,
                     }
                 continue

@@ -330,13 +330,18 @@ class BinanceBroker(Broker):
         equity = usd_stable_free + usd_stable_locked
         # Add market value of held crypto assets so equity doesn't appear to
         # drop when USDT is spent buying — this prevents false VaR spikes.
-        for asset, qty in non_stable:
+        # Use a single bulk ticker call to avoid N×15s timeout stalls.
+        if non_stable:
             try:
-                ticker = self.client.get_symbol_ticker(symbol=f"{asset}USDT")
-                price = float(ticker.get("price", 0) or 0)
-                equity += qty * price
+                all_tickers = {
+                    t["symbol"]: float(t["price"])
+                    for t in self.client.get_all_tickers()
+                }
+                for asset, qty in non_stable:
+                    price = all_tickers.get(f"{asset}USDT", 0.0)
+                    equity += qty * price
             except Exception:
-                pass  # skip if price unavailable
+                pass  # skip if bulk ticker unavailable
         return {"equity": equity, "cash": usdt_free, "buying_power": usdt_free,
                 "today_deposits": self.get_today_deposits()}
 

@@ -1091,7 +1091,7 @@ quote_stream:
 
 llm_orchestrator:
   enabled: true
-  mode: portfolio           # portfolio: one call/cycle for all symbols; per_symbol: one call/symbol
+  mode: vote                # vote: no LLM, pure signal vote; portfolio: one Gemini call/cycle
   provider: gemini
   model: gemini-2.5-flash  # flash: reliable JSON output, <1s latency, 33x cheaper than pro
   max_tokens: 8192          # per-broker decisions: 3 brokers × 33 symbols ~100 entries in JSON
