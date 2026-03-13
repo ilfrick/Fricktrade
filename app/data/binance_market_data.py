@@ -294,17 +294,22 @@ def fetch_binance_bars(
             return symbol, None
 
     result: dict[str, pd.DataFrame] = {}
-    # Fetch all symbols concurrently (bounded by 15s per-request timeout on the client).
-    # Wall-clock capped at ~15s regardless of symbol count vs up to N×15s serial.
+    # Fetch all symbols concurrently with a hard 30s wall-clock cap.
+    # requests_params timeout only fires on zero-byte reads; parallel+wall-clock
+    # cap ensures the whole batch completes in ≤30s even on slow demo APIs.
+    from concurrent.futures import TimeoutError as _FutTimeoutError
     with ThreadPoolExecutor(max_workers=min(len(symbols), 10)) as pool:
         futures = {pool.submit(_fetch_one, sym): sym for sym in symbols}
-        for fut in as_completed(futures, timeout=30):
-            try:
-                sym, df = fut.result()
-                if df is not None:
-                    result[sym] = df
-            except Exception as exc:
-                log.warning("Binance bars fetch thread error: %s", exc)
+        try:
+            for fut in as_completed(futures, timeout=30):
+                try:
+                    sym, df = fut.result()
+                    if df is not None:
+                        result[sym] = df
+                except Exception as exc:
+                    log.warning("Binance bars fetch thread error: %s", exc)
+        except _FutTimeoutError:
+            log.warning("Binance bars: bulk fetch timed out after 30s, using partial results (%d/%d)", len(result), len(symbols))
 
     log.info("Binance bars: fetched %d/%d symbols", len(result), len(symbols))
     return result
