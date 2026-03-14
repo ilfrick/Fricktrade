@@ -4,17 +4,36 @@
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeoutError, as_completed
 from typing import Any
 
 from app.brokers.base import Broker
 from app.utils.account import extract_equity_cash
 
+try:
+    from app.monitoring.metrics import BROKER_REQUESTS, BROKER_LAST_SUCCESS
+    _HAS_METRICS = True
+except Exception:
+    _HAS_METRICS = False
+
+# Consecutive timeouts before a broker is put offline
+_CIRCUIT_BREAK_THRESHOLD = 3
+# How long (seconds) a broker stays offline before being retried
+_CIRCUIT_RESET_SECONDS = 60
+# How long (seconds) a cached response is considered fresh enough to serve on timeout
+_CACHE_MAX_AGE_SECONDS = 300  # 5 minutes
+
 
 class BrokerRouter(Broker):
     def __init__(self, brokers: dict[str, Broker], routing: dict | None = None):
         self._brokers = brokers
         self._routing = routing or {}
+        # Per-broker response cache: {broker_name: {method: (result, timestamp)}}
+        self._response_cache: dict[str, dict[str, tuple[Any, float]]] = {}
+        # Circuit-breaker state: consecutive timeouts and offline-until timestamps
+        self._consecutive_timeouts: dict[str, int] = {}
+        self._offline_until: dict[str, float] = {}
 
     @property
     def brokers(self) -> dict[str, Broker]:
@@ -30,6 +49,7 @@ class BrokerRouter(Broker):
         per_broker: dict[str, dict[str, Any]] = {}
         accounts = self._fetch_per_broker(
             lambda broker: broker.get_account(),
+            "get_account",
             "Account fetch failed for %s: %s",
             {},
         )
@@ -57,6 +77,7 @@ class BrokerRouter(Broker):
         positions: list[dict] = []
         positions_map = self._fetch_per_broker(
             lambda broker: broker.get_positions(),
+            "get_positions",
             "Position fetch failed for %s: %s",
             [],
         )
@@ -71,6 +92,7 @@ class BrokerRouter(Broker):
         orders: list[dict] = []
         orders_map = self._fetch_per_broker(
             lambda broker: broker.get_open_orders(),
+            "get_open_orders",
             "Open orders fetch failed for %s: %s",
             [],
         )
@@ -142,34 +164,114 @@ class BrokerRouter(Broker):
             return str(default)
         return next(iter(self._brokers.keys()))
 
-    def _fetch_per_broker(self, func, error_template: str, default: Any) -> dict[str, Any]:
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _is_circuit_open(self, broker_name: str) -> bool:
+        """Return True if broker is currently offline (circuit open)."""
+        until = self._offline_until.get(broker_name, 0.0)
+        if until and time.monotonic() < until:
+            return True
+        if until:
+            # Reset: offline period expired
+            self._offline_until.pop(broker_name, None)
+            self._consecutive_timeouts.pop(broker_name, None)
+            logging.info("BrokerRouter: %s back online after circuit-break timeout", broker_name)
+        return False
+
+    def _record_timeout(self, broker_name: str) -> None:
+        """Record a timeout; open circuit after threshold."""
+        count = self._consecutive_timeouts.get(broker_name, 0) + 1
+        self._consecutive_timeouts[broker_name] = count
+        if _HAS_METRICS:
+            try:
+                BROKER_REQUESTS.labels(broker=broker_name, method="any", status="timeout").inc()
+            except Exception:
+                pass
+        if count >= _CIRCUIT_BREAK_THRESHOLD:
+            self._offline_until[broker_name] = time.monotonic() + _CIRCUIT_RESET_SECONDS
+            logging.warning(
+                "BrokerRouter: %s circuit open after %d consecutive timeouts — "
+                "skipping for %ds, serving stale cache",
+                broker_name, count, _CIRCUIT_RESET_SECONDS,
+            )
+
+    def _record_success(self, broker_name: str, method: str, result: Any) -> None:
+        """Cache result and reset circuit-breaker on success."""
+        self._consecutive_timeouts.pop(broker_name, None)
+        self._offline_until.pop(broker_name, None)
+        cache = self._response_cache.setdefault(broker_name, {})
+        cache[method] = (result, time.monotonic())
+        if _HAS_METRICS:
+            try:
+                BROKER_REQUESTS.labels(broker=broker_name, method=method, status="success").inc()
+                BROKER_LAST_SUCCESS.labels(broker=broker_name, method=method).set(time.time())
+            except Exception:
+                pass
+
+    def _get_cached(self, broker_name: str, method: str, default: Any) -> Any:
+        """Return cached result if available and not too stale, else default."""
+        entry = self._response_cache.get(broker_name, {}).get(method)
+        if entry is None:
+            return default
+        result, ts = entry
+        age = time.monotonic() - ts
+        if age > _CACHE_MAX_AGE_SECONDS:
+            logging.warning(
+                "BrokerRouter: %s %s cache is %.0fs stale — using anyway (no fresh data)",
+                broker_name, method, age,
+            )
+        else:
+            logging.info(
+                "BrokerRouter: %s %s serving %.0fs-old cache (broker timeout/offline)",
+                broker_name, method, age,
+            )
+        return result
+
+    def _fetch_per_broker(
+        self, func, method: str, error_template: str, default: Any
+    ) -> dict[str, Any]:
         if not self._brokers:
             return {}
-        max_workers = min(8, len(self._brokers))
+
+        # Split into brokers that are online vs circuit-open
+        online_brokers = {}
         results: dict[str, Any] = {}
+        for name, broker in self._brokers.items():
+            if self._is_circuit_open(name):
+                results[name] = self._get_cached(name, method, default)
+            else:
+                online_brokers[name] = broker
+
+        if not online_brokers:
+            return results
+
+        max_workers = min(8, len(online_brokers))
         # IMPORTANT: do NOT use 'with ThreadPoolExecutor' — its __exit__ calls
         # shutdown(wait=True) which blocks until all broker threads finish even when
         # as_completed times out, stalling the main loop for as long as the slowest broker.
         executor = ThreadPoolExecutor(max_workers=max_workers)
         try:
             futures = {
-                executor.submit(func, broker): name for name, broker in self._brokers.items()
+                executor.submit(func, broker): name
+                for name, broker in online_brokers.items()
             }
             try:
                 for future in as_completed(futures, timeout=30):
                     name = futures[future]
                     try:
-                        results[name] = future.result()
+                        result = future.result()
+                        self._record_success(name, method, result)
+                        results[name] = result
                     except Exception as exc:
                         logging.warning(error_template, name, exc)
-                        results[name] = default
+                        results[name] = self._get_cached(name, method, default)
             except _FutTimeoutError:
                 for future, name in futures.items():
                     if name not in results:
-                        logging.warning(error_template, name, "broker call timed out after 30s")
-                        results[name] = default
+                        self._record_timeout(name)
+                        results[name] = self._get_cached(name, method, default)
         finally:
             executor.shutdown(wait=False)  # abandon slow threads; do not block
         return results
-
-
