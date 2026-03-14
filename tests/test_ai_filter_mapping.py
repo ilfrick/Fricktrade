@@ -92,4 +92,9 @@ def _cfg() -> ai_filter.AISymbolFilterConfig:
         keras_weight=0.0,
         keras_score_mode="expected_return",
         device="cpu", # Default to CPU for tests
+        return_ranker_enabled=False,
+        return_ranker_model_path="/tmp/return_ranker.zip",
+        return_ranker_data_dir="/tmp/return_ranker_data",
+        return_ranker_retrain_hours=24,
+        return_ranker_max_age_days=3,
     )
