@@ -996,10 +996,13 @@ llm:
     refresh_hours: 4
     backend: gemini
 
-  # Sentiment analyzer (Claude) — per-symbol news analysis
-  # Fires only when news.enabled: true AND raw articles are fetched from Alpaca
+  # Sentiment analyzer — per-symbol news analysis
+  # Disabled: vote mode skips _enrich_signals entirely so scores never reach decisions.
+  # Re-enable with backend: gemini when switching to weighted/confidence combine mode.
+  # Local Ollama (llama3.1:8b, 4.4GB VRAM) generates at ~0.5 tok/s — full JSON
+  # response needs 200-500 tokens = 400-1000s per call, well beyond the 45s timeout.
   sentiment:
-    enabled: true
+    enabled: false
     cache_ttl_seconds: 900
     max_news_items: 10
     min_confidence_to_inject: 0.3
