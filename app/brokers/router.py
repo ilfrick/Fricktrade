@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeoutError, as_completed
 from typing import Any
 
 from app.brokers.base import Broker
@@ -147,17 +147,29 @@ class BrokerRouter(Broker):
             return {}
         max_workers = min(8, len(self._brokers))
         results: dict[str, Any] = {}
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # IMPORTANT: do NOT use 'with ThreadPoolExecutor' — its __exit__ calls
+        # shutdown(wait=True) which blocks until all broker threads finish even when
+        # as_completed times out, stalling the main loop for as long as the slowest broker.
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
             futures = {
                 executor.submit(func, broker): name for name, broker in self._brokers.items()
             }
-            for future in as_completed(futures):
-                name = futures[future]
-                try:
-                    results[name] = future.result()
-                except Exception as exc:
-                    logging.warning(error_template, name, exc)
-                    results[name] = default
+            try:
+                for future in as_completed(futures, timeout=30):
+                    name = futures[future]
+                    try:
+                        results[name] = future.result()
+                    except Exception as exc:
+                        logging.warning(error_template, name, exc)
+                        results[name] = default
+            except _FutTimeoutError:
+                for future, name in futures.items():
+                    if name not in results:
+                        logging.warning(error_template, name, "broker call timed out after 30s")
+                        results[name] = default
+        finally:
+            executor.shutdown(wait=False)  # abandon slow threads; do not block
         return results
 
 
