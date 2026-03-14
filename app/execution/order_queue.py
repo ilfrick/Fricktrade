@@ -371,6 +371,8 @@ def _reject_reason(code: str, exc: Exception) -> str:
     # "cost basis < $10" and "insufficient balance for USDC/USDT".
     if "floors to 0" in text or "floors to zero" in text:
         return "floors_to_zero"  # sub-step qty — will never succeed, do not retry
+    if "filter failure: notional" in text or "notional" in text and "filter" in text:
+        return "floors_to_zero"  # Binance -1013: sub-minimum notional, same treatment
     if "pattern day trading" in text or "pdt" in text:
         return "pdt_protection"
     if "insufficient balance for" in text:
@@ -382,6 +384,8 @@ def _reject_reason(code: str, exc: Exception) -> str:
     mapping = {
         "40310100": "pdt_protection",
         "40310000": "min_order_notional",  # Alpaca: cost basis < $10 minimum
+        "-1013": "floors_to_zero",         # Binance: Filter failure NOTIONAL — sub-minimum value
+        "-1111": "floors_to_zero",         # Binance: LOT_SIZE precision error
     }
     if code in mapping:
         return mapping[code]
