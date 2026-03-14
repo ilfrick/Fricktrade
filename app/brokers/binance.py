@@ -155,6 +155,8 @@ class BinanceBroker(Broker):
 
         # Maps order_id → Binance symbol string (required for cancel)
         self._order_symbol_map: dict[str, str] = {}
+        # Ticker prices from last get_all_tickers() call; shared with _spot_positions_inner
+        self._last_ticker_prices: dict[str, float] = {}
 
         # Persistent single-worker pool for account/position/order fetches.
         # max_workers=1 means at most one Binance call runs at a time; extra
@@ -363,6 +365,7 @@ class BinanceBroker(Broker):
                     t["symbol"]: float(t["price"])
                     for t in self.client.get_all_tickers()
                 }
+                self._last_ticker_prices = all_tickers  # share with _spot_positions_inner
                 for asset, qty in non_stable:
                     price = all_tickers.get(f"{asset}USDT", 0.0)
                     equity += qty * price
@@ -393,11 +396,14 @@ class BinanceBroker(Broker):
             qty = float(balance.get("free", 0) or 0) + float(balance.get("locked", 0) or 0)
             if qty < 1e-8:
                 continue
+            price = self._last_ticker_prices.get(f"{asset}USDT", 0.0)
             positions.append(
                 {
                     "symbol": f"{asset}/USD",
                     "qty": qty,
                     "avg_entry": None,  # not tracked by Binance Spot
+                    "current_price": price,
+                    "market_value": qty * price,
                     "side": "long",
                     "asset_class": "crypto",
                 }
