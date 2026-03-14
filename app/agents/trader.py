@@ -1306,7 +1306,10 @@ class TradingAgent:
             # sell signals are short entries that can never execute — don't let them vote
             _cs_positions = market_state.get("portfolio", {}).get("positions", {})
             _cs_qty = float(_cs_positions.get(symbol, {}).get("qty", 0) or 0)
-            if _cs_qty <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
+            # Dust positions (qty < 1e-6) are treated as not held so strategies
+            # generate fresh buy signals instead of returning hold for a "held" symbol.
+            _cs_qty_meaningful = _cs_qty if _cs_qty >= 1e-6 else 0.0
+            if _cs_qty_meaningful <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
                 filtered_signals = [s for s in filtered_signals if s.get("action") != "sell"]
             if self._portfolio_orchestrator is not None:
                 # Accumulate signals for this cycle's batch-level LLM call
@@ -1319,7 +1322,7 @@ class TradingAgent:
                 # Shadow: always compute combine so we can compare outcomes later
                 shadow_action, shadow_reduce, shadow_strategy = self._combine_signals(
                     filtered_signals, weights, order=names, market_state=market_state,
-                    is_held=(_cs_qty > 0),
+                    is_held=(_cs_qty_meaningful > 0),
                 )
                 llm_active = action != "hold" or action_strategy is not None
                 # LLM exit constraint: LLM may exit against a hold vote only when the
@@ -1356,7 +1359,7 @@ class TradingAgent:
             else:
                 action, reduce_pct, action_strategy = self._combine_signals(
                     filtered_signals, weights, order=names, market_state=market_state,
-                    is_held=(_cs_qty > 0),
+                    is_held=(_cs_qty_meaningful > 0),
                 )
             # Track expected returns for portfolio optimizer / rebalance engine
             if action == "buy":
@@ -1398,7 +1401,7 @@ class TradingAgent:
                     )
                     _shadow2, _red2, _strat2 = self._combine_signals(
                         filtered_signals, filtered_weights, order=allowed_names, market_state=market_state,
-                        is_held=(_cs_qty > 0),
+                        is_held=(_cs_qty_meaningful > 0),
                     )
                     if _llm2_action in ("sell", "exit") and _shadow2 == "hold":
                         # LLM exit constraint: allow only when position is in drawdown
@@ -1425,7 +1428,7 @@ class TradingAgent:
                 else:
                     action, reduce_pct, action_strategy = self._combine_signals(
                         filtered_signals, filtered_weights, order=allowed_names, market_state=market_state,
-                        is_held=(_cs_qty > 0),
+                        is_held=(_cs_qty_meaningful > 0),
                     )
                 order_meta = self._select_order_meta(filtered_signals, allowed_names)
                 if not broker_override:
