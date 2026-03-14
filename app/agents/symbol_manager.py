@@ -737,21 +737,39 @@ class SymbolManager:
         routing_cfg = exec_cfg.get("routing", {})
         broker_names = list(self._broker_map.keys())
 
+        # Build asset_filter lookup: broker_name → "both"|"crypto_only"|"equity_only"
+        brokers_cfg = self._cfg.get("brokers", {})
+
+        def _asset_filter(broker_name: str) -> str:
+            """Return asset_filter for a broker (e.g. 'alpaca:Realistic' → 'both')."""
+            parts = broker_name.split(":", 1)
+            base = parts[0].lower()
+            acct = parts[1] if len(parts) > 1 else None
+            b_cfg = brokers_cfg.get(base, {})
+            if acct:
+                for a in (b_cfg.get("accounts") or []):
+                    if str(a.get("name", "")).lower() == acct.lower():
+                        return str(a.get("asset_filter", "both")).lower()
+            return str(b_cfg.get("asset_filter", "both")).lower()
+
+        def _apply_broker_asset_filter(broker_name: str, syms: list[str]) -> list[str]:
+            if "binance" in broker_name.lower():
+                return [s for s in syms if "/" in s]
+            af = _asset_filter(broker_name)
+            if af == "crypto_only":
+                return [s for s in syms if "/" in s and s.upper().endswith("/USD")]
+            if af == "equity_only":
+                return [s for s in syms if "/" not in s]
+            # "both" (default): strip /USDT and other non-/USD crypto pairs
+            return [s for s in syms if "/" not in s or s.upper().endswith("/USD")]
+
         # When buying_power_scaling is disabled every broker scans the full universe
         # independently — no per-broker symbol cap, no exclusive held-symbol assignment.
         scaling_enabled = bool(routing_cfg.get("buying_power_scaling", True))
         if not scaling_enabled:
             result = {name: list(ordered) for name in broker_names}
             for broker_name in list(result):
-                if "binance" in broker_name.lower():
-                    # Binance is crypto-only — strip all equity symbols
-                    result[broker_name] = [s for s in result[broker_name] if "/" in s]
-                else:
-                    # Alpaca/IBKR: strip /USDT and other non-/USD crypto pairs
-                    result[broker_name] = [
-                        s for s in result[broker_name]
-                        if "/" not in s or s.upper().endswith("/USD")
-                    ]
+                result[broker_name] = _apply_broker_asset_filter(broker_name, result[broker_name])
             return result
 
         # Collect per-broker buying power and held/open-order symbols
@@ -779,18 +797,9 @@ class SymbolManager:
             extras = broker_extras.get(broker_name, [])
             part = partitioned.get(broker_name, [])
             symbols_by_broker[broker_name] = list(dict.fromkeys(extras + part))
-        # Filter asset-class-incompatible symbols per broker.
-        # Binance is crypto-only; Alpaca/IBKR only support /USD-quoted crypto.
+        # Filter asset-class-incompatible symbols per broker (respects asset_filter config).
         for broker_name, syms in list(symbols_by_broker.items()):
-            if "binance" in broker_name.lower():
-                # Binance: crypto only — drop all equity symbols
-                symbols_by_broker[broker_name] = [s for s in syms if "/" in s]
-            else:
-                # Alpaca/IBKR: strip /USDT and other non-/USD crypto pairs
-                symbols_by_broker[broker_name] = [
-                    s for s in syms
-                    if "/" not in s or s.upper().endswith("/USD")
-                ]
+            symbols_by_broker[broker_name] = _apply_broker_asset_filter(broker_name, syms)
         return symbols_by_broker
 
     def resolve_universe(

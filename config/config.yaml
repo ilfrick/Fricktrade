@@ -143,12 +143,14 @@ brokers:
     api_secret: ${ALPACA_API_SECRET}
     accounts:
     - name: Realistic
+      asset_filter: both        # both | crypto_only | equity_only
       risk:
         hard_stop_pct: 1.0
       reward:
         time_penalty_weight: 0.8
         time_normalizer: 240.0
     - name: Higher
+      asset_filter: both        # both | crypto_only | equity_only
     fees:
       commission_pct: 0.0
       per_trade_fee: 0.0
@@ -1006,6 +1008,16 @@ llm:
     cache_ttl_seconds: 900
     max_news_items: 10
     min_confidence_to_inject: 0.3
+
+  # Aggregate market sentiment via local Ollama (llama3.2:3b, ~1.5s/call).
+  # Runs every 15 min in background; result passed to tactical + strategic orchestrators.
+  # Never blocks main loop — runs in news executor thread with a hard timeout.
+  ollama_sentiment:
+    enabled: true
+    base_url: http://ollama:11434
+    model: llama3.2:3b         # 3B model: ~1.5s/call; fast enough for 15-min cadence
+    timeout_seconds: 30        # hard wall-clock limit — ollama call aborted if exceeded
+    max_headlines: 20          # max headlines per analysis call
 
   # Daily symbol selection (Gemini) — replaces PPO filter
   symbols_filter:

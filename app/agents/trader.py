@@ -325,6 +325,9 @@ class TradingAgent:
         # LLM integration — initialised lazily; missing API keys don't crash startup
         self._llm_client = None
         self._llm_sentiment = None
+        self._ollama_sentiment = None                  # local aggregate sentiment via Ollama
+        self._ollama_sentiment_future = None           # background future for ollama call
+        self._ollama_sentiment_last_at: datetime | None = None  # last trigger time
         self._risk_interpreter = None
         self._risk_interpreter_pause_until: datetime | None = None
         self._macro_regime = None
@@ -367,6 +370,17 @@ class TradingAgent:
                     cache_ttl_seconds=int(sent_cfg.get("cache_ttl_seconds", 900)),
                     min_confidence_to_inject=float(sent_cfg.get("min_confidence_to_inject", 0.3)),
                 )
+            # Ollama aggregate sentiment (free, local, runs every 15 min in background)
+            ollama_sent_cfg = llm_cfg.get("ollama_sentiment", {})
+            if ollama_sent_cfg.get("enabled", False):
+                from app.llm.ollama_sentiment import OllamaSentimentAnalyzer
+                self._ollama_sentiment = OllamaSentimentAnalyzer(
+                    base_url=ollama_sent_cfg.get("base_url", "http://ollama:11434"),
+                    model=ollama_sent_cfg.get("model", "llama3.2:3b"),
+                    timeout=int(ollama_sent_cfg.get("timeout_seconds", 30)),
+                    max_headlines=int(ollama_sent_cfg.get("max_headlines", 20)),
+                )
+
             ri_cfg = llm_cfg.get("risk_interpreter", {})
             if ri_cfg.get("enabled", False):
                 from app.llm.risk_interpreter import RiskEventInterpreter
@@ -3435,6 +3449,30 @@ class TradingAgent:
                 _p = self._last_portfolio
                 if _p:
                     self._update_position_metrics(_p)
+                # Ollama aggregate sentiment — triggered every 15 min, runs in news executor
+                # (background thread), so this reporting thread never blocks.
+                if self._ollama_sentiment is not None:
+                    _now_utc = datetime.now(timezone.utc)
+                    # Collect completed future (OllamaSentimentAnalyzer updates _last in-place)
+                    if self._ollama_sentiment_future is not None and self._ollama_sentiment_future.done():
+                        try:
+                            self._ollama_sentiment_future.result()
+                        except Exception:
+                            pass
+                        self._ollama_sentiment_future = None
+                    # Schedule new analysis every 15 min if previous is not still running
+                    _sent_interval = 15 * 60
+                    if (self._ollama_sentiment_future is None and
+                            (self._ollama_sentiment_last_at is None or
+                             (_now_utc - self._ollama_sentiment_last_at).total_seconds() >= _sent_interval)):
+                        _headlines = list(self._raw_news_cache.get("__headlines__", []))
+                        if _headlines:
+                            self._ollama_sentiment_last_at = _now_utc
+                            _analyzer = self._ollama_sentiment
+                            _hdls = _headlines
+                            self._ollama_sentiment_future = self._news_executor.submit(
+                                lambda a=_analyzer, h=_hdls: a.analyze(h)
+                            )
             except Exception as exc:
                 logging.warning("Reporting loop error: %s", exc)
             time.sleep(15)
@@ -3757,6 +3795,7 @@ class TradingAgent:
             "exit_backoffs": exit_backoffs,
             "dust_count": dust_count,
             "regime": regime_ctx,
+            "market_sentiment": self._ollama_sentiment.to_dict() if self._ollama_sentiment is not None else {},
             "strategic_baseline": strategic_baseline,
             "brokers": tmo_broker_ctx,
         }
@@ -3962,7 +4001,7 @@ class TradingAgent:
             symbols_snapshot = list(symbols)
             self._news_inflight_at = now
             logging.info("News catalyst refresh started; symbols=%d", len(symbols_snapshot))
-            _fetch_raw = self._llm_sentiment is not None
+            _fetch_raw = self._llm_sentiment is not None or self._ollama_sentiment is not None
             _news_cfg = dict(news_cfg)
             _brokers_cfg = dict(self.cfg.get("brokers", {}))
 
