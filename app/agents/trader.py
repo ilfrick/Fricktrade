@@ -84,6 +84,7 @@ try:
 except Exception:
     _TORCH_OOM = ()
 _OOM_ERRORS = (tf.errors.ResourceExhaustedError,) + _TORCH_OOM
+_rl_model_warned: bool = False  # suppress repeated "RL model unavailable" warnings (once per process)
 from app.strategies.rl_policy import RLPolicyStrategy
 from app.strategies.rl_policy_fees import FeeAwareRLPolicyStrategy
 from app.utils.market import is_market_open, is_venue_extended
@@ -180,6 +181,7 @@ class TradingAgent:
             self._broker_states[name] = BrokerState(risk=RiskManager(broker_risk_cfg, tz=risk_tz))
         self._last_market_open = None
         self._started_at = datetime.now(timezone.utc)
+        self._loop_heartbeat: float = 0.0  # updated each loop iteration; monitored by watchdog
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
         self._news_executor = ThreadPoolExecutor(max_workers=1)
@@ -220,6 +222,7 @@ class TradingAgent:
         self._orchestrator_state: dict[tuple[str, str], dict[str, object]] = {}
         self._position_symbols: set[str] = set()
         self._position_symbols_by_broker: dict[str, set[str]] = {}
+        self._last_portfolio: dict = {}  # updated each cycle; read by reporting thread for position metrics
         self._market_cache_cfg = build_market_cache_config(cfg.get("market_cache", {}))
         self._market_cache = build_market_cache(cfg.get("market_cache", {}))
         self._symbol_mgr = SymbolManager(cfg, self._broker_map, self._broker_name, self._open_order_mgr, self._market_cache_cfg, self._market_cache)
@@ -2211,6 +2214,20 @@ class TradingAgent:
                                 "floors_to_zero dust %s/%s — exit suppressed for 8h",
                                 response.broker, response.symbol,
                             )
+                            # Attempt immediate dust conversion to BNB so the position doesn't linger
+                            try:
+                                _dust_broker = self._broker_map.get(response.broker) if hasattr(self, "_broker_map") else None
+                                if _dust_broker is None and hasattr(self, "broker"):
+                                    _dust_broker = self.broker
+                                if _dust_broker is not None:
+                                    _base = response.symbol.split("/")[0] if "/" in response.symbol else response.symbol
+                                    _inner = getattr(_dust_broker, "_brokers", {}).get(response.broker) or _dust_broker
+                                    _client = getattr(_inner, "client", None) or getattr(_dust_broker, "client", None)
+                                    if _client is not None and hasattr(_client, "transfer_dust"):
+                                        _client.transfer_dust(asset=[_base])
+                                        logging.info("Dust converted to BNB: %s/%s", response.broker, response.symbol)
+                            except Exception as _dust_exc:
+                                logging.debug("Dust conversion failed for %s/%s: %s", response.broker, response.symbol, _dust_exc)
                         else:
                             self._record_exit_failure(response.broker, response.symbol)
                         if _rej_reason == "pdt_protection":
@@ -3403,6 +3420,11 @@ class TradingAgent:
                 self._last_market_open = self._account_metrics.update_market_open_metrics(
                     self.cfg, self._broker_names or [self._broker_name], market_open, self._last_market_open
                 )
+                # Update position metrics from last known portfolio so Grafana stays fresh (15s vs 90s).
+                # _last_portfolio is a reference swap (GIL-atomic in CPython) — safe to read here.
+                _p = self._last_portfolio
+                if _p:
+                    self._update_position_metrics(_p)
             except Exception as exc:
                 logging.warning("Reporting loop error: %s", exc)
             time.sleep(15)
@@ -3413,8 +3435,27 @@ class TradingAgent:
         # Start decoupled reporting thread
         reporting_thread = threading.Thread(target=self._run_reporting_loop, daemon=True)
         reporting_thread.start()
-        
+
+        def _watchdog():
+            import traceback, sys
+            while True:
+                time.sleep(30)
+                age = time.monotonic() - self._loop_heartbeat
+                if age > 180:
+                    logging.warning(
+                        "WATCHDOG: main loop has not advanced for %.0fs — dumping all thread stacks",
+                        age,
+                    )
+                    for tid, frame in sys._current_frames().items():
+                        logging.warning(
+                            "Thread %d:\n%s", tid,
+                            "".join(traceback.format_stack(frame)),
+                        )
+        watchdog_thread = threading.Thread(target=_watchdog, daemon=True, name="loop-watchdog")
+        watchdog_thread.start()
+
         while True:
+            self._loop_heartbeat = time.monotonic()
             if should_restart(self._started_at):
                 logging.info("Restart requested; exiting trading loop.")
                 raise SystemExit(0)
@@ -3426,6 +3467,7 @@ class TradingAgent:
                     BROKER_MARKET_OPEN.labels(broker=broker_name).set(0)
                 time.sleep(interval_seconds)
                 continue
+            self._last_portfolio = portfolio  # reporting thread reads this for position metrics
             symbols = self._symbol_mgr.resolve_active_symbols()
             symbols = self._run_cycle_maintenance(symbols, portfolio)
             self._update_open_order_queues()
