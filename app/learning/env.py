@@ -136,6 +136,7 @@ class TradingEnv(gym.Env):
         symbol: str | None = None,
         reward_overrides: dict[str, float] | None = None,
         reward_override_mode: str = "add",
+        random_start_pos_prob: float = 0.0,
     ):
         super().__init__()
         self.data = data.reset_index(drop=True)
@@ -161,6 +162,7 @@ class TradingEnv(gym.Env):
         self.symbol = str(symbol) if symbol else None
         self.reward_overrides = reward_overrides or {}
         self.reward_override_mode = str(reward_override_mode or "add").lower()
+        self.random_start_pos_prob = float(random_start_pos_prob)
 
         self.position_entry_price = 0.0
         self.total_realized_pnl = 0.0
@@ -192,6 +194,20 @@ class TradingEnv(gym.Env):
         self.gross_profits = 0.0
         self.gross_losses = 0.0
         self.reward_calculator.reset(self.initial_cash)
+        # Randomly start some episodes with an inherited long position so the model
+        # learns to evaluate (and potentially hold) a position it didn't enter itself,
+        # mirroring what happens after a live model reload.
+        if self.random_start_pos_prob > 0 and np.random.random() < self.random_start_pos_prob:
+            price = self._get_price(self.step_index)
+            if price > 0:
+                alloc = self.initial_cash * 0.5  # invest ~50% of capital
+                self.position_qty = alloc / price
+                self.position_entry_price = price
+                self.cash = self.initial_cash - alloc
+                self.position = 1
+                self.last_value = self.cash + self.position_qty * price
+                self.reward_calculator.reset(self.last_value)
+                self.reward_calculator.on_position_open(self.step_index, price)
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)

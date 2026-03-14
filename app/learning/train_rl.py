@@ -78,6 +78,7 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
                 symbol=str(sym) if sym else None,
                 reward_overrides=ov,
                 reward_override_mode=str(learning_cfg.get("live_rewards", {}).get("mode", "add")),
+                random_start_pos_prob=float(training_cfg.get("random_start_pos_prob", 0.0)),
             )
         )
         eval_sets.append(eval_df)
@@ -242,7 +243,14 @@ def train_from_config(cfg: dict, resume: bool | None = None) -> str:
             publish_mode = str(registry_cfg.get("publish_mode", "best")).lower()
             active_path = registry_cfg.get("active_path", "/app/models/model_active.json")
             if publish_mode == "latest" or (publish_mode == "best" and is_best):
-                set_active_model(active_path, record, reason=publish_mode)
+                sell_happy_threshold = float(training_cfg.get("sell_happy_threshold", 0.6))
+                if _is_sell_happy(model, eval_sets, window_size, feature_config, sell_happy_threshold):
+                    logging.warning(
+                        "Model validation failed: sell-happy gate (>%.0f%% immediate sells on "
+                        "inherited positions). NOT publishing to active.", sell_happy_threshold * 100
+                    )
+                else:
+                    set_active_model(active_path, record, reason=publish_mode)
     try:
         candidate_file.unlink(missing_ok=True)
     except Exception:
@@ -297,6 +305,37 @@ def _sb3_custom_objects() -> dict:
         "clip_range": lambda _: 0.2,
         "lr_schedule": lambda _: 0.0,
     }
+
+
+def _is_sell_happy(model, eval_sets: list, window_size: int, feature_config: dict, threshold: float) -> bool:
+    """Return True if the model immediately sells on >=threshold fraction of inherited-position episodes.
+
+    Runs up to 20 single-step probes: each probe resets the env with position=1 already held
+    (random_start_pos_prob=1.0) and checks whether the model's first action is sell (action==2).
+    A model that sells on >60% of such probes is flagged as sell-happy and blocked from going live.
+    """
+    if not eval_sets:
+        return False
+    try:
+        probe_env = TradingEnv(
+            data=eval_sets[0] if not eval_sets[0].empty else eval_sets[-1],
+            window_size=window_size,
+            feature_config=feature_config,
+            random_start_pos_prob=1.0,
+        )
+        n_probes = 20
+        sell_count = 0
+        for _ in range(n_probes):
+            obs, _ = probe_env.reset()
+            action, _ = model.predict(obs, deterministic=True)
+            if int(action) == 2:  # 2 = sell
+                sell_count += 1
+        sell_rate = sell_count / n_probes
+        logging.info("Sell-happy gate: %.0f%% immediate sells on inherited positions (%d probes)", sell_rate * 100, n_probes)
+        return sell_rate >= threshold
+    except Exception as exc:
+        logging.warning("Sell-happy gate check failed (%s); allowing publish.", exc)
+        return False
 
 
 def _is_better_report(report: dict, best_report_path: str) -> bool:

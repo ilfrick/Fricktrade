@@ -308,6 +308,8 @@ class TradingAgent:
         # PDT-blocked symbols: suppress sell retries until next trading day
         self._pdt_blocked: set[tuple[str, str]] = set()
         self._pdt_blocked_date: date | None = None
+        # RL model reload timestamp — used to suppress sell votes right after reload
+        self._rl_reload_at: datetime | None = None
         # Config strategy weights — used when orchestrator is disabled (returns uniform 1.0)
         self._config_strategy_weights: dict[str, float] = dict(
             self.cfg.get("orchestrator", {}).get("strategy_weights", {}) or {}
@@ -3180,11 +3182,21 @@ class TradingAgent:
                         return action, reduce_pct, name
             return "hold", 1.0, None
         if mode == "vote":
+            _strat_params_v = (self.cfg.get("strategy") or {}).get("params") or {}
+            _rl_hold_min = int(_strat_params_v.get("rl_reload_hold_minutes", 15))
+            _rl_reload_suppressed = False
+            if _rl_hold_min > 0 and self._rl_reload_at is not None:
+                _elapsed = (datetime.now(timezone.utc) - self._rl_reload_at).total_seconds() / 60.0
+                _rl_reload_suppressed = _elapsed < _rl_hold_min
             vote_counts: dict[str, int] = {"buy": 0, "sell": 0, "hold": 0}
             for signal in signals:
                 a = signal.get("action", "hold")
                 if a == "exit":
                     a = "sell"  # exit is a sell vote; no pre-emption in vote mode
+                # After model reload, suppress rl_policy sell votes for rl_reload_hold_minutes
+                # to prevent the new model from immediately liquidating all held positions.
+                if _rl_reload_suppressed and a == "sell" and signal.get("name") in {"rl_policy", "rl_policy_fees"}:
+                    a = "hold"
                 if a in vote_counts:
                     vote_counts[a] += 1
             # When closing a held position, a lower sell-vote threshold applies so
@@ -3197,6 +3209,14 @@ class TradingAgent:
             _strat_params = (self.cfg.get("strategy") or {}).get("params") or {}
             _exit_threshold = int(_strat_params.get("exit_vote_threshold", 2))
             _buy_threshold = int(_strat_params.get("buy_vote_threshold", 0))
+            # In trending regimes (low_vol_trending / high_vol_trending) lower the bar for
+            # new entries: crypto strategies rarely co-fire, so require fewer votes.
+            # Config: strategy.params.buy_vote_threshold_trending (default 1).
+            _regime = (market_state or {}).get("regime")
+            if _regime in (0,) and not is_held:  # 0 = low_vol_trending
+                _trending_threshold = int(_strat_params.get("buy_vote_threshold_trending", 1))
+                if _trending_threshold > 0:
+                    _buy_threshold = _trending_threshold
             if is_held and vote_counts["sell"] >= _exit_threshold:
                 winning_action = "sell"
             elif not is_held and _buy_threshold > 0 and vote_counts["buy"] >= _buy_threshold:
@@ -3379,6 +3399,7 @@ class TradingAgent:
                     del strategies[name]
             if not strategies:
                 del self._strategy_by_symbol[symbol]
+        self._rl_reload_at = datetime.now(timezone.utc)
 
     # _violates_exposure_caps moved to RiskManager.check_exposure_caps
 
