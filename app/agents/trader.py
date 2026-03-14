@@ -323,20 +323,28 @@ class TradingAgent:
                 cfg.get("data", {}),
             )
         # LLM integration — initialised lazily; missing API keys don't crash startup
+        # Rolling order-flow counters — must be before _init_llm() (early-return when disabled)
         self._tmo_counters: dict[str, int] = {
             "attempted": 0, "filled": 0, "rejected": 0,
             "insuff_stablecoin": 0, "insuff_cash": 0,
             "pos_limit": 0, "leverage_cap": 0, "timedout": 0,
         }
+        # LLM sub-modules — default None; _init_llm() sets them when enabled.
+        # Declared here so any method can safely check "is not None" regardless
+        # of whether LLM is enabled or _init_llm() returned early.
         self._llm_client = None
         self._llm_sentiment = None
-        self._ollama_sentiment = None                  # local aggregate sentiment via Ollama
-        self._ollama_sentiment_future = None           # background future for ollama call
-        self._ollama_sentiment_last_at: datetime | None = None  # last trigger time
+        self._ollama_sentiment = None
+        self._ollama_sentiment_future = None
+        self._ollama_sentiment_last_at: datetime | None = None
         self._risk_interpreter = None
         self._risk_interpreter_pause_until: datetime | None = None
         self._macro_regime = None
         self._llm_symbols_filter = None
+        self._portfolio_orchestrator = None
+        self._tactical_meta_orch = None
+        self._strategic_orch = None
+        self._risk_interpreter = None
         self._raw_news_cache: dict[str, list[dict]] = {}  # populated when news enrichment is added
         # Quote stream (real-time bid/ask data)
         self._quote_stream = None
@@ -423,7 +431,6 @@ class TradingAgent:
         except Exception as exc:
             logging.warning("LLM init failed (check API keys): %s", exc)
         # LLM Portfolio Orchestrator (makes final trade decisions)
-        self._portfolio_orchestrator = None
         _orch_cfg = self.cfg.get("llm_orchestrator", {}) or {}
         _orch_mode = str(_orch_cfg.get("mode", "portfolio"))
         if _orch_cfg.get("enabled", False) and _orch_mode != "vote" and self._llm_client is not None:
@@ -433,7 +440,6 @@ class TradingAgent:
             except Exception as exc:
                 logging.warning("LLM orchestrator init failed: %s", exc)
         # Tactical Meta Orchestrator (15-min config tuner + tactical strategist)
-        self._tactical_meta_orch = None
         _tmo_cfg = self.cfg.get("tactical_meta_orchestrator", {}) or {}
         if _tmo_cfg.get("enabled", False) and self._llm_client is not None:
             try:
@@ -443,7 +449,6 @@ class TradingAgent:
             except Exception as exc:
                 logging.warning("Tactical meta orchestrator init failed: %s", exc)
         # Strategic Meta Orchestrator (weekly/emergency config rebalancer)
-        self._strategic_orch = None
         _so_cfg = self.cfg.get("strategic_meta_orchestrator", {}) or {}
         if _so_cfg.get("enabled", False) and self._llm_client is not None:
             try:
