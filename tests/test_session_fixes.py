@@ -61,23 +61,24 @@ def _make_symbol_mgr(cfg=None):
 
 
 class TestAIFilterMarketGate:
-    @patch("app.agents.symbol_manager.is_market_open", return_value=False)
-    def test_skips_when_market_closed(self, mock_open):
+    @patch("app.agents.symbol_manager.is_venue_open", return_value=False)
+    @patch("app.agents.symbol_manager.get_alpaca_account_cfg", return_value={"api_key": "", "api_secret": ""})
+    def test_skips_when_market_closed(self, mock_cfg, mock_venue):
         mgr = _make_symbol_mgr({"data": {"dynamic_symbols": {"enabled": True, "provider": "alpaca", "refresh_minutes": 1}}})
         mgr._dynamic_symbols_at = None
         mgr.refresh_dynamic_symbols({}, ["trend_following"])
-        # Should return early without setting _dynamic_symbols_at
+        # Equity market closed + no API keys → returns early without setting _dynamic_symbols_at
         assert mgr._dynamic_symbols_at is None
 
-    @patch("app.agents.symbol_manager.is_market_open", return_value=True)
+    @patch("app.agents.symbol_manager.is_venue_open", return_value=True)
     @patch("app.agents.symbol_manager.get_alpaca_account_cfg", return_value={"api_key": "", "api_secret": ""})
-    def test_proceeds_when_market_open(self, mock_cfg, mock_open):
+    def test_proceeds_when_market_open(self, mock_cfg, mock_venue):
         mgr = _make_symbol_mgr({"data": {"dynamic_symbols": {"enabled": True, "provider": "alpaca", "refresh_minutes": 1}}})
         mgr._dynamic_symbols_at = None
         # Will proceed past the gate but may fail later due to missing API keys — that's OK
         mgr.refresh_dynamic_symbols({}, ["trend_following"])
-        # Should have attempted to run (may or may not succeed depending on API)
-        mock_open.assert_called_once()
+        # Should have attempted to check venue (may or may not succeed depending on API)
+        mock_venue.assert_called()
 
 
 # ---------------------------------------------------------------------------

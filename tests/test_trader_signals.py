@@ -48,15 +48,18 @@ class TestCombineSignalsPriority:
         assert reduce_pct == 1.0
         assert strategy is None
 
-    def test_exit_always_wins(self):
+    def test_exit_pre_emption_removed(self):
+        # exit pre-emption was removed (commit eb7ba18); exit is normalised to sell
+        # and in priority mode the higher-priority strategy wins regardless of action.
+        # strategies: ["intraday_momentum", "trend_following"] — intraday_momentum is first.
         agent = _make_agent("priority")
         signals = [
             {"action": "buy", "name": "intraday_momentum"},
             {"action": "exit", "name": "trend_following"},
         ]
         action, reduce_pct, strategy = agent._combine_signals(signals)
-        assert action == "exit"
-        assert strategy == "trend_following"
+        assert action == "buy"
+        assert strategy == "intraday_momentum"
 
     def test_priority_order(self):
         agent = _make_agent("priority", ["trend_following", "intraday_momentum"])

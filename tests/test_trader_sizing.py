@@ -6,7 +6,7 @@
 import pytest
 
 pytest.importorskip("tensorflow")
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from app.agents.trader import TradingAgent
 
@@ -48,11 +48,13 @@ class TestSizeOrderBuy:
     def test_basic_buy(self):
         agent = _make_agent(max_pos_pct=10.0)
         portfolio = {"equity": 100000.0, "cash": 50000.0, "positions": {}}
-        qty, reason = agent._size_order("buy", 100.0, portfolio, "AAPL", {})
+        # Half-Kelly: kelly_win_prob=1.0 → kelly_scale=0.5 → effective 5% of 100k=$5k → qty=50
+        # tod_scale patched to 1.0 to avoid time-of-day flakiness
+        with patch.object(type(agent), "_time_of_day_scale", staticmethod(lambda s, a: 1.0)):
+            qty, reason = agent._size_order("buy", 100.0, portfolio, "AAPL", {"kelly_win_prob": 1.0})
         assert qty > 0
         assert reason is None
-        # max_pos_pct=10% of 100k = 10k, price=100, so qty=100
-        assert qty == 100
+        assert qty == 50
 
     def test_buy_zero_price(self):
         agent = _make_agent()
@@ -79,11 +81,13 @@ class TestSizeOrderBuy:
         portfolio = {
             "equity": 100000.0,
             "cash": 50000.0,
-            "positions": {"AAPL": {"qty": 50}},
+            "positions": {"AAPL": {"qty": 25}},
         }
-        # Target 10k, existing 50*100=5k, remaining 5k, qty=50
-        qty, reason = agent._size_order("buy", 100.0, portfolio, "AAPL", {})
-        assert qty == 50
+        # kelly_win_prob=1.0 → kelly_scale=0.5 → effective 5% of 100k=$5k target
+        # existing 25*100=$2.5k, remaining $2.5k → qty=25
+        with patch.object(type(agent), "_time_of_day_scale", staticmethod(lambda s, a: 1.0)):
+            qty, reason = agent._size_order("buy", 100.0, portfolio, "AAPL", {"kelly_win_prob": 1.0})
+        assert qty == 25
         assert reason is None
 
     def test_buy_position_limit(self):
