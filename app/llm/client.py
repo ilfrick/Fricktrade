@@ -231,6 +231,56 @@ class GeminiBackend(LLMBackend):
         )
 
 
+class OllamaBackend(LLMBackend):
+    """Local Ollama backend (free — no API cost)."""
+
+    def __init__(self, model: Optional[str] = None):
+        self.model = model or os.getenv("LLM_OLLAMA_MODEL", "llama3.1:8b")
+        self.base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+
+    def complete(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.2,
+        model: Optional[str] = None,
+    ) -> LLMResponse:
+        import urllib.request
+        effective_model = model or self.model
+        t0 = time.monotonic()
+        payload = json.dumps({
+            "model": effective_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": temperature, "num_predict": max_tokens},
+        }).encode()
+        req = urllib.request.Request(
+            f"{self.base_url}/api/chat",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+        latency = (time.monotonic() - t0) * 1000
+        content = data.get("message", {}).get("content", "") or ""
+        prompt_tok = data.get("prompt_eval_count", 0) or 0
+        eval_tok = data.get("eval_count", 0) or 0
+        return LLMResponse(
+            content=content,
+            model=effective_model,
+            input_tokens=prompt_tok,
+            output_tokens=eval_tok,
+            latency_ms=round(latency, 1),
+            cost_usd=0.0,
+        )
+
+
 class LLMClient:
     """
     Main client used by all Fricktrade LLM modules.
@@ -242,6 +292,7 @@ class LLMClient:
     BACKENDS: dict[str, type[LLMBackend]] = {
         "claude": ClaudeBackend,
         "gemini": GeminiBackend,
+        "ollama": OllamaBackend,
     }
 
     def __init__(self, daily_budget_usd: float = 5.00, alert_threshold_usd: float = 4.00):

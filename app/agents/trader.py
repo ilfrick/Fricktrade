@@ -3651,11 +3651,18 @@ class TradingAgent:
     def _maybe_checkpoint(self) -> None:
         broker_states_payload: dict[str, dict[str, object]] = {}
         for name, state in self._broker_states.items():
+            # Serialize position_state: convert datetime fields to ISO strings
+            pos_state_serialized = {}
+            for sym, pos in (state.position_state or {}).items():
+                pos_copy = dict(pos)
+                pos_copy["opened_at"] = _dt_to_str(pos.get("opened_at"))
+                pos_state_serialized[sym] = pos_copy
             broker_states_payload[name] = {
                 "last_trade_at": _dt_to_str(state.last_trade_at),
                 "equity_start": state.equity_start,
                 "equity_peak": state.equity_peak,
                 "disabled_strategies": sorted(state.disabled_strategies),
+                "position_state": pos_state_serialized,
             }
         default_state = self._broker_states.get(self._broker_name)
         payload = {
@@ -3706,6 +3713,19 @@ class TradingAgent:
                 disabled = state.get("disabled_strategies")
                 if isinstance(disabled, list):
                     broker_state.disabled_strategies = {str(item) for item in disabled}
+                # Restore position_state: opened_at deserialised back to datetime.
+                # Backdate all loaded positions by 24h so they immediately clear
+                # min_hold_minutes — positions held before a restart are never "new".
+                saved_pos_state = state.get("position_state")
+                if isinstance(saved_pos_state, dict):
+                    for sym, pos in saved_pos_state.items():
+                        if isinstance(pos, dict) and float(pos.get("qty", 0) or 0) > 0:
+                            pos_restored = dict(pos)
+                            _oa = _dt_from_str(pos.get("opened_at"))
+                            if _oa is not None:
+                                _oa = _oa - timedelta(hours=24)
+                            pos_restored["opened_at"] = _oa
+                            broker_state.position_state[sym] = pos_restored
         calibrator_data = payload.get("confidence_calibrator")
         if isinstance(calibrator_data, dict):
             self._confidence_calibrator = ConfidenceCalibrator.from_dict(calibrator_data)

@@ -984,7 +984,7 @@ llm:
 
   # Backend assignment per module
   backends:
-    sentiment: gemini        # Quality-critical
+    sentiment: ollama        # Free local inference (llama3.1:8b)
     symbols_filter: gemini   # High volume, large context
     post_session: gemini     # Large trade logs
     meta_orchestrator: gemini # Complex reasoning
