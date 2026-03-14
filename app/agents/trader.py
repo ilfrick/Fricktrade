@@ -2162,6 +2162,16 @@ class TradingAgent:
                     if status == "completed":
                         # Successful fill resets the consecutive-stuck counter
                         self._stuck_timeout_counts.pop((response.broker, response.symbol), None)
+                        # A buy on a previously-dust symbol makes it a real position.
+                        # Clear any lingering sell blocks left over from floors_to_zero:
+                        # - _pending_sell_qty: was intentionally kept set to block repeat sells on
+                        #   sub-LOT_SIZE dust, but the position is no longer dust after this fill.
+                        # - _exit_backoff_until: 8h backoff set on floors_to_zero rejection; no
+                        #   longer appropriate now that the position has real size.
+                        _buy_key = (response.broker, response.symbol)
+                        with self._pending_sell_qty_lock:
+                            self._pending_sell_qty.pop(_buy_key, None)
+                        self._exit_backoff_until.pop(_buy_key, None)
                 # insufficient_stablecoin: price moved between sizing and fill; apply a short
                 # cooldown so the symbol doesn't hammer the broker every cycle until cash
                 # replenishes or the margin fix kicks in post-restart.
