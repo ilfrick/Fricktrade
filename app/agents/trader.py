@@ -2888,6 +2888,7 @@ class TradingAgent:
         market_data_provider,
         broker_override: str | None,
     ) -> None:
+        """Single-broker batch dispatch (holders → non_holders within the broker)."""
         skip_unchanged = bool(self.cfg.get("data", {}).get("process_on_new_bar_only", False))
 
         # Determine effective portfolio for batch
@@ -2935,6 +2936,72 @@ class TradingAgent:
         _submit_phase(non_holders)
         # Optional rebalance pass: after all signals processed, check drift vs target
         self._maybe_rebalance(batch_portfolio)
+
+    def _run_all_batches_clustered(
+        self,
+        symbol_batches: list[tuple[str, str | None, list[str]]],
+        portfolio: dict,
+        market_data_provider,
+    ) -> None:
+        """Two-cluster cross-broker dispatch.
+
+        Cluster 1 (Portfolio): all held-position symbols across ALL brokers,
+        fully completed before Cluster 2 starts. This ensures exit capital is
+        freed and position_state updated before any new-entry decision competes
+        for the same notional budget.
+
+        Cluster 2 (Universe): all non-held symbols across ALL brokers.
+
+        Within each cluster, all brokers run concurrently via the shared
+        _symbol_executor thread pool.
+        """
+        skip_unchanged = bool(self.cfg.get("data", {}).get("process_on_new_bar_only", False))
+
+        with self._lock:
+            news_snap = dict(self._news_cache)
+            orders_snap = list(self._open_order_mgr.cache)
+
+        # Pre-compute per-broker portfolios and holder/non_holder splits
+        batch_contexts: list[tuple[str | None, dict, list[str], list[str]]] = []
+        for _, broker_override, batch in symbol_batches:
+            bp = self._portfolio_for_broker(portfolio, broker_override) if broker_override else portfolio
+            _pos = bp.get("positions", {})
+            holders = [s for s in batch if s in _pos]
+            non_holders = [s for s in batch if s not in _pos]
+            batch_contexts.append((broker_override, bp, holders, non_holders))
+            # Update quote stream subscription
+            if self._quote_stream is not None and batch:
+                try:
+                    self._quote_stream.update_symbols(batch)
+                except Exception:
+                    pass
+
+        def _submit_syms(syms: list[str], broker_override: str | None, bp: dict) -> list:
+            return [
+                self._symbol_executor.submit(
+                    self._process_single_symbol,
+                    sym, bp, market_data_provider, broker_override,
+                    skip_unchanged, news_snap, orders_snap,
+                )
+                for sym in syms
+            ]
+
+        # Cluster 1: ALL portfolio holders across ALL brokers
+        holder_futures = []
+        for broker_override, bp, holders, _ in batch_contexts:
+            holder_futures.extend(_submit_syms(holders, broker_override, bp))
+        if holder_futures:
+            wait(holder_futures)
+
+        # Cluster 2: ALL new-entry candidates across ALL brokers
+        non_holder_futures = []
+        for broker_override, bp, _, non_holders in batch_contexts:
+            non_holder_futures.extend(_submit_syms(non_holders, broker_override, bp))
+        if non_holder_futures:
+            wait(non_holder_futures)
+
+        # Rebalance pass after all signals settled
+        self._maybe_rebalance(portfolio)
 
     def _maybe_rebalance(self, portfolio: dict) -> None:
         """Check whether portfolio has drifted from signal targets and enqueue rebalance trades."""
@@ -3360,8 +3427,7 @@ class TradingAgent:
                 logging.info("Equity market closed; processing %d crypto symbols", len(symbols))
             self._prepare_market_data(market_data_provider, symbols)
             symbol_batches = self._build_symbol_batches(symbols)
-            for _, broker_override, batch in symbol_batches:
-                self._run_symbol_batch(batch, portfolio, market_data_provider, broker_override)
+            self._run_all_batches_clustered(symbol_batches, portfolio, market_data_provider)
             # Portfolio-level LLM: fire ONE call after all symbols processed
             if self._portfolio_orchestrator is not None:
                 try:
