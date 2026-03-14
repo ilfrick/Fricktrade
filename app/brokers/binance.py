@@ -371,7 +371,10 @@ class BinanceBroker(Broker):
                     equity += qty * price
             except Exception:
                 pass  # skip if bulk ticker unavailable
-        result = {"equity": equity, "cash": usdt_free, "buying_power": usdt_free,
+        # buying_power = all free USD-pegged stablecoins (USDT + USDC + BUSD etc.)
+        # Previously only counted USDT — accounts funded with USDC had $0 buying power.
+        available_cash = usd_stable_free
+        result = {"equity": equity, "cash": available_cash, "buying_power": available_cash,
                   "today_deposits": self.get_today_deposits()}
         self._last_spot_account = result
         return result
