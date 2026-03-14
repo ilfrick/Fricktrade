@@ -311,6 +311,7 @@ class TradingAgent:
         )
         # Pending sell qty tracking to prevent sell orders overshooting past zero
         self._pending_sell_qty: dict[tuple[str, str], float] = {}  # (broker, symbol) -> qty
+        self._pending_sell_qty_lock = threading.Lock()
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -1827,18 +1828,18 @@ class TradingAgent:
                 # Previously only guarded when _can_short() was False, but _can_short()
                 # returns True whenever current_qty > 0, so the guard was never applied
                 # for normal position closes — causing infinite sell stacking in the queue.
+                # Lock: read-check-write must be atomic — two threads for the same symbol
+                # (multi-broker or concurrent holder processing) can both pass the check
+                # and enqueue duplicate sells without the lock.
                 _pending_sell_key = (broker_name, symbol)
-                _pending_sells = self._pending_sell_qty.get(_pending_sell_key, 0.0)
-                _available_qty = current_qty - _pending_sells
-                if _available_qty <= 0:
-                    self._record_skip(symbol, action, "pending_sell_covers_position", broker_name)
-                    self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
-                    return None
-                qty = min(qty, _available_qty)  # preserve fractional qty (no int() truncation)
-                if qty <= 0:
-                    self._record_skip(symbol, action, "pending_sell_covers_position", broker_name)
-                    self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
-                    return None
+                with self._pending_sell_qty_lock:
+                    _pending_sells = self._pending_sell_qty.get(_pending_sell_key, 0.0)
+                    _available_qty = current_qty - _pending_sells
+                    if _available_qty <= 0 or min(qty, _available_qty) <= 0:
+                        self._record_skip(symbol, action, "pending_sell_covers_position", broker_name)
+                        self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
+                        return None
+                    qty = min(qty, _available_qty)
                 order_notional = qty * last_price
 
             # Block duplicate buys while an order for this symbol is still pending
@@ -1903,11 +1904,12 @@ class TradingAgent:
                 )
                 return None
 
-            # Track pending sell qty to prevent overshoot
+            # Track pending sell qty to prevent overshoot (lock: concurrent workers)
             if _pending_sell_key is not None:
-                self._pending_sell_qty[_pending_sell_key] = (
-                    self._pending_sell_qty.get(_pending_sell_key, 0.0) + qty
-                )
+                with self._pending_sell_qty_lock:
+                    self._pending_sell_qty[_pending_sell_key] = (
+                        self._pending_sell_qty.get(_pending_sell_key, 0.0) + qty
+                    )
 
             # Update shared portfolio in-memory so subsequent threads see new exposure
             with self._lock:
@@ -2191,9 +2193,10 @@ class TradingAgent:
                     _ps_key = (response.broker, response.symbol)
                     _ps_resp_qty = float(response.qty or 0)
                     if _ps_resp_qty > 0 and _ps_key in self._pending_sell_qty:
-                        self._pending_sell_qty[_ps_key] = max(
-                            0.0, self._pending_sell_qty[_ps_key] - _ps_resp_qty
-                        )
+                        with self._pending_sell_qty_lock:
+                            self._pending_sell_qty[_ps_key] = max(
+                                0.0, self._pending_sell_qty.get(_ps_key, 0.0) - _ps_resp_qty
+                            )
                 # Track exit success/failure for backoff
                 if side == "sell":
                     if status == "completed":
@@ -3379,8 +3382,11 @@ class TradingAgent:
         logging.info("Starting reporting loop thread.")
         while True:
             try:
-                # Update account metrics (includes PnL, Equity, Drift)
-                self._account_metrics.update(self.broker, self._broker_states, self._broker_name)
+                # Update account metrics (includes PnL, Equity, Drift).
+                # Lock: broker_state fields (current_drawdown_pct, equity_history, etc.)
+                # are read by worker threads for risk checks — mutations must be serialised.
+                with self._lock:
+                    self._account_metrics.update(self.broker, self._broker_states, self._broker_name)
                 market_open = is_market_open(self.cfg)
                 self._last_market_open = self._account_metrics.update_market_open_metrics(
                     self.cfg, self._broker_names or [self._broker_name], market_open, self._last_market_open
@@ -3782,15 +3788,16 @@ class TradingAgent:
                 # Restore position_state: opened_at deserialised back to datetime.
                 # Backdate all loaded positions by 24h so they immediately clear
                 # min_hold_minutes — positions held before a restart are never "new".
+                # When opened_at was never serialised (old checkpoint or Binance None),
+                # substitute now-24h so time_exit and alpha_decay still fire correctly.
                 saved_pos_state = state.get("position_state")
                 if isinstance(saved_pos_state, dict):
                     for sym, pos in saved_pos_state.items():
                         if isinstance(pos, dict) and float(pos.get("qty", 0) or 0) > 0:
                             pos_restored = dict(pos)
                             _oa = _dt_from_str(pos.get("opened_at"))
-                            if _oa is not None:
-                                _oa = _oa - timedelta(hours=24)
-                            pos_restored["opened_at"] = _oa
+                            _epoch = datetime.now(timezone.utc) - timedelta(hours=24)
+                            pos_restored["opened_at"] = (_oa - timedelta(hours=24)) if _oa is not None else _epoch
                             broker_state.position_state[sym] = pos_restored
         calibrator_data = payload.get("confidence_calibrator")
         if isinstance(calibrator_data, dict):

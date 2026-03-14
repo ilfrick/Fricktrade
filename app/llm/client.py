@@ -14,8 +14,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional
@@ -57,6 +59,9 @@ class LLMUsageTracker:
     errors: int = 0
     _today: str = field(default_factory=lambda: str(date.today()), repr=False)
 
+    def __post_init__(self) -> None:
+        self._lock: threading.Lock = threading.Lock()
+
     def _reset_if_new_day(self) -> None:
         today = str(date.today())
         if today != self._today:
@@ -68,25 +73,28 @@ class LLMUsageTracker:
             self._today = today
 
     def record(self, response: LLMResponse) -> None:
-        self._reset_if_new_day()
-        self.total_input_tokens += response.input_tokens
-        self.total_output_tokens += response.output_tokens
-        self.total_cost_usd += response.cost_usd
-        self.call_count += 1
+        with self._lock:
+            self._reset_if_new_day()
+            self.total_input_tokens += response.input_tokens
+            self.total_output_tokens += response.output_tokens
+            self.total_cost_usd += response.cost_usd
+            self.call_count += 1
 
     def daily_cost(self) -> float:
-        self._reset_if_new_day()
-        return self.total_cost_usd
+        with self._lock:
+            self._reset_if_new_day()
+            return self.total_cost_usd
 
     def summary(self) -> dict:
-        self._reset_if_new_day()
-        return {
-            "calls": self.call_count,
-            "errors": self.errors,
-            "total_input_tokens": self.total_input_tokens,
-            "total_output_tokens": self.total_output_tokens,
-            "total_cost_usd": round(self.total_cost_usd, 4),
-        }
+        with self._lock:
+            self._reset_if_new_day()
+            return {
+                "calls": self.call_count,
+                "errors": self.errors,
+                "total_input_tokens": self.total_input_tokens,
+                "total_output_tokens": self.total_output_tokens,
+                "total_cost_usd": round(self.total_cost_usd, 4),
+            }
 
 
 class LLMBackend(ABC):
@@ -232,11 +240,22 @@ class GeminiBackend(LLMBackend):
 
 
 class OllamaBackend(LLMBackend):
-    """Local Ollama backend (free — no API cost)."""
+    """Local Ollama backend (free — no API cost).
+
+    Uses a persistent ThreadPoolExecutor with future.result(timeout=45) as a
+    hard wall-clock deadline. urllib.request timeout=30 only fires on idle
+    socket reads; trickle responses from a slow model bypass it entirely —
+    the same lesson learned with the Binance demo API deadlocks.
+    """
+
+    _WALL_CLOCK_TIMEOUT = 45  # seconds; hard kill regardless of response streaming
 
     def __init__(self, model: Optional[str] = None):
         self.model = model or os.getenv("LLM_OLLAMA_MODEL", "llama3.1:8b")
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+        # Persistent pool — intentionally NOT used as context manager so __exit__
+        # doesn't call shutdown(wait=True) and block past the timeout.
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ollama")
 
     def complete(
         self,
@@ -246,28 +265,37 @@ class OllamaBackend(LLMBackend):
         temperature: float = 0.2,
         model: Optional[str] = None,
     ) -> LLMResponse:
+        from concurrent.futures import TimeoutError as _FutTimeoutError
         import urllib.request
         effective_model = model or self.model
-        t0 = time.monotonic()
-        payload = json.dumps({
-            "model": effective_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "stream": False,
-            "format": "json",
-            "options": {"temperature": temperature, "num_predict": max_tokens},
-        }).encode()
-        req = urllib.request.Request(
-            f"{self.base_url}/api/chat",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read())
-        latency = (time.monotonic() - t0) * 1000
+
+        def _call() -> tuple[dict, float]:
+            t0 = time.monotonic()
+            payload = json.dumps({
+                "model": effective_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": temperature, "num_predict": max_tokens},
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.base_url}/api/chat",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read()), time.monotonic() - t0
+
+        future = self._executor.submit(_call)
+        try:
+            data, elapsed = future.result(timeout=self._WALL_CLOCK_TIMEOUT)
+        except _FutTimeoutError:
+            raise RuntimeError(f"Ollama request timed out after {self._WALL_CLOCK_TIMEOUT}s")
+        latency = elapsed * 1000
         content = data.get("message", {}).get("content", "") or ""
         prompt_tok = data.get("prompt_eval_count", 0) or 0
         eval_tok = data.get("eval_count", 0) or 0
@@ -300,14 +328,16 @@ class LLMClient:
         self._trackers: dict[str, LLMUsageTracker] = {}
         self._daily_budget_usd = daily_budget_usd
         self._alert_threshold_usd = alert_threshold_usd
+        self._backend_lock = threading.Lock()
 
     def _get_backend(self, name: str) -> LLMBackend:
-        if name not in self._backends:
-            if name not in self.BACKENDS:
-                raise ValueError(f"Unknown LLM backend: {name}")
-            self._backends[name] = self.BACKENDS[name]()
-            self._trackers[name] = LLMUsageTracker()
-        return self._backends[name]
+        with self._backend_lock:
+            if name not in self._backends:
+                if name not in self.BACKENDS:
+                    raise ValueError(f"Unknown LLM backend: {name}")
+                self._backends[name] = self.BACKENDS[name]()
+                self._trackers[name] = LLMUsageTracker()
+            return self._backends[name]
 
     def _daily_total_cost(self) -> float:
         return sum(t.daily_cost() for t in self._trackers.values())
@@ -347,6 +377,10 @@ class LLMClient:
                 self._daily_budget_usd,
             )
 
+        # Local backends don't benefit from retries — they're either available or not.
+        # Cap at 1 attempt to prevent cycle stalls when Ollama is slow/loading.
+        if backend == "ollama":
+            retries = 1
         delay = retry_delay
         for attempt in range(retries):
             try:
