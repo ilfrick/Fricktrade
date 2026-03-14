@@ -335,7 +335,7 @@ class TacticalMetaOrchestrator:
         self._pending: list[dict]       = []   # {param, old, new, rationale, apply_at, type}
         self._applied_log: list[dict]   = []   # last 50 applied changes (for API)
         self._last_result: dict         = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # RLock: _run_cycle holds lock then calls _enqueue_change (re-entrant)
         # Reference to trader's live _config_strategy_weights dict (set externally)
         self._weights_ref: dict[str, float] | None = None
         # Strategic baseline from StrategicOrchestrator (for corridor enforcement)
