@@ -17,7 +17,13 @@ _DEPOSIT_CACHE_TTL = 600  # seconds
 
 class AlpacaBroker(Broker):
     def __init__(self, api_key: str, api_secret: str, base_url: str, paper: bool = True, name: str = "alpaca"):
-        self.client = TradingClient(api_key, api_secret, paper=paper, url_override=base_url)
+        try:
+            self.client = TradingClient(
+                api_key, api_secret, paper=paper, url_override=base_url,
+                timeout=30,
+            )
+        except TypeError:
+            self.client = TradingClient(api_key, api_secret, paper=paper, url_override=base_url)
         self._name = name
         self._deposit_cache: tuple[float, float] | None = None  # (timestamp, amount)
 
