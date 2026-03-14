@@ -408,8 +408,9 @@ class TradingAgent:
                 )
                 self._symbol_mgr.set_llm_filter(self._llm_symbols_filter)
             logging.info(
-                "LLM client initialised (sentiment=%s, risk_interpreter=%s, macro_regime=%s, symbols_filter=%s)",
+                "LLM client initialised (sentiment=%s, ollama_sentiment=%s, risk_interpreter=%s, macro_regime=%s, symbols_filter=%s)",
                 self._llm_sentiment is not None,
+                self._ollama_sentiment is not None,
                 self._risk_interpreter is not None,
                 self._macro_regime is not None,
                 self._llm_symbols_filter is not None,
@@ -3123,7 +3124,13 @@ class TradingAgent:
         # Macro regime overrides from LLM analyzer (4h TTL, non-blocking)
         if self._macro_regime is not None:
             try:
-                news_headlines = list(self._raw_news_cache.get("__headlines__", []))
+                news_headlines = []
+                for _sk, _arts in self._raw_news_cache.items():
+                    if isinstance(_arts, list):
+                        for _a in _arts:
+                            _h = _a.get("headline") or _a.get("title") or ""
+                            if _h:
+                                news_headlines.append(str(_h))
                 macro = self._macro_regime.get_regime(news_headlines or None)
                 if macro and macro.weight_overrides:
                     for strat, mult in macro.weight_overrides.items():
@@ -3465,7 +3472,14 @@ class TradingAgent:
                     if (self._ollama_sentiment_future is None and
                             (self._ollama_sentiment_last_at is None or
                              (_now_utc - self._ollama_sentiment_last_at).total_seconds() >= _sent_interval)):
-                        _headlines = list(self._raw_news_cache.get("__headlines__", []))
+                        _headlines = []
+                        for _sym_key, _arts in self._raw_news_cache.items():
+                            if isinstance(_arts, list):
+                                for _a in _arts:
+                                    _h = (_a.get("headline") or _a.get("title")
+                                          or _a.get("summary", "")[:120])
+                                    if _h:
+                                        _headlines.append(str(_h))
                         if _headlines:
                             self._ollama_sentiment_last_at = _now_utc
                             _analyzer = self._ollama_sentiment
