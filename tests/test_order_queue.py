@@ -26,7 +26,7 @@ def test_order_queue_fifo() -> None:
     first_id = queue.enqueue("AAA", "buy", 1)
     second_id = queue.enqueue("BBB", "sell", 2)
     assert first_id is not None
-    assert second_id is None
+    assert second_id == "queued"  # accepted to heap but not yet submitted (active order running)
 
     open_orders = [{"order_id": first_id, "symbol": "AAA", "side": "buy", "qty": 1}]
     queue.update(open_orders)
