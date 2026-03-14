@@ -114,12 +114,13 @@ class AccountMetricsUpdater:
                 )
             broker_state.risk.update_daily_loss(day_pnl_pct)
 
-    def update(self, broker, broker_states: dict, broker_name: str) -> dict | None:
-        try:
-            account = broker.get_account()
-        except (ConnectionError, TimeoutError, OSError) as exc:
-            logging.warning("Account metrics update failed: %s", exc)
-            return None
+    def update(self, broker, broker_states: dict, broker_name: str, account: dict | None = None) -> dict | None:
+        if account is None:
+            try:
+                account = broker.get_account()
+            except (ConnectionError, TimeoutError, OSError) as exc:
+                logging.warning("Account metrics update failed: %s", exc)
+                return None
         total_val = cash_val = buying_power_val = None
         broker_equities: dict[str, float] = {}
         if isinstance(account, dict):

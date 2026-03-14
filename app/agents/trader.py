@@ -2774,7 +2774,10 @@ class TradingAgent:
                 self._live_reward_tracker.sync_positions(portfolio)
             except Exception as exc:
                 logging.warning("Live reward sync failed: %s", exc)
-        self._account_metrics.update(self.broker, self._broker_states, self._broker_name)
+        self._account_metrics.update(
+            self.broker, self._broker_states, self._broker_name,
+            account=self._account_snapshot if self._account_snapshot else None,
+        )
         self._update_position_metrics(portfolio)
         if self._perf_tracker.enabled:
             brokers = portfolio.get("brokers", {})
@@ -3412,10 +3415,17 @@ class TradingAgent:
         while True:
             try:
                 # Update account metrics (includes PnL, Equity, Drift).
+                # Pass _account_snapshot (fetched by main loop) instead of calling broker.get_account()
+                # again — the Binance pool has max_workers=1, so a redundant get_account call from
+                # this thread would starve get_positions/get_open_orders and cause them to time out.
                 # Lock: broker_state fields (current_drawdown_pct, equity_history, etc.)
                 # are read by worker threads for risk checks — mutations must be serialised.
+                _acct = self._account_snapshot  # GIL-atomic reference read; may be {} on first cycle
                 with self._lock:
-                    self._account_metrics.update(self.broker, self._broker_states, self._broker_name)
+                    self._account_metrics.update(
+                        self.broker, self._broker_states, self._broker_name,
+                        account=_acct if _acct else None,
+                    )
                 market_open = is_market_open(self.cfg)
                 self._last_market_open = self._account_metrics.update_market_open_metrics(
                     self.cfg, self._broker_names or [self._broker_name], market_open, self._last_market_open
