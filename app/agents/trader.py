@@ -3181,11 +3181,16 @@ class TradingAgent:
             # that 1-2 agreeing strategies can trigger an exit without needing a
             # majority (which is almost never reached in sideways markets).
             # Config: strategy.params.exit_vote_threshold (default 2).
-            # Buy entries still require strict majority — only exits are relaxed.
+            # buy_vote_threshold: minimum buy votes to trigger a buy entry (0 = strict majority).
+            # Useful when most strategies return hold for an asset class (e.g. equity strategies
+            # voting hold on crypto) so the few crypto-specific strategies can still open positions.
             _strat_params = (self.cfg.get("strategy") or {}).get("params") or {}
             _exit_threshold = int(_strat_params.get("exit_vote_threshold", 2))
+            _buy_threshold = int(_strat_params.get("buy_vote_threshold", 0))
             if is_held and vote_counts["sell"] >= _exit_threshold:
                 winning_action = "sell"
+            elif not is_held and _buy_threshold > 0 and vote_counts["buy"] >= _buy_threshold:
+                winning_action = "buy"
             else:
                 max_votes = max(vote_counts.values())
                 winners = [a for a, v in vote_counts.items() if v == max_votes]
