@@ -323,6 +323,11 @@ class TradingAgent:
                 cfg.get("data", {}),
             )
         # LLM integration — initialised lazily; missing API keys don't crash startup
+        self._tmo_counters: dict[str, int] = {
+            "attempted": 0, "filled": 0, "rejected": 0,
+            "insuff_stablecoin": 0, "insuff_cash": 0,
+            "pos_limit": 0, "leverage_cap": 0, "timedout": 0,
+        }
         self._llm_client = None
         self._llm_sentiment = None
         self._ollama_sentiment = None                  # local aggregate sentiment via Ollama
@@ -447,12 +452,7 @@ class TradingAgent:
                 self._strategic_orch.set_weights_ref(self._config_strategy_weights)
             except Exception as exc:
                 logging.warning("Strategic meta orchestrator init failed: %s", exc)
-        # Rolling order-flow counters for TacticalMetaOrchestrator metrics snapshot
-        self._tmo_counters: dict[str, int] = {
-            "attempted": 0, "filled": 0, "rejected": 0,
-            "insuff_stablecoin": 0, "insuff_cash": 0,
-            "pos_limit": 0, "leverage_cap": 0, "timedout": 0,
-        }
+        # _tmo_counters initialised early in __init__ (before LLM/orchestrator setup)
 
     def _init_quote_stream(self) -> None:
         """Initialise real-time quote stream if quote_stream.enabled is true."""
