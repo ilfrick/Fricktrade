@@ -83,6 +83,7 @@ def main() -> None:
     _section_leverage_deep_dive(report_lines, risk_blocks, decisions)
     _section_latency(report_lines, decisions)
     _section_pnl(report_lines, pnl_rows)
+    _section_benchmark(report_lines, pnl_rows, metrics_files, date_str)
     _section_memory(report_lines, metrics_files)
     _section_anomalies(report_lines, decisions, signals, risk_blocks, pnl_rows)
     _section_improvements(report_lines, decisions, signals, risk_blocks)
@@ -616,6 +617,148 @@ def _section_improvements(
 # ---------------------------------------------------------------------------
 # I/O helpers
 # ---------------------------------------------------------------------------
+
+def _parse_prom_snapshot(path: Path) -> dict[str, float]:
+    """Parse a Prometheus text-format snapshot into {metric_key: value}.
+
+    metric_key is either 'metric_name' (no labels) or 'metric_name{label=value,...}'.
+    """
+    result: dict[str, float] = {}
+    if not path.exists():
+        return result
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            parts = line.rsplit(" ", 1)
+            if len(parts) != 2:
+                continue
+            key, val_str = parts
+            result[key] = float(val_str)
+        except (ValueError, IndexError):
+            pass
+    return result
+
+
+def _extract_broker_series(metrics_files: list[Path]) -> dict[str, list[tuple[str, float]]]:
+    """Return {broker: [(timestamp_str, equity), ...]} from sorted metrics snapshots."""
+    broker_series: dict[str, list[tuple[str, float]]] = {}
+    for fpath in metrics_files:
+        snap = _parse_prom_snapshot(fpath)
+        # timestamp from filename stem (HHMMSS) → use file mtime as fallback
+        ts = fpath.stem  # e.g. "143001"
+        for key, val in snap.items():
+            if key.startswith('account_total_by_broker{broker="'):
+                broker = key.split('"')[1]
+                broker_series.setdefault(broker, []).append((ts, val))
+    return broker_series
+
+
+def _fetch_benchmark_returns(date_str: str) -> dict[str, float | None]:
+    """Fetch intraday returns for BTC-USD and SPY on date_str using yfinance.
+
+    Returns {'BTC-USD': pct, 'SPY': pct} where pct is open→close % change.
+    Returns None for a ticker if data is unavailable (weekend/holiday for equities).
+    """
+    result: dict[str, float | None] = {"BTC-USD": None, "SPY": None}
+    try:
+        import yfinance as yf  # type: ignore[import]
+        from datetime import date, timedelta
+        d = date.fromisoformat(date_str)
+        start = d.isoformat()
+        end = (d + timedelta(days=1)).isoformat()
+        for ticker in ("BTC-USD", "SPY"):
+            try:
+                df = yf.download(ticker, start=start, end=end, interval="1d", progress=False, auto_adjust=True)
+                if df is not None and not df.empty:
+                    row = df.iloc[0]
+                    o = float(row.get("Open", row.get("open", 0)))
+                    c = float(row.get("Close", row.get("close", 0)))
+                    if o > 0:
+                        result[ticker] = (c - o) / o * 100.0
+            except Exception:
+                pass
+    except ImportError:
+        pass
+    return result
+
+
+def _section_benchmark(
+    lines: list,
+    pnl_rows: list[dict],
+    metrics_files: list[Path],
+    date_str: str,
+) -> None:
+    """Per-broker daily performance vs market benchmarks."""
+    lines.append("## Benchmark Comparison")
+
+    benchmarks = _fetch_benchmark_returns(date_str)
+    btc_ret = benchmarks.get("BTC-USD")
+    spy_ret = benchmarks.get("SPY")
+
+    lines.append("")
+    lines.append("### Market Benchmarks")
+    lines.append("| Benchmark | Day Return |")
+    lines.append("|-----------|-----------|")
+    lines.append(f"| BTC-USD | {'N/A' if btc_ret is None else f'{btc_ret:+.2f}%'} |")
+    lines.append(f"| SPY     | {'N/A (weekend/holiday)' if spy_ret is None else f'{spy_ret:+.2f}%'} |")
+    lines.append("")
+
+    # Per-broker equity series from Prometheus snapshots
+    broker_series = _extract_broker_series(metrics_files)
+    if not broker_series:
+        lines += ["_No per-broker metrics snapshots available._", ""]
+        return
+
+    # Classify each broker: crypto-only (Binance) → benchmark BTC, else SPY
+    _CRYPTO_BROKERS = {"binance"}
+    lines.append("### Per-Broker Performance vs Benchmark")
+    lines.append("")
+    lines.append("| Broker | Start Equity | End Equity | Return | Benchmark | Alpha |")
+    lines.append("|--------|-------------|-----------|--------|-----------|-------|")
+
+    for broker, series in sorted(broker_series.items()):
+        if len(series) < 2:
+            continue
+        eq_start = series[0][1]
+        eq_end = series[-1][1]
+        if eq_start <= 0:
+            continue
+        ret = (eq_end - eq_start) / eq_start * 100.0
+
+        is_crypto = any(k in broker.lower() for k in _CRYPTO_BROKERS)
+        bench_ret = btc_ret if is_crypto else spy_ret
+        bench_label = "BTC-USD" if is_crypto else "SPY"
+
+        if bench_ret is not None:
+            alpha = ret - bench_ret
+            alpha_str = f"{alpha:+.2f}%"
+            bench_str = f"{bench_ret:+.2f}%"
+        else:
+            alpha_str = "N/A"
+            bench_str = "N/A"
+
+        lines.append(
+            f"| {broker} | ${eq_start:,.0f} | ${eq_end:,.0f} "
+            f"| {ret:+.2f}% | {bench_label} {bench_str} | {alpha_str} |"
+        )
+
+    # Aggregate comparison (weighted by equity)
+    if pnl_rows:
+        agg_eq_start = float(pnl_rows[0].get("equity", 0) or 0)
+        agg_eq_end = float(pnl_rows[-1].get("equity", 0) or 0)
+        if agg_eq_start > 0:
+            agg_ret = (agg_eq_end - agg_eq_start) / agg_eq_start * 100.0
+            lines.append("")
+            lines.append(f"**Portfolio aggregate:** {agg_ret:+.2f}% "
+                         f"(equity ${agg_eq_start:,.0f} → ${agg_eq_end:,.0f})")
+            if btc_ret is not None:
+                lines.append(f"**vs BTC-USD:** {agg_ret - btc_ret:+.2f}% alpha")
+            if spy_ret is not None:
+                lines.append(f"**vs SPY:** {agg_ret - spy_ret:+.2f}% alpha")
+    lines.append("")
+
 
 def _load_jsonl(path: Path) -> list[dict]:
     if not path.exists():
