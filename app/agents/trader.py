@@ -14,7 +14,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date, timezone
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 
 from app.utils.account import extract_equity_cash
 from app.execution.executor import ExecutionEngine
@@ -2990,18 +2990,30 @@ class TradingAgent:
             ]
 
         # Cluster 1: ALL portfolio holders across ALL brokers
+        # Hard 120s wall-clock cap — any hung Binance/Alpaca thread can't block the main loop
+        # past this. Incomplete futures are abandoned (daemon threads, no cleanup needed).
         holder_futures = []
         for broker_override, bp, holders, _ in batch_contexts:
             holder_futures.extend(_submit_syms(holders, broker_override, bp))
         if holder_futures:
-            wait(holder_futures)
+            done, still_running = wait(holder_futures, timeout=120)
+            if still_running:
+                logging.warning(
+                    "Cluster 1 (holders): %d/%d symbols timed out after 120s — proceeding",
+                    len(still_running), len(holder_futures),
+                )
 
         # Cluster 2: ALL new-entry candidates across ALL brokers
         non_holder_futures = []
         for broker_override, bp, _, non_holders in batch_contexts:
             non_holder_futures.extend(_submit_syms(non_holders, broker_override, bp))
         if non_holder_futures:
-            wait(non_holder_futures)
+            done, still_running = wait(non_holder_futures, timeout=120)
+            if still_running:
+                logging.warning(
+                    "Cluster 2 (non-holders): %d/%d symbols timed out after 120s — proceeding",
+                    len(still_running), len(non_holder_futures),
+                )
 
         # Rebalance pass after all signals settled
         self._maybe_rebalance(portfolio)

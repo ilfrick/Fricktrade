@@ -14,6 +14,7 @@ called per-symbol in the hot path.
 from __future__ import annotations
 
 import logging
+import threading
 import urllib.request
 import urllib.parse
 from dataclasses import dataclass, field
@@ -95,13 +96,18 @@ class MacroRegimeAnalyzer:
         self._backend = str(cfg.get("backend", "gemini"))
         self._cache: Optional[MacroRegime] = None
         self._failed_at: Optional[datetime] = None  # backoff after API failure
+        self._refresh_lock = threading.Lock()  # only one thread refreshes at a time
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def get_regime(self, news_headlines: list[str] | None = None) -> Optional[MacroRegime]:
-        """Return cached regime (4h TTL). Refresh if stale. Backs off 10 min after failure."""
+        """Return cached regime (4h TTL). Refresh if stale. Backs off 10 min after failure.
+
+        Thread-safe: concurrent callers from worker threads wait on _refresh_lock so
+        only one FRED+LLM call fires per TTL period instead of N parallel calls.
+        """
         now = datetime.now(timezone.utc)
         if (self._cache is not None
                 and (now - self._cache.fetched_at) < timedelta(hours=self._refresh_hours)):
@@ -110,18 +116,26 @@ class MacroRegimeAnalyzer:
         if self._failed_at is not None and (now - self._failed_at) < timedelta(minutes=10):
             return self._cache
 
-        try:
-            indicators = self._fetch_indicators()
-            regime = self._classify(indicators, news_headlines or [])
-            if regime:
-                self._cache = regime
-                self._failed_at = None
-            else:
+        with self._refresh_lock:
+            # Re-check after acquiring lock — another thread may have refreshed already
+            now = datetime.now(timezone.utc)
+            if (self._cache is not None
+                    and (now - self._cache.fetched_at) < timedelta(hours=self._refresh_hours)):
+                return self._cache
+            if self._failed_at is not None and (now - self._failed_at) < timedelta(minutes=10):
+                return self._cache
+            try:
+                indicators = self._fetch_indicators()
+                regime = self._classify(indicators, news_headlines or [])
+                if regime:
+                    self._cache = regime
+                    self._failed_at = None
+                else:
+                    self._failed_at = now
+            except Exception as exc:
+                logger.warning("MacroRegimeAnalyzer failed: %s", exc)
                 self._failed_at = now
-        except Exception as exc:
-            logger.warning("MacroRegimeAnalyzer failed: %s", exc)
-            self._failed_at = now
-            return self._cache  # return stale cache on failure
+                return self._cache  # return stale cache on failure
 
         return self._cache
 
