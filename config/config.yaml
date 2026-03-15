@@ -592,6 +592,11 @@ backtest:
     liquidity_tiers: 3
     sample_per_tier: 50
     seed: 42
+test_report:
+  enabled: true                                          # generate Word report each market-closed cycle
+  output_path: /data/reports/test_report_{date}.docx    # {date} replaced with YYYY-MM-DD
+  tests_dir: tests
+
 benchmarking:
   run_when_closed: false
   use_plan: true

@@ -2,6 +2,7 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 import argparse
+import datetime
 import logging
 import subprocess
 import time
@@ -53,6 +54,27 @@ def _run_benchmarks(cfg: dict, config_path: str) -> int:
     return result.returncode
 
 
+def _run_test_report(config_path: str, report_cfg: dict) -> None:
+    """Generate a Word document test report via generate_test_report.py."""
+    date_str = datetime.date.today().isoformat()
+    default_output = f"/data/reports/test_report_{date_str}.docx"
+    output_path = report_cfg.get("output_path", default_output)
+    # Support date templating: {date} in output_path
+    output_path = str(output_path).replace("{date}", date_str)
+    tests_dir = report_cfg.get("tests_dir", "tests")
+
+    try:
+        from scripts.generate_test_report import generate_report  # noqa: PLC0415
+        generate_report(
+            config_path=config_path,
+            output_path=output_path,
+            tests_dir=tests_dir,
+        )
+        logging.info("Test report written to %s", output_path)
+    except Exception as exc:
+        logging.error("Test report generation failed: %s", exc)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="/app/config/config.yaml")
@@ -82,8 +104,16 @@ def main() -> None:
             logging.info("Market open; skipping tests.")
         else:
             logging.info("Market closed; running tests.")
-            code = _run_pytest()
-            logging.info("Pytest finished with exit code %d.", code)
+
+            # Generate the full Word document report (runs pytest + health checks internally)
+            report_cfg = cfg.get("test_report", {}) or {}
+            if report_cfg.get("enabled", True):
+                _run_test_report(args.config, report_cfg)
+            else:
+                # Fallback: bare pytest (legacy behaviour)
+                code = _run_pytest()
+                logging.info("Pytest finished with exit code %d.", code)
+
             backtest_cfg = cfg.get("backtest", {})
             if backtest_cfg.get("run_when_closed", False):
                 logging.info("Market closed; running backtest.")
