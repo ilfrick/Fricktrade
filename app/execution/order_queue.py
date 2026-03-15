@@ -57,6 +57,7 @@ class OrderResponse:
     filled_qty: float | None = None
     filled_avg_price: float | None = None
     reason: str = ""
+    reserved_notional: float = 0.0  # original notional reserved at enqueue time; fallback for release when fill price unavailable
     received_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -202,6 +203,7 @@ class OrderQueue:
                             qty=self._active.qty,
                             filled_qty=snapshot.get("filled_qty"),
                             filled_avg_price=snapshot.get("filled_avg_price"),
+                            reserved_notional=float(self._active.notional or 0.0),
                         )
                     )
                     self._cancel_requested.discard(self._active.order_id)
@@ -300,6 +302,7 @@ class OrderQueue:
                 order_id=request.order_id,
                 side=request.side,
                 qty=request.qty,
+                reserved_notional=float(request.notional or 0.0),
             )
         )
 

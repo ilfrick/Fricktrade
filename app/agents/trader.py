@@ -2157,7 +2157,13 @@ class TradingAgent:
                 if side == "buy" and status in ("completed", "rejected", "canceled", "timed_out"):
                     est_price = float(response.filled_avg_price or 0)
                     resp_qty = float(response.qty or 0)
-                    notional = resp_qty * est_price if est_price else float(response.notional if hasattr(response, "notional") else 0)
+                    notional = resp_qty * est_price if est_price else 0.0
+                    # Fallback: use the notional reserved at enqueue time when fill price is
+                    # unavailable (market orders that fill before the next open-orders poll
+                    # have no snapshot, so filled_avg_price is None → notional would be 0
+                    # → pending_notional leaks and leverage cap fires indefinitely).
+                    if notional <= 0:
+                        notional = float(getattr(response, "reserved_notional", 0.0) or 0.0)
                     if notional > 0:
                         self._release_pending_notional(response.broker, notional)
                     self._release_pending_buy(response.broker, response.symbol)
@@ -3193,9 +3199,14 @@ class TradingAgent:
                 a = signal.get("action", "hold")
                 if a == "exit":
                     a = "sell"  # exit is a sell vote; no pre-emption in vote mode
-                # After model reload, suppress rl_policy sell votes for rl_reload_hold_minutes
-                # to prevent the new model from immediately liquidating all held positions.
-                if _rl_reload_suppressed and a == "sell" and signal.get("name") in {"rl_policy", "rl_policy_fees"}:
+                # Suppress rl_policy sell votes on held positions.
+                # rl_policy has distribution shift on inherited positions (trained always
+                # starting from cash) → unreliable for exit decisions. Exits are handled
+                # by crypto_momentum/trend_following which analyse price patterns directly.
+                # Also suppress for rl_reload_hold_minutes after reload (belt-and-suspenders).
+                if a == "sell" and is_held and signal.get("name") in {"rl_policy", "rl_policy_fees"}:
+                    a = "hold"
+                elif _rl_reload_suppressed and a == "sell" and signal.get("name") in {"rl_policy", "rl_policy_fees"}:
                     a = "hold"
                 if a in vote_counts:
                     vote_counts[a] += 1
