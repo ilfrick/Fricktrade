@@ -1149,6 +1149,7 @@ tactical_meta_orchestrator:
     execution.insufficient_stablecoin_cooldown_minutes: [2, 15]
     data.timeout_seconds:                            [15, 60]
     # Strategy params — applied after apply_delay_minutes
+    strategy.params.exit_vote_threshold:             [1, 3]
     strategy.params.min_hold_minutes:                [5, 30]
     strategy.params.regime_hold_minutes.base_minutes: [60, 480]
     # Risk: equity

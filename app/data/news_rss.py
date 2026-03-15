@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Iterable
@@ -224,6 +225,24 @@ def _fetch_broad(
 # Per-symbol Yahoo Finance RSS (equities)
 # ---------------------------------------------------------------------------
 
+def _fetch_yahoo_single(sym: str, cutoff: datetime, timeout: int, max_per_symbol: int) -> list[dict]:
+    """Fetch Yahoo Finance RSS for a single equity symbol."""
+    url = f"https://finance.yahoo.com/rss/headline?s={sym}"
+    out: list[dict] = []
+    try:
+        articles = _fetch_rss(url, timeout=timeout)
+    except Exception as exc:
+        logging.debug("Yahoo Finance RSS %s error: %s", sym, exc)
+        return out
+    for art in articles:
+        pub_dt = art.get("_pub_dt")
+        if pub_dt and pub_dt < cutoff:
+            continue
+        if len(out) < max_per_symbol:
+            out.append(_clean(art))
+    return out
+
+
 def _fetch_yahoo(
     symbols: list[str],
     cutoff: datetime,
@@ -231,27 +250,45 @@ def _fetch_yahoo(
     max_per_symbol: int,
     result: dict[str, list[dict]],
 ) -> None:
-    for sym in symbols:
-        if "/" in sym:
-            continue  # equity only
-        url = f"https://finance.yahoo.com/rss/headline?s={sym}"
-        try:
-            articles = _fetch_rss(url, timeout=timeout)
-        except Exception as exc:
-            logging.debug("Yahoo Finance RSS %s error: %s", sym, exc)
-            continue
-        for art in articles:
-            pub_dt = art.get("_pub_dt")
-            if pub_dt and pub_dt < cutoff:
-                continue
-            if len(result[sym]) < max_per_symbol:
-                result[sym].append(_clean(art))
-        time.sleep(0.15)  # gentle per-symbol rate limiting
+    equity_syms = [s for s in symbols if "/" not in s]
+    if not equity_syms:
+        return
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(_fetch_yahoo_single, sym, cutoff, timeout, max_per_symbol): sym
+                for sym in equity_syms}
+        for fut in as_completed(futs, timeout=30):
+            sym = futs[fut]
+            try:
+                result[sym].extend(fut.result()[:max_per_symbol - len(result[sym])])
+            except Exception as exc:
+                logging.debug("Yahoo Finance RSS %s future error: %s", sym, exc)
 
 
 # ---------------------------------------------------------------------------
 # Per-symbol Google News RSS
 # ---------------------------------------------------------------------------
+
+def _fetch_google_news_single(sym: str, cutoff: datetime, timeout: int, max_per_symbol: int) -> list[dict]:
+    """Fetch Google News RSS for a single symbol."""
+    query = sym.split("/")[0] if "/" in sym else sym
+    url = (
+        f"https://news.google.com/rss/search"
+        f"?q={query}+%22{query}%22&hl=en&gl=US&ceid=US:en"
+    )
+    out: list[dict] = []
+    try:
+        articles = _fetch_rss(url, timeout=timeout)
+    except Exception as exc:
+        logging.debug("Google News RSS %s error: %s", sym, exc)
+        return out
+    for art in articles:
+        pub_dt = art.get("_pub_dt")
+        if pub_dt and pub_dt < cutoff:
+            continue
+        if len(out) < max_per_symbol:
+            out.append(_clean(art))
+    return out
+
 
 def _fetch_google_news(
     symbols: list[str],
@@ -260,24 +297,17 @@ def _fetch_google_news(
     max_per_symbol: int,
     result: dict[str, list[dict]],
 ) -> None:
-    for sym in symbols:
-        query = sym.split("/")[0] if "/" in sym else sym
-        url = (
-            f"https://news.google.com/rss/search"
-            f"?q={query}+%22{query}%22&hl=en&gl=US&ceid=US:en"
-        )
-        try:
-            articles = _fetch_rss(url, timeout=timeout)
-        except Exception as exc:
-            logging.debug("Google News RSS %s error: %s", sym, exc)
-            continue
-        for art in articles:
-            pub_dt = art.get("_pub_dt")
-            if pub_dt and pub_dt < cutoff:
-                continue
-            if len(result[sym]) < max_per_symbol:
-                result[sym].append(_clean(art))
-        time.sleep(0.2)
+    if not symbols:
+        return
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(_fetch_google_news_single, sym, cutoff, timeout, max_per_symbol): sym
+                for sym in symbols}
+        for fut in as_completed(futs, timeout=30):
+            sym = futs[fut]
+            try:
+                result[sym].extend(fut.result()[:max_per_symbol - len(result[sym])])
+            except Exception as exc:
+                logging.debug("Google News RSS %s future error: %s", sym, exc)
 
 
 # ---------------------------------------------------------------------------

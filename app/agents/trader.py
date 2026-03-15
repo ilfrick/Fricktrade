@@ -819,9 +819,13 @@ class TradingAgent:
         if _opp_cfg.get("enabled") and market_state is not None:
             _opp_elapsed = (_now - opened_at).total_seconds() if opened_at else 0
             if _opp_elapsed >= float(_opp_cfg.get("min_hold_minutes", 60)) * 60:
-                # Use broker-scoped equity/exposure rather than cross-broker aggregate.
-                # broker_state.position_state has per-symbol qty and last price.
-                _equity = float(broker_state.equity_start or 1.0)
+                # Use current equity (not stale day-open equity_start) for accurate
+                # exposure percentage calculation.
+                _equity = float(
+                    (market_state or {}).get("portfolio", {}).get("equity")
+                    or broker_state.equity_start
+                    or 1.0
+                )
                 _gross = sum(
                     abs(float(ps.get("qty", 0) or 0)) * float(ps.get("last_price") or broker_state.last_prices.get(sym, 0) or 0)
                     for sym, ps in broker_state.position_state.items()
@@ -1246,6 +1250,14 @@ class TradingAgent:
             # Dust positions (qty < 1e-6) are treated as not held so strategies
             # generate fresh buy signals instead of returning hold for a "held" symbol.
             _cs_qty_meaningful = _cs_qty if _cs_qty >= 1e-6 else 0.0
+            # Write last_market_state so _build_meta_orch_metrics can extract live
+            # indicators (RSI, ATR, Hurst) for the tactical orchestrator health report.
+            if _cs_qty_meaningful > 0:
+                _ps_entry = broker_state.position_state.get(symbol)
+                if _ps_entry is not None:
+                    _ps_entry["last_market_state"] = {
+                        "indicators": market_state.get("indicators") or {},
+                    }
             if _cs_qty_meaningful <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
                 filtered_signals = [s for s in filtered_signals if s.get("action") != "sell"]
             if self._portfolio_orchestrator is not None:
@@ -1899,6 +1911,16 @@ class TradingAgent:
             except Exception as exc:
                 if action == "buy" and not _is_closing_position:
                     self._release_pending_notional(broker_name, order_notional)
+                # Release pre-registered pending sell qty if enqueue failed.
+                # The qty was pre-registered inside the lock before enqueue was called
+                # (_pending_sell_key set to None after registration). On exception,
+                # _pending_sell_key is None but we can still roll back via broker+symbol key.
+                if _is_closing_position and action == "sell":
+                    with self._pending_sell_qty_lock:
+                        _ps_exc_key = (broker_name, symbol)
+                        self._pending_sell_qty[_ps_exc_key] = max(
+                            0.0, self._pending_sell_qty.get(_ps_exc_key, 0.0) - qty
+                        )
                 self._record_skip(symbol, action, "order_failed", broker_name)
                 logging.warning("Order enqueue failed for %s %s: %s", action, symbol, exc)
                 self._emit_decision_trace(
@@ -3138,6 +3160,19 @@ class TradingAgent:
             data = dict(brokers[broker_name])
             data.setdefault("broker", broker_name)
             return data
+        # Missing broker data: return a safe empty portfolio rather than the aggregate.
+        # Returning aggregate would cause cross-broker exposure contamination in sizing
+        # and risk checks (e.g. Binance equity leaking into Alpaca leverage calculations).
+        if broker_name and isinstance(brokers, dict):
+            return {
+                "equity": 0.0,
+                "cash": 0.0,
+                "positions": {},
+                "buying_power": 0.0,
+                "gross_exposure": 0.0,
+                "short_exposure": 0.0,
+                "broker": broker_name,
+            }
         return portfolio
 
     def _maybe_fallback_broker(self, broker_name: str) -> str:
@@ -4248,8 +4283,10 @@ class TradingAgent:
                         if oi:
                             market_state["crypto_oi_change_pct"] = oi.get("change_pct_24h", 0.0)
                 if not is_crypto and alt_cfg.get("sec_edgar", {}).get("enabled", False):
-                    trades = fetch_sec_insider_trades(symbol)
-                    market_state["insider_sentiment"] = insider_sentiment(trades)
+                    # EDGAR parser reads filing index only (not Form 4 XML), so transaction_type
+                    # is always "unknown" and insider_sentiment() always returns 0.
+                    # Skip the API call until Form 4 XML parsing is implemented.
+                    market_state["insider_sentiment"] = 0
             except Exception as _ad_exc:
                 logging.debug("Alt data inject skipped for %s: %s", symbol, _ad_exc)
         # Earnings calendar injection

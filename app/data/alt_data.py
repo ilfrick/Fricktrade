@@ -69,13 +69,14 @@ def fetch_fear_greed(ttl_seconds: int = 3600) -> Optional[float]:
 def fetch_coinglass_oi(
     symbol: str,
     api_key: str,
-    base_url: str = "https://open-api.coinglass.com/public/v2",
+    base_url: str = "https://open-api.coinglass.com/public/v3",
     ttl_seconds: int = 3600,
 ) -> Optional[dict]:
     """Return open interest metrics for a crypto symbol from CoinGlass.
 
     Returns dict with keys: open_interest_usd, change_pct_24h, long_pct, short_pct
-    Returns None if the API key is missing or the request fails.
+    Returns None if the API key is missing, the request fails, or data is empty.
+    Uses CoinGlass v3 API (default); callers can override base_url for v2 compatibility.
     """
     if not api_key:
         return None
@@ -89,17 +90,18 @@ def fetch_coinglass_oi(
             params = urllib.parse.urlencode({
                 "symbol": base,
                 "interval": "h1",
-                "api_key": api_key,
             })
             url = f"{base_url}/indicator/open_interest?{params}"
             req = urllib.request.Request(url, headers={"coinglassSecret": api_key})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read())
-            # CoinGlass wraps results in data[] sorted desc
+            # CoinGlass v3 wraps results in data[] sorted desc; same structure as v2
             entries = data.get("data", [])
             if not entries:
+                logger.warning("fetch_coinglass_oi(%s): empty data field in response", base)
                 return None
             latest = entries[0]
+            # v3 field names: openInterest, openInterestChange24h, longRatio, shortRatio
             return {
                 "open_interest_usd": float(latest.get("openInterest", 0) or 0),
                 "change_pct_24h": float(latest.get("openInterestChange24h", 0) or 0),
@@ -119,22 +121,39 @@ def fetch_coinglass_oi(
 
 _TICKER_CIK_CACHE: dict[str, Optional[str]] = {}
 
+_SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+_SEC_TICKERS_TTL = 86400  # 24-hour TTL — the bulk tickers file changes rarely
+
+
+def _fetch_sec_tickers_bulk() -> Optional[dict]:
+    """Download the SEC bulk company_tickers.json with proper User-Agent (24h TTL via _cached)."""
+    try:
+        req = urllib.request.Request(
+            _SEC_TICKERS_URL,
+            headers={"User-Agent": "fricktrade contact@example.com"},  # SEC requires name + email
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except Exception as exc:
+        logger.debug("SEC tickers bulk fetch failed: %s", exc)
+        return None
+
 
 def _lookup_cik(symbol: str) -> Optional[str]:
-    """Resolve ticker to SEC CIK (padded to 10 digits)."""
+    """Resolve ticker to SEC CIK (padded to 10 digits).
+
+    Uses a 24h TTL cache for the bulk tickers file to avoid re-downloading
+    every session, plus a per-symbol in-process dict to skip repeated lookups.
+    """
     if symbol in _TICKER_CIK_CACHE:
         return _TICKER_CIK_CACHE[symbol]
-    try:
-        url = "https://www.sec.gov/files/company_tickers.json"
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            tickers = json.loads(resp.read())
+    tickers = _cached("sec_tickers_bulk", float(_SEC_TICKERS_TTL), _fetch_sec_tickers_bulk)
+    if tickers:
         for _, entry in tickers.items():
             if str(entry.get("ticker", "")).upper() == symbol.upper():
                 cik = str(entry.get("cik_str", "")).zfill(10)
                 _TICKER_CIK_CACHE[symbol] = cik
                 return cik
-    except Exception as exc:
-        logger.debug("CIK lookup for %s failed: %s", symbol, exc)
     _TICKER_CIK_CACHE[symbol] = None
     return None
 

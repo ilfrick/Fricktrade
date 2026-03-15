@@ -73,9 +73,10 @@ class TrendFollowingStrategy(Strategy):
         supertrend = indicators.get("supertrend")  # 1=bullish, -1=bearish
         vwap_dev = indicators.get("vwap_dev")  # >0 means price above VWAP
 
-        # Regime filter
+        # Regime filter — HMM integer code 2 = crisis; also accept string name as fallback
+        regime = market_state.get("regime")
         regime_name = market_state.get("regime_name")
-        in_crisis = regime_name == "high_vol_crisis"
+        in_crisis = (regime == 2) or (regime_name == "high_vol_crisis")
 
         # --- BUY signal ---
         if trend_strength >= self.params.breakout_pct and last >= fast and rsi < 70 and vol_ok:

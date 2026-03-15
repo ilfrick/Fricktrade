@@ -99,7 +99,8 @@ class CryptoMomentumStrategy(Strategy):
             # RSI overbought damper: crypto can stay overbought, but high RSI reduces
             # entry quality — dampen confidence rather than gate entirely.
             # Prefer pre-computed indicator to avoid double-work; fall back to inline.
-            rsi = float(indicators.get("rsi") or self._wilder_rsi(list(close), 14))
+            _rsi_cached = indicators.get("rsi")
+            rsi = float(_rsi_cached if _rsi_cached is not None else self._wilder_rsi(list(close), 14))
             rsi_mult = 1.0
             if rsi > 80:
                 rsi_mult = 0.5   # strongly overbought — halve confidence

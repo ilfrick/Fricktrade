@@ -24,7 +24,10 @@ def fractional_slice(qty: float) -> list[AlgoSlice]:
 def twap_slices(total_qty: int, duration_seconds: int, slice_count: int) -> list[AlgoSlice]:
     if total_qty <= 0 or slice_count <= 0:
         return []
-    slice_count = min(slice_count, total_qty)
+    # Cast to int to prevent TypeError when fractional qty is passed (e.g. crypto lot sizes)
+    slice_count = int(min(slice_count, total_qty))
+    if slice_count <= 0:
+        return []
     now = datetime.now(timezone.utc)
     qty_per = total_qty // slice_count
     remainder = total_qty % slice_count

@@ -117,26 +117,36 @@ class MacroRegimeAnalyzer:
         if self._failed_at is not None and (now - self._failed_at) < timedelta(minutes=10):
             return self._cache
 
+        # Re-check under lock — another thread may have refreshed while we waited
         with self._refresh_lock:
-            # Re-check after acquiring lock — another thread may have refreshed already
             now = datetime.now(timezone.utc)
             if (self._cache is not None
                     and (now - self._cache.fetched_at) < timedelta(hours=self._refresh_hours)):
                 return self._cache
             if self._failed_at is not None and (now - self._failed_at) < timedelta(minutes=10):
                 return self._cache
-            try:
-                indicators = self._fetch_indicators()
-                regime = self._classify(indicators, news_headlines or [])
-                if regime:
-                    self._cache = regime
-                    self._failed_at = None
-                else:
-                    self._failed_at = now
-            except Exception as exc:
-                logger.warning("MacroRegimeAnalyzer failed: %s", exc)
+
+        # Do expensive HTTP I/O *outside* the lock so we don't hold it for up to 30s.
+        # Other threads can still serve the stale cache while this thread fetches.
+        _new_regime = None
+        _fetch_failed = False
+        try:
+            indicators = self._fetch_indicators()
+            _new_regime = self._classify(indicators, news_headlines or [])
+        except Exception as exc:
+            logger.warning("MacroRegimeAnalyzer failed: %s", exc)
+            _fetch_failed = True
+
+        # Only lock for the cache write
+        with self._refresh_lock:
+            now = datetime.now(timezone.utc)
+            if _fetch_failed:
                 self._failed_at = now
-                return self._cache  # return stale cache on failure
+            elif _new_regime is not None:
+                self._cache = _new_regime
+                self._failed_at = None
+            else:
+                self._failed_at = now
 
         return self._cache
 

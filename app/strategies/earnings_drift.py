@@ -60,6 +60,13 @@ class EarningsDriftStrategy(Strategy):
         # Re-entry guard: don't re-buy within hold_days of the last buy on this symbol.
         # Without this, a stop/TP that closes the position while earnings_window is still
         # "post" immediately causes a new buy signal the next cycle.
+        # Re-arm guard on restart: if we hold this symbol but don't know when we bought it,
+        # use opened_at from position_state if available, else now (conservative).
+        if symbol not in self._last_buy:
+            _pos_info = (market_state.get("portfolio") or {}).get("positions", {}).get(symbol, {})
+            if float(_pos_info.get("qty", 0) or 0) > 0:
+                _opened_at = _pos_info.get("opened_at")
+                self._last_buy[symbol] = _opened_at if isinstance(_opened_at, datetime) else datetime.now(timezone.utc)
         now = datetime.now(timezone.utc)
         last_buy_at = self._last_buy.get(symbol)
         if last_buy_at is not None:
