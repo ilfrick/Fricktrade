@@ -733,10 +733,11 @@ class TradingAgent:
         if hard_stop > 0 and last_price <= avg_entry * (1 - hard_stop / 100.0):
             return True, "hard_stop"
 
-        # Trailing stop: price dropped X% from peak since entry
+        # Trailing stop: price dropped X% from trail reference (peak or entry, whichever is higher)
         peak = float(pos.get("peak_price") or avg_entry)
-        if trailing_stop > 0 and peak > avg_entry:
-            if last_price <= peak * (1 - trailing_stop / 100.0):
+        if trailing_stop > 0:
+            trail_ref = max(peak, avg_entry)
+            if last_price <= trail_ref * (1 - trailing_stop / 100.0):
                 return True, "trailing_stop"
 
         # Take-profit: full exit when price >= entry * (1 + take_profit_pct/100)

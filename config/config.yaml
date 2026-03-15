@@ -194,7 +194,7 @@ risk:
     max_daily_loss_pct: 5.0
     max_position_size_pct: 90.0
     max_crypto_exposure_pct: 50.0
-    hard_stop_pct: 3.0
+    hard_stop_pct: 4.0
     trailing_stop_pct: 1.5
     take_profit_pct: 4.0
     circuit_breaker_drawdown_pct: 8.0

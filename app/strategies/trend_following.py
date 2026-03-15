@@ -28,13 +28,28 @@ class TrendFollowingStrategy(Strategy):
             exit_pct=float(cfg.get("exit_pct", 0.2)),
         )
 
+    @staticmethod
+    def _ema(arr: np.ndarray, span: int) -> float:
+        alpha = 2.0 / (span + 1.0)
+        result = float(arr[0])
+        for val in arr[1:]:
+            result = alpha * float(val) + (1.0 - alpha) * result
+        return result
+
     def generate_signal(self, market_state: dict) -> dict:
         prices = market_state.get("prices", []) or []
         if len(prices) < max(self.params.fast_window, self.params.slow_window) + 1:
             return {"action": "hold"}
         close = np.array(prices, dtype=float)
-        fast = float(close[-self.params.fast_window :].mean())
-        slow = float(close[-self.params.slow_window :].mean())
+        # Use pre-computed EMA from indicator injection if available; otherwise compute inline
+        indicators = market_state.get("indicators") or {}
+        if indicators.get("ema_fast") and indicators.get("ema_slow"):
+            fast = float(indicators["ema_fast"])
+            slow = float(indicators["ema_slow"])
+        else:
+            prices_for_ema = close[-(self.params.slow_window * 3):]
+            fast = self._ema(prices_for_ema, self.params.fast_window)
+            slow = self._ema(prices_for_ema, self.params.slow_window)
         last = float(close[-1])
         if slow <= 0:
             return {"action": "hold"}
@@ -53,8 +68,7 @@ class TrendFollowingStrategy(Strategy):
             avg_vol = float(np.mean(volumes[-5:-1])) if len(volumes) > 1 else 0.0
             vol_ok = avg_vol <= 0 or volumes[-1] >= avg_vol * 1.5
 
-        # Extended indicators (when available from indicator injection)
-        indicators = market_state.get("indicators", {})
+        # Extended indicators (when available from indicator injection; already fetched above)
         supertrend = indicators.get("supertrend")  # 1=bullish, -1=bearish
         vwap_dev = indicators.get("vwap_dev")  # >0 means price above VWAP
 

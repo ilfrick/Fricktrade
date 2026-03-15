@@ -60,9 +60,12 @@ class CryptoMomentumStrategy(Strategy):
                 return 0.0
             return float((close[-1] - close[-n - 1]) / close[-n - 1] * 100.0)
 
-        ret_fast = _ret(self.params.fast_window)
-        ret_med = _ret(self.params.medium_window)
-        ret_slow = _ret(self.params.slow_window)
+        vel_fast = _ret(self.params.fast_window) / self.params.fast_window
+        vel_med  = _ret(self.params.medium_window) / self.params.medium_window
+        vel_slow = _ret(self.params.slow_window) / self.params.slow_window
+
+        per_bar_thr = self.params.min_return_pct / self.params.fast_window
+        slow_trend_min = per_bar_thr * 0.2  # require minimum slow trend strength (IMP-6)
 
         # Volume confirmation — used as a confidence boost, not a hard gate.
         # Alpaca crypto bar volume is platform-routed flow, not global exchange volume.
@@ -76,13 +79,24 @@ class CryptoMomentumStrategy(Strategy):
                 ratio = float(volumes[-1]) / avg_vol
                 vol_boost = min(ratio / self.params.volume_mult, 1.5)  # caps at 1.5×
 
-        all_positive = ret_fast > self.params.min_return_pct and ret_med > 0.0 and ret_slow > 0.0
-        all_negative = ret_fast < -self.params.min_return_pct and ret_med < 0.0 and ret_slow < 0.0
+        all_positive = vel_fast > per_bar_thr and vel_med > 0.0 and vel_slow > slow_trend_min
+        all_negative = vel_fast < -per_bar_thr and vel_med < 0.0 and vel_slow < -slow_trend_min
 
         if all_positive:
-            min_ret = min(ret_fast, ret_med, ret_slow)
-            base_conf = min(min_ret / (self.params.min_return_pct * 3.0), 1.0)
-            confidence = min(base_conf * max(vol_boost, 0.5), 1.0)
+            weighted_vel = 0.5 * vel_fast + 0.3 * vel_med + 0.2 * vel_slow
+            base_conf = min(weighted_vel / (per_bar_thr * 4.0), 1.0)
+            # VWAP filter (IMP-4): vwap_dev is normalized to [-1, 1] (raw_pct / 5.0)
+            indicators = market_state.get("indicators") or {}
+            vwap_dev = indicators.get("vwap_dev")
+            vwap_mult = 1.0
+            if vwap_dev is not None:
+                if vwap_dev > 0.3:   # overextended above VWAP (~1.5% raw) — dampen
+                    vwap_mult = 0.7
+                elif vwap_dev >= 0:  # at/near VWAP — ideal entry
+                    vwap_mult = 1.1
+                else:                # below VWAP in uptrend — caution
+                    vwap_mult = 0.85
+            confidence = min(base_conf * max(vol_boost, 0.5) * vwap_mult, 1.0)
             return {
                 "action": "buy",
                 "confidence": float(confidence),
@@ -92,6 +106,8 @@ class CryptoMomentumStrategy(Strategy):
 
         if all_negative:
             # Long-only: signal to exit any existing position
-            return {"action": "sell", "confidence": 0.6, "name": "crypto_momentum"}
+            sell_conf = min(abs(vel_fast) / (per_bar_thr * 4.0), 1.0)
+            sell_conf = max(sell_conf, 0.4)
+            return {"action": "sell", "confidence": float(sell_conf), "name": "crypto_momentum"}
 
         return {"action": "hold", "confidence": 0.0, "name": "crypto_momentum"}
