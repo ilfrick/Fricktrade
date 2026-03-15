@@ -110,7 +110,8 @@ class GapReversalStrategy(Strategy):
             }
 
         # Gap UP reversal → EXIT signal (if holding a position)
-        position_qty = float((market_state.get("positions") or {}).get(symbol, {}).get("qty", 0.0))
+        _portfolio = market_state.get("portfolio") or {}
+        position_qty = float((_portfolio.get("positions") or {}).get(symbol, {}).get("qty", 0.0))
         if gap_pct >= self.params.min_gap_pct and rsi > self.params.rsi_overbought and position_qty > 0 and vol_ok:
             return {"action": "sell", "confidence": 0.65, "name": "gap_reversal"}
 

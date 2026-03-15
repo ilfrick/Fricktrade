@@ -390,6 +390,7 @@ def _reject_reason(code: str, exc: Exception) -> str:
         "40310000": "min_order_notional",  # Alpaca: cost basis < $10 minimum
         "-1013": "floors_to_zero",         # Binance: Filter failure NOTIONAL — sub-minimum value
         "-1111": "floors_to_zero",         # Binance: LOT_SIZE precision error
+        "-1121": "invalid_symbol",         # Binance: symbol not listed on this account/env
     }
     if code in mapping:
         return mapping[code]

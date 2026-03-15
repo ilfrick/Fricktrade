@@ -72,7 +72,8 @@ class CryptoMeanReversionStrategy(Strategy):
         fast_drop = ref_price > 0 and ((ref_price - last) / ref_price * 100.0) > 1.0
 
         # Check if holding a position and price has reverted to midline
-        position_qty = float((market_state.get("positions") or {}).get(symbol, {}).get("qty", 0.0))
+        _portfolio = market_state.get("portfolio") or {}
+        position_qty = float((_portfolio.get("positions") or {}).get(symbol, {}).get("qty", 0.0))
         if position_qty > 0 and last >= sma:
             return {"action": "sell", "confidence": 0.7, "name": "crypto_mean_reversion"}
 

@@ -711,13 +711,18 @@ class TradingAgent:
 
         is_crypto = "/" in symbol
 
-        # ATR-based stop: supersedes hard_stop when ATR is available
+        # ATR-based stop: supersedes hard_stop when ATR is available.
+        # Floor: ATR stop must not be looser than the hard_stop floor to cap max loss.
         if market_state is not None:
             indicators = market_state.get("indicators") or {}
             atr = float(indicators.get("atr", 0.0) or 0.0)
             if atr > 0 and avg_entry > 0:
+                _crypto_cfg_atr = (risk_cfg.get("crypto") or {}) if is_crypto else {}
+                _hs = float(_crypto_cfg_atr.get("hard_stop_pct") or risk_cfg.get("hard_stop_pct", 0) or 0)
                 atr_mult = 2.5 if is_crypto else 1.5
                 atr_stop_price = avg_entry - atr * atr_mult
+                if _hs > 0:
+                    atr_stop_price = max(atr_stop_price, avg_entry * (1.0 - _hs / 100.0))
                 if last_price <= atr_stop_price:
                     return True, "atr_stop"
 
@@ -2094,6 +2099,18 @@ class TradingAgent:
                         with self._pending_sell_qty_lock:
                             self._pending_sell_qty.pop(_buy_key, None)
                         self._exit_backoff_until.pop(_buy_key, None)
+                # invalid_symbol: broker doesn't list this symbol (e.g. Binance -1121).
+                # Blacklist for 24h so we don't spam every cycle.
+                if (status == "rejected" and side == "buy"
+                        and getattr(response, "reason", "") == "invalid_symbol"):
+                    _inv_key = (response.broker, response.symbol)
+                    self._symbol_stuck_blacklist[_inv_key] = (
+                        datetime.now(timezone.utc) + timedelta(hours=24)
+                    )
+                    logging.warning(
+                        "invalid_symbol: %s/%s blacklisted for 24h on broker %s",
+                        response.symbol, response.broker, response.broker,
+                    )
                 # insufficient_stablecoin: price moved between sizing and fill; apply a short
                 # cooldown so the symbol doesn't hammer the broker every cycle until cash
                 # replenishes or the margin fix kicks in post-restart.

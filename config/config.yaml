@@ -308,14 +308,13 @@ strategy:
     exit_threshold_pct: 0.15
     position_horizon_minutes: 0    # disabled — hard/trailing stops and TP handle exits
     min_hold_minutes: 15        # suppress all stop/take-profit exits for 15 min after entry
-    exit_vote_threshold: 1     # vote mode: exit a held position when ≥N strategies say sell/exit (vs majority for new entries)
-    buy_vote_threshold: 1      # vote mode: open a new position when ≥N strategies say buy (0=strict majority); 1 allows crypto strategies to trigger buys individually
+    exit_vote_threshold: 2     # vote mode: exit a held position when ≥N strategies say sell/exit
+    buy_vote_threshold: 2      # vote mode: open a new position when ≥N strategies say buy (0=strict majority)
     buy_vote_threshold_trending: 1  # in low_vol_trending regime, only 1 strategy needs to say buy (vs 2 normally)
     crypto_eligible_strategies:
       - crypto_momentum
       - crypto_mean_reversion
       - trend_following
-      - pattern_trading
       - top_movers_rf
     alt_data_fear_greed_block: 20   # suppress crypto longs when F&G below this
     alt_data_oi_block: -5.0         # suppress crypto longs when OI change % below this
@@ -1047,7 +1046,7 @@ llm:
   post_session:
     enabled: true
     auto_run: true           # Run automatically at session end
-    output_dir: data/session_reports
+    output_dir: /data/reports/session
     max_trades_in_context: 100
     auto_apply_weights: false  # If true, apply weight changes without confirmation
 
@@ -1149,7 +1148,7 @@ tactical_meta_orchestrator:
     data.timeout_seconds:                            [15, 60]
     # Strategy params — applied after apply_delay_minutes
     strategy.params.min_hold_minutes:                [5, 30]
-    strategy.params.position_horizon_minutes:        [60, 480]
+    strategy.params.regime_hold_minutes.base_minutes: [60, 480]
     # Risk: equity
     risk.hard_stop_pct:                              [0.5, 3.0]
     risk.trailing_stop_pct:                          [1.0, 10.0]
@@ -1187,7 +1186,7 @@ strategic_meta_orchestrator:
     execution.insufficient_stablecoin_cooldown_minutes: [2, 15]
     data.timeout_seconds:                            [15, 60]
     strategy.params.min_hold_minutes:                [5, 30]
-    strategy.params.position_horizon_minutes:        [60, 480]
+    strategy.params.regime_hold_minutes.base_minutes: [60, 480]
     risk.hard_stop_pct:                              [0.5, 3.0]
     risk.trailing_stop_pct:                          [2.0, 10.0]
     risk.take_profit_pct:                            [0.5, 5.0]

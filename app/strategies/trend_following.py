@@ -88,14 +88,17 @@ class TrendFollowingStrategy(Strategy):
             confidence = self._compute_confidence(trend_strength, rsi, supertrend, vwap_dev, is_buy=False)
             return {"action": "sell", "confidence": confidence, "trend_strength": trend_strength, "rsi": rsi}
 
-        # --- Extended exit signals (indicator-based) ---
+        # --- Extended exit signals (indicator-based, only when holding a position) ---
         if indicators:
-            # Overbought RSI exit
-            if rsi > 75:
-                return {"action": "sell", "confidence": 0.6, "trend_strength": trend_strength, "rsi": rsi}
-            # Bearish supertrend flip
-            if supertrend is not None and supertrend == -1 and trend_strength < 0:
-                return {"action": "sell", "confidence": 0.5, "trend_strength": trend_strength, "rsi": rsi}
+            _portfolio = market_state.get("portfolio") or {}
+            _held_qty = float((_portfolio.get("positions") or {}).get(symbol, {}).get("qty", 0.0))
+            if _held_qty > 0:
+                # Overbought RSI exit
+                if rsi > 75:
+                    return {"action": "sell", "confidence": 0.6, "trend_strength": trend_strength, "rsi": rsi}
+                # Bearish supertrend flip
+                if supertrend is not None and supertrend == -1 and trend_strength < 0:
+                    return {"action": "sell", "confidence": 0.5, "trend_strength": trend_strength, "rsi": rsi}
 
         return {"action": "hold", "confidence": 0.0, "trend_strength": trend_strength, "rsi": rsi}
 

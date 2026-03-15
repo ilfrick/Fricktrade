@@ -101,6 +101,9 @@ class StatArbPairsStrategy(Strategy):
             last = StatArbPairsStrategy._shared_last_refresh
             if last and now - last < timedelta(minutes=self.params.refresh_minutes):
                 return
+            # Claim the refresh slot before releasing the lock so concurrent callers
+            # see a recent timestamp and skip their own redundant refresh (TOCTOU fix).
+            StatArbPairsStrategy._shared_last_refresh = now
             symbols = list(StatArbPairsStrategy._shared_price_cache.keys())
             # Snapshot series under lock, do heavy computation outside
             snapshots = {
@@ -130,7 +133,7 @@ class StatArbPairsStrategy(Strategy):
         new_pairs = [(a, b, hr) for a, b, hr, _ in candidates[: self.params.max_pairs]]
         with StatArbPairsStrategy._shared_lock:
             StatArbPairsStrategy._shared_pairs = new_pairs
-            StatArbPairsStrategy._shared_last_refresh = now
+            # _shared_last_refresh already set optimistically above; no need to re-set here
         logging.info(
             "stat_arb: %d symbols in cache, %d pairs tested, %d passed ADF, %d active pairs",
             len(symbols), n_tested, n_passed, len(new_pairs),
