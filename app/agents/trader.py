@@ -2322,6 +2322,11 @@ class TradingAgent:
         current_qty = float(positions.get(symbol, {}).get("qty", 0.0) or 0.0)
         current_value = current_qty * last_price
         max_pos_pct = float(self.cfg["risk"]["max_position_size_pct"])
+        # F2 fix: honour risk.crypto.max_position_size_pct when present
+        if "/" in symbol:
+            _crypto_max = (self.cfg.get("risk", {}).get("crypto", {}) or {}).get("max_position_size_pct")
+            if _crypto_max is not None:
+                max_pos_pct = float(_crypto_max)
         vol_scale = self._vol_target_scale(market_state)
         portfolio_scale = self._portfolio_position_scale(symbol, market_state, portfolio)
         max_pos_pct *= vol_scale * portfolio_scale * tod_scale
@@ -2382,7 +2387,9 @@ class TradingAgent:
             if self._is_fractional(symbol):
                 # Crypto: 8 decimals; fractionable equity: 3 decimals
                 precision = 8 if "/" in symbol else 3
-                return round(allowed_value / last_price, precision), None
+                # F5 fix: use floor (consistent with sell path) — round() can overshoot by sub-ULP
+                factor = 10 ** precision
+                return math.floor(allowed_value / last_price * factor) / factor, None
             return int(allowed_value // last_price), None
 
         if action == "sell":
@@ -2451,7 +2458,9 @@ class TradingAgent:
                 return 0, "insufficient_buying_power"
             if self._is_fractional(symbol):
                 precision = 8 if "/" in symbol else 3
-                return round(allowed_value / last_price, precision), None
+                # F5 fix: use floor consistent with buy and sell paths
+                factor = 10 ** precision
+                return math.floor(allowed_value / last_price * factor) / factor, None
             return int(allowed_value // last_price), None
 
         return 0, "unsupported"
@@ -3139,6 +3148,12 @@ class TradingAgent:
             if winning_action == "sell":
                 reduce_pct = max(float(s.get("reduce_pct", 1.0)) for s in winning_sigs)
                 return "sell", reduce_pct, best.get("name")
+            # F1 fix: propagate winning signal's confidence as kelly_win_prob so
+            # _size_order can scale buy size in vote mode (previously always 0.0 → 0.1× floor)
+            if winning_action == "buy" and market_state is not None:
+                best_conf = float(best.get("confidence", 0.0))
+                if best_conf > 0:
+                    market_state["kelly_win_prob"] = best_conf
             return winning_action, 1.0, best.get("name")
         weights = weights or {}
         # Orchestrator returns uniform 1.0 when disabled — use config weights instead
