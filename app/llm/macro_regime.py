@@ -204,8 +204,13 @@ class MacroRegimeAnalyzer:
                 temperature=0.1,
             )
             data = response.parse_json()
+            _valid = {"risk_on", "risk_off", "rotation", "range_bound", "crisis"}
+            _name = str(data.get("name", "range_bound"))
+            if _name not in _valid:
+                logger.warning("MacroRegime returned unknown name %r; defaulting to range_bound", _name)
+                _name = "range_bound"
             return MacroRegime(
-                name=str(data.get("name", "range_bound")),
+                name=_name,
                 confidence=float(data.get("confidence", 0.5)),
                 weight_overrides={k: float(v) for k, v in data.get("weight_overrides", {}).items()},
                 rationale=str(data.get("rationale", "")),

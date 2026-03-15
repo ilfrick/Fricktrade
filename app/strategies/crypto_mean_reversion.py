@@ -79,6 +79,10 @@ class CryptoMeanReversionStrategy(Strategy):
             # Only exit if meaningful profit has accumulated — prevents round-trips that
             # barely cover transaction costs when price just kisses the SMA.
             avg_entry = float(_pos_info.get("avg_entry") or 0.0)
+            # If position was opened at or above SMA it was not opened by this strategy
+            # (we only buy below lower_band). Don't issue sell votes for foreign positions.
+            if avg_entry > 0 and avg_entry >= sma:
+                return {"action": "hold", "confidence": 0.0, "name": "crypto_mean_reversion"}
             min_profit_pct = 0.3  # require at least 0.3% profit before SMA exit
             if avg_entry > 0:
                 profit_pct = (last - avg_entry) / avg_entry * 100.0

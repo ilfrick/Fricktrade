@@ -1502,14 +1502,17 @@ class TradingAgent:
                     return None
                 if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
                     self._open_order_mgr.remove_pending(symbol, broker=broker_name)
-                # Register pending sell so the next cycle doesn't re-enter while broker
-                # position still shows qty > 0 (broker refresh lags close_position).
+                # Guard: if pending_sell already covers this position, skip (prevents
+                # duplicate close_position calls when _check_position_exit fires every cycle).
                 if _exit_qty > 0:
                     _exit_ps_key = (broker_name, symbol)
                     with self._pending_sell_qty_lock:
-                        self._pending_sell_qty[_exit_ps_key] = (
-                            self._pending_sell_qty.get(_exit_ps_key, 0.0) + _exit_qty
-                        )
+                        _already_pending = self._pending_sell_qty.get(_exit_ps_key, 0.0)
+                        if _already_pending >= _exit_qty * 0.9:
+                            self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
+                            return None
+                        # Register before close_position call (roll back on failure)
+                        self._pending_sell_qty[_exit_ps_key] = _already_pending + _exit_qty
                 try:
                     self.broker.close_position(symbol, broker=broker_name)
                 except Exception as _ce:
@@ -1799,6 +1802,10 @@ class TradingAgent:
                         self._emit_decision_trace(trace, "skip", "pending_sell_covers_position", "risk")
                         return None
                     qty = min(qty, _available_qty)
+                    # Pre-register inside the same lock to eliminate the TOCTOU window
+                    # between the check above and the post-enqueue registration below.
+                    self._pending_sell_qty[_pending_sell_key] = _pending_sells + qty
+                    _pending_sell_key = None  # mark as already registered
                 order_notional = qty * last_price
 
             # Block duplicate buys while an order for this symbol is still pending
@@ -1877,9 +1884,15 @@ class TradingAgent:
 
             # Update shared portfolio in-memory so subsequent threads see new exposure
             with self._lock:
-                portfolio["gross_exposure"] = float(portfolio.get("gross_exposure", 0.0) or 0.0) + order_notional
-                if action == "sell" and not _is_closing_position:
-                    portfolio["short_exposure"] = float(portfolio.get("short_exposure", 0.0) or 0.0) + order_notional
+                if _is_closing_position:
+                    # Closing a position reduces gross exposure
+                    portfolio["gross_exposure"] = max(
+                        0.0, float(portfolio.get("gross_exposure", 0.0) or 0.0) - order_notional
+                    )
+                else:
+                    portfolio["gross_exposure"] = float(portfolio.get("gross_exposure", 0.0) or 0.0) + order_notional
+                    if action == "sell":
+                        portfolio["short_exposure"] = float(portfolio.get("short_exposure", 0.0) or 0.0) + order_notional
             order_latency = time.perf_counter() - order_start
             ORDER_LATENCY.labels(symbol=symbol, side=action).observe(order_latency)
             if trace:
@@ -3174,7 +3187,7 @@ class TradingAgent:
             # rather than silently permitting them (prior blocklist had dead entries:
             # "recession" and "high_vol_crisis" are not valid regime names, so only
             # "crisis" ever matched).
-            _ENTRY_ALLOWED_REGIMES = frozenset({"risk_on", "rotation", "range_bound"})
+            _ENTRY_ALLOWED_REGIMES = frozenset({"risk_on", "risk_off", "rotation", "range_bound"})
             if not is_held and self._macro_regime is not None:
                 try:
                     _macro = self._macro_regime.get_regime(None)

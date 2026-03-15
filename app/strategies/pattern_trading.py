@@ -36,6 +36,9 @@ class PatternTradingStrategy(Strategy):
         if not prices or last_price is None:
             return {"action": "hold", "confidence": 0.0, "name": "pattern_trading"}
 
+        if "/" in symbol:
+            return {"action": "hold", "confidence": 0.0, "name": "pattern_trading"}
+
         if not self._passes_filters(market_state):
             return {"action": "hold", "confidence": 0.0, "name": "pattern_trading"}
 
