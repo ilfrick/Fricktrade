@@ -286,7 +286,6 @@ strategy:
   - crypto_mean_reversion
   - gap_reversal
   - earnings_drift
-  - rl_policy
   combine: vote
   # min_conviction / single_sided_conviction_multiplier / fee_aware are weighted-mode only;
   # unused in vote mode (votes are unweighted action counts).
@@ -311,7 +310,6 @@ strategy:
     min_hold_minutes: 15        # suppress all stop/take-profit exits for 15 min after entry
     exit_vote_threshold: 2     # vote mode: exit a held position when ≥N strategies say sell/exit (vs majority for new entries)
     buy_vote_threshold: 2      # vote mode: open a new position when ≥N strategies say buy (0=strict majority); 2 lets crypto strategies trigger buys without needing equity strategies to agree
-    rl_reload_hold_minutes: 60 # suppress rl_policy sell votes for this many minutes after model reload to prevent mass liquidation
     buy_vote_threshold_trending: 1  # in low_vol_trending regime, only 1 strategy needs to say buy (vs 2 normally)
     alpha_decay_exit:
       enabled: true            # exit when the entry strategy actively signals sell

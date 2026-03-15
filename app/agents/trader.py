@@ -67,7 +67,7 @@ from app.strategies.gap_reversal import GapReversalStrategy
 from app.data.news import fetch_catalyst_symbols_for_config, fetch_raw_articles_for_config
 from app.data.market_cache import build_market_cache, build_market_cache_config
 from app.learning.drift import DriftMonitor
-from app.learning.registry import load_active_model, load_latest_feature_stats
+from app.learning.registry import load_latest_feature_stats
 from app.learning.live_rewards import LiveRewardTracker
 from app.brokers.config_utils import merge_cfg
 from app.utils.checkpoint import load_checkpoint, maybe_save_checkpoint
@@ -76,17 +76,6 @@ from app.utils.volatility import realized_volatility_pct
 
 _slog = StructuredLogger("trading_agent")
 from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
-from app.utils.gpu_state import is_gpu_disabled, disable_gpu_until_restart # Import GPU state utilities
-import tensorflow as tf # Import tensorflow for GPU error handling
-try:
-    import torch
-    _TORCH_OOM = (torch.cuda.OutOfMemoryError,)
-except Exception:
-    _TORCH_OOM = ()
-_OOM_ERRORS = (tf.errors.ResourceExhaustedError,) + _TORCH_OOM
-_rl_model_warned: bool = False  # suppress repeated "RL model unavailable" warnings (once per process)
-from app.strategies.rl_policy import RLPolicyStrategy
-from app.strategies.rl_policy_fees import FeeAwareRLPolicyStrategy
 from app.utils.market import is_market_open, is_venue_extended
 from app.utils.restart import should_restart
 from app.agents.account_metrics import AccountMetricsUpdater
@@ -275,10 +264,6 @@ class TradingAgent:
         self._include_feature_snapshots = self._audit_include_features or self._compliance_include_features
         self._drift_monitor: DriftMonitor | None = None
         self._drift_auto_rollback = False
-        self._drift_rollback_done = False
-        self._active_model_ref: str | None = None
-        self._active_model_checked_at: datetime | None = None
-        self._active_model_snapshot: dict | None = None
         self._init_drift_monitor()
         self._account_metrics = AccountMetricsUpdater(cfg)
         self._active_kill_switch_profile: str | None = None
@@ -308,8 +293,6 @@ class TradingAgent:
         # PDT-blocked symbols: suppress sell retries until next trading day
         self._pdt_blocked: set[tuple[str, str]] = set()
         self._pdt_blocked_date: date | None = None
-        # RL model reload timestamp — used to suppress sell votes right after reload
-        self._rl_reload_at: datetime | None = None
         # Config strategy weights — used when orchestrator is disabled (returns uniform 1.0)
         self._config_strategy_weights: dict[str, float] = dict(
             self.cfg.get("orchestrator", {}).get("strategy_weights", {}) or {}
@@ -601,59 +584,7 @@ class TradingAgent:
     def _risk_disabled(self) -> bool:
         return not bool(self.cfg.get("risk", {}).get("enabled", True))
 
-    def _build_rl_strategy(self, strategy_cls, name: str, extra_kwargs: dict | None = None):
-        """Build an RL strategy with device-fallback loop and OOM handling."""
-        if not self.learning_cfg.get("enabled"):
-            logging.debug("RL %s not enabled or failed to build.", name)
-            return None
-        model_path = self._select_model_path()
-        window_size = int(self.learning_cfg.get("window_size", 50))
-        device = self.learning_cfg.get("device", "auto")
-        feature_config = self.learning_cfg.get("features", {})
-        try_devices = [device]
-        if device != "cpu":
-            try_devices.append("cpu")
-        base_kwargs = dict(
-            window_size=window_size,
-            feature_config=feature_config,
-            drift_monitor=self._drift_monitor,
-            include_features=self._include_feature_snapshots,
-            risk_cfg=self.cfg.get("risk", {}),
-        )
-        if extra_kwargs:
-            base_kwargs.update(extra_kwargs)
-        for current_device in try_devices:
-            try:
-                return strategy_cls(model_path, device=current_device, **base_kwargs)
-            except (FileNotFoundError, ValueError) as exc:
-                logging.warning("RL model unavailable, skipping %s: %s", name, exc)
-                break
-            except _OOM_ERRORS as exc:
-                if current_device != "cpu":
-                    logging.warning("CUDA OOM during %s build: %s. Falling back to CPU.", name, exc)
-                    disable_gpu_until_restart()
-                    self.learning_cfg["device"] = "cpu"
-                    continue
-                else:
-                    logging.error("RL %s failed on CPU after GPU error: %s", name, exc)
-                    break
-            except Exception as exc:
-                logging.warning("Unknown error during %s build: %s", name, exc)
-                break
-        logging.debug("RL %s not enabled or failed to build.", name)
-        return None
-
     def _build_strategy(self, name: str, params: dict):
-        if name == "rl_policy":
-            return self._build_rl_strategy(RLPolicyStrategy, "rl_policy")
-        if name == "rl_policy_fees":
-            return self._build_rl_strategy(
-                FeeAwareRLPolicyStrategy, "rl_policy_fees",
-                extra_kwargs={
-                    "broker_fees": self.cfg.get("brokers", {}).get(self._broker_name, {}).get("fees", {}),
-                    "fee_guard": self._strategy_cfg.fee_aware,
-                },
-            )
         if name == "pattern_trading":
             return PatternTradingStrategy(self.cfg.get("pattern_trading", {}))
         if name == "trend_following":
@@ -682,45 +613,6 @@ class TradingAgent:
         logging.warning("Unknown strategy '%s' requested, skipping.", name)
         return None
 
-    def _select_model_path(self) -> str:
-        registry_cfg = self.learning_cfg.get("registry", {}) or {}
-        if registry_cfg.get("use_active", True):
-            active_path = registry_cfg.get("active_path", "/app/models/model_active.json")
-            active = load_active_model(active_path)
-            if isinstance(active, dict):
-                active_model = active.get("model_path")
-                if active_model and Path(active_model).exists():
-                    return str(active_model)
-        model_path = self.learning_cfg.get("model_path", "/app/models/ppo_policy.zip")
-        if not self.learning_cfg.get("use_best_model", True):
-            return model_path
-        best_path = self.learning_cfg.get("best_model_path", "/app/models/ppo_policy_best.zip")
-        return best_path if Path(best_path).exists() else model_path
-
-    def _maybe_reload_active_model(self) -> None:
-        registry_cfg = self.learning_cfg.get("registry", {}) or {}
-        if not registry_cfg.get("use_active", True):
-            return
-        refresh_minutes = int(registry_cfg.get("refresh_minutes", 5))
-        now = datetime.now(timezone.utc)
-        if self._active_model_checked_at and (now - self._active_model_checked_at).total_seconds() < refresh_minutes * 60:
-            return
-        active_path = registry_cfg.get("active_path", "/app/models/model_active.json")
-        active = load_active_model(active_path)
-        ref = _active_model_ref(active)
-        self._active_model_checked_at = now
-        if active:
-            self._active_model_snapshot = active
-        if ref and ref != self._active_model_ref:
-            self._active_model_ref = ref
-            self._reload_rl_strategies()
-            logging.info("Active model updated; reloading RL strategies.")
-
-    def _current_model_snapshot(self) -> dict | None:
-        registry_cfg = self.learning_cfg.get("registry", {}) or {}
-        if not registry_cfg.get("use_active", True):
-            return None
-        return self._active_model_snapshot
 
     def _init_drift_monitor(self) -> None:
         drift_cfg = self.learning_cfg.get("drift", {}) or {}
@@ -1182,10 +1074,6 @@ class TradingAgent:
             trace = self._init_decision_trace(symbol, market_state)
             if trace and "_decision_start" in market_state:
                 trace["_decision_start"] = market_state.get("_decision_start")
-            if trace:
-                model_snapshot = self._current_model_snapshot()
-                if model_snapshot:
-                    trace["model_active"] = model_snapshot
             if self._kill_switch_liquidated:
                 return None
             if (self._risk_interpreter_pause_until is not None
@@ -2845,7 +2733,6 @@ class TradingAgent:
         self._symbol_mgr.refresh_symbol_venues()
         self._maybe_checkpoint()
         self._symbol_mgr.log_ai_filter_heartbeat()
-        self._maybe_reload_active_model()
         symbols = self._symbol_mgr.resolve_active_symbols()
         symbols = self._symbol_mgr.merge_symbols_with_positions(symbols, portfolio)
         # Ensure per-broker partition exists (may be empty when market is closed
@@ -3188,41 +3075,18 @@ class TradingAgent:
                         return action, reduce_pct, name
             return "hold", 1.0, None
         if mode == "vote":
-            _strat_params_v = (self.cfg.get("strategy") or {}).get("params") or {}
-            _rl_hold_min = int(_strat_params_v.get("rl_reload_hold_minutes", 15))
-            _rl_reload_suppressed = False
-            if _rl_hold_min > 0 and self._rl_reload_at is not None:
-                _elapsed = (datetime.now(timezone.utc) - self._rl_reload_at).total_seconds() / 60.0
-                _rl_reload_suppressed = _elapsed < _rl_hold_min
             vote_counts: dict[str, int] = {"buy": 0, "sell": 0, "hold": 0}
             for signal in signals:
                 a = signal.get("action", "hold")
                 if a == "exit":
                     a = "sell"  # exit is a sell vote; no pre-emption in vote mode
-                # Suppress rl_policy sell votes on held positions.
-                # rl_policy has distribution shift on inherited positions (trained always
-                # starting from cash) → unreliable for exit decisions. Exits are handled
-                # by crypto_momentum/trend_following which analyse price patterns directly.
-                # Also suppress for rl_reload_hold_minutes after reload (belt-and-suspenders).
-                if a == "sell" and is_held and signal.get("name") in {"rl_policy", "rl_policy_fees"}:
-                    a = "hold"
-                elif _rl_reload_suppressed and a == "sell" and signal.get("name") in {"rl_policy", "rl_policy_fees"}:
-                    a = "hold"
                 if a in vote_counts:
                     vote_counts[a] += 1
-            # When closing a held position, a lower sell-vote threshold applies so
-            # that 1-2 agreeing strategies can trigger an exit without needing a
-            # majority (which is almost never reached in sideways markets).
-            # Config: strategy.params.exit_vote_threshold (default 2).
-            # buy_vote_threshold: minimum buy votes to trigger a buy entry (0 = strict majority).
-            # Useful when most strategies return hold for an asset class (e.g. equity strategies
-            # voting hold on crypto) so the few crypto-specific strategies can still open positions.
             _strat_params = (self.cfg.get("strategy") or {}).get("params") or {}
             _exit_threshold = int(_strat_params.get("exit_vote_threshold", 2))
             _buy_threshold = int(_strat_params.get("buy_vote_threshold", 0))
-            # In trending regimes (low_vol_trending / high_vol_trending) lower the bar for
-            # new entries: crypto strategies rarely co-fire, so require fewer votes.
-            # Config: strategy.params.buy_vote_threshold_trending (default 1).
+            # In trending regimes lower the bar for new entries: crypto strategies rarely
+            # co-fire, so require fewer votes. Config: buy_vote_threshold_trending (default 1).
             _regime = (market_state or {}).get("regime")
             if _regime in (0,) and not is_held:  # 0 = low_vol_trending
                 _trending_threshold = int(_strat_params.get("buy_vote_threshold_trending", 1))
@@ -3235,16 +3099,7 @@ class TradingAgent:
             else:
                 max_votes = max(vote_counts.values())
                 winners = [a for a, v in vote_counts.items() if v == max_votes]
-                if len(winners) == 1:
-                    winning_action = winners[0]
-                else:
-                    # RL tiebreak: if rl_policy voted for one of the tied actions, follow it
-                    rl_sig = next((s for s in signals if s.get("name") == "rl_policy"), None)
-                    if rl_sig and rl_sig.get("action", "hold") in winners:
-                        winning_action = rl_sig.get("action", "hold")
-                        logging.debug("Vote tie %s broken by rl_policy → %s", winners, winning_action)
-                    else:
-                        winning_action = "hold"
+                winning_action = winners[0] if len(winners) == 1 else "hold"
             if winning_action == "hold":
                 return "hold", 1.0, None
             winning_sigs = [s for s in signals if s.get("action") == winning_action]
@@ -3395,22 +3250,6 @@ class TradingAgent:
                         logging.warning("RiskInterpreter requested pause: trading suspended for 1 hour.")
             except Exception as _ri_exc:
                 logging.debug("RiskInterpreter call failed: %s", _ri_exc)
-        if self._drift_rollback_done or not self._drift_auto_rollback:
-            return
-        self.learning_cfg["use_best_model"] = True
-        self._reload_rl_strategies()
-        self._drift_rollback_done = True
-        logging.warning("Drift detected (%s). Reloaded RL policies using best model.", ", ".join(reasons))
-
-    def _reload_rl_strategies(self) -> None:
-        RLPolicyStrategy.clear_model_cache()
-        for symbol, strategies in list(self._strategy_by_symbol.items()):
-            for name in list(strategies.keys()):
-                if name in {"rl_policy", "rl_policy_fees"}:
-                    del strategies[name]
-            if not strategies:
-                del self._strategy_by_symbol[symbol]
-        self._rl_reload_at = datetime.now(timezone.utc)
 
     # _violates_exposure_caps moved to RiskManager.check_exposure_caps
 
@@ -4485,11 +4324,3 @@ def _realized_volatility_pct(market_state: dict) -> float:
     return realized_volatility_pct(prices)
 
 
-def _active_model_ref(active: dict | None) -> str | None:
-    if not active:
-        return None
-    model_path = active.get("model_path")
-    model_sha = active.get("model_sha256")
-    if not model_path:
-        return None
-    return f"{model_path}:{model_sha or ''}"
