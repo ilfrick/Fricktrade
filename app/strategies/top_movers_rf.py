@@ -658,6 +658,10 @@ class TopMoversRFStrategy(Strategy):
         return available >= self._min_buying_power
 
     def generate_signal(self, market_state: dict) -> dict:
+        symbol = str(market_state.get("symbol", "") or "")
+        if "/" in symbol:
+            return {"action": "hold", "confidence": 0.0, "reason": "equity_only"}
+
         if not self._bundle:
             return {"action": "hold", "reason": "model_unavailable"}
 

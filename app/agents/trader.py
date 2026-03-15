@@ -3112,6 +3112,23 @@ class TradingAgent:
                         return action, reduce_pct, name
             return "hold", 1.0, None
         if mode == "vote":
+            _ms_symbol = (market_state.get("symbol", "") if market_state else "")
+            _is_crypto_vote = "/" in _ms_symbol
+            _strat_params_pre = (self.cfg.get("strategy") or {}).get("params") or {}
+            # For crypto symbols, restrict votes to crypto-eligible strategies
+            if _is_crypto_vote:
+                _crypto_eligible = set(_strat_params_pre.get("crypto_eligible_strategies") or [])
+                if _crypto_eligible:
+                    signals = [s for s in signals if s.get("name") in _crypto_eligible]
+            # Alt-data pre-filter: suppress new crypto long entries in extreme fear + OI contraction
+            if _is_crypto_vote and not is_held:
+                _alt_ms = market_state or {}
+                _fg = float(_alt_ms.get("fear_greed_index") or 50)
+                _oi_change = float(_alt_ms.get("crypto_oi_change_pct") or 0)
+                _fg_threshold = float(_strat_params_pre.get("alt_data_fear_greed_block", 20))
+                _oi_threshold = float(_strat_params_pre.get("alt_data_oi_block", -5))
+                if _fg < _fg_threshold and _oi_change < _oi_threshold:
+                    return "hold", 1.0, None
             vote_counts: dict[str, int] = {"buy": 0, "sell": 0, "hold": 0}
             for signal in signals:
                 a = signal.get("action", "hold")
@@ -3148,12 +3165,22 @@ class TradingAgent:
             if winning_action == "sell":
                 reduce_pct = max(float(s.get("reduce_pct", 1.0)) for s in winning_sigs)
                 return "sell", reduce_pct, best.get("name")
-            # F1 fix: propagate winning signal's confidence as kelly_win_prob so
-            # _size_order can scale buy size in vote mode (previously always 0.0 → 0.1× floor)
+            # Propagate kelly_win_prob: prefer historical win rate over raw signal confidence
             if winning_action == "buy" and market_state is not None:
+                best_name = best.get("name", "")
+                _win_rate = None
+                try:
+                    from app.agents.performance import PerformanceTracker as _PT
+                    for _bs in self._broker_states.values():
+                        _trades = (_bs.strategy_trades or {}).get(best_name, [])
+                        if len(_trades) >= 10:
+                            _stats = _PT.compute_trade_stats(_trades)
+                            _win_rate = _stats.get("win_rate")
+                            break
+                except Exception:
+                    pass
                 best_conf = float(best.get("confidence", 0.0))
-                if best_conf > 0:
-                    market_state["kelly_win_prob"] = best_conf
+                market_state["kelly_win_prob"] = _win_rate if (_win_rate is not None and _win_rate > 0) else best_conf
             return winning_action, 1.0, best.get("name")
         weights = weights or {}
         # Orchestrator returns uniform 1.0 when disabled — use config weights instead

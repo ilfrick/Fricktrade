@@ -87,17 +87,7 @@ class TrendFollowingStrategy(Strategy):
 
     @staticmethod
     def _compute_rsi(close: np.ndarray, period: int = 14) -> float:
-        if close.size < period + 1:
-            return 50.0
-        deltas = np.diff(close[-(period + 1):])
-        gains = np.where(deltas > 0, deltas, 0.0)
-        losses = np.where(deltas < 0, -deltas, 0.0)
-        avg_gain = float(gains.mean())
-        avg_loss = float(losses.mean())
-        if avg_loss > 0:
-            rs = avg_gain / avg_loss
-            return 100.0 - (100.0 / (1.0 + rs))
-        return 100.0
+        return Strategy._wilder_rsi(list(close), period)
 
     def _compute_confidence(
         self,

@@ -41,7 +41,9 @@ class StatArbPairsStrategy(Strategy):
         )
 
     def generate_signal(self, market_state: dict) -> dict:
-        symbol = market_state.get("symbol")
+        symbol = market_state.get("symbol", "")
+        if "/" in (symbol or ""):
+            return {"action": "hold", "confidence": 0.0, "reason": "equity_only", "name": "stat_arb_pairs"}
         prices = market_state.get("prices", []) or []
         if not symbol or len(prices) < 3:
             return {"action": "hold", "name": "stat_arb_pairs"}
