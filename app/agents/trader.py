@@ -2395,9 +2395,11 @@ class TradingAgent:
                     # Guard: float64 representation of current_qty can be marginally
                     # larger than the broker's decimal storage, so floor may land at
                     # or above current_qty → broker rejects with insufficient_balance.
-                    # Step back one tick to guarantee we never request more than held.
+                    # At large scales (e.g. 51M SHIB), subtracting 1 tick is a no-op
+                    # because ULP ≈ 1.18e-8 — both values round to the same float64.
+                    # Use a relative safety margin instead (1e-9 ≈ 0.0000001%).
                     if qty >= current_qty:
-                        qty = max(0.0, (math.floor(current_qty * factor) - 1) / factor)
+                        qty = max(0.0, math.floor(current_qty * (1.0 - 1e-9) * factor) / factor)
                 else:
                     qty = int(raw_qty)
                 # Dust: positive holding too small to sell via qty-based order
@@ -2411,8 +2413,9 @@ class TradingAgent:
                     remainder_value = (current_qty - qty) * last_price
                     if 0 < remainder_value < min_notional_usd:
                         # Round up to full position — use same precision flooring
+                        # Apply same relative safety margin to avoid broker rejection.
                         if self._is_fractional(symbol):
-                            qty = math.floor(current_qty * factor) / factor
+                            qty = math.floor(current_qty * (1.0 - 1e-9) * factor) / factor
                         else:
                             qty = int(current_qty)
                 return (qty, None) if qty > 0 else (0, "position_limit")
