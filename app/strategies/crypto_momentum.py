@@ -96,7 +96,15 @@ class CryptoMomentumStrategy(Strategy):
                     vwap_mult = 1.1
                 else:                # below VWAP in uptrend — caution
                     vwap_mult = 0.85
-            confidence = min(base_conf * max(vol_boost, 0.5) * vwap_mult, 1.0)
+            # RSI overbought damper: crypto can stay overbought, but high RSI reduces
+            # entry quality — dampen confidence rather than gate entirely
+            rsi = self._wilder_rsi(list(close), 14)
+            rsi_mult = 1.0
+            if rsi > 80:
+                rsi_mult = 0.5   # strongly overbought — halve confidence
+            elif rsi > 72:
+                rsi_mult = 0.75  # moderately overbought — reduce confidence
+            confidence = min(base_conf * max(vol_boost, 0.5) * vwap_mult * rsi_mult, 1.0)
             return {
                 "action": "buy",
                 "confidence": float(confidence),

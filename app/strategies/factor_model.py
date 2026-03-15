@@ -15,7 +15,7 @@ class FactorParams:
     momentum_weight: float = 0.5
     liquidity_weight: float = 0.2
     volatility_weight: float = 0.1
-    mr_weight: float = 0.15
+    mr_weight: float = 0.2
     buy_threshold: float = 0.2
     sell_threshold: float = -0.2
 
@@ -27,7 +27,7 @@ class FactorModelStrategy(Strategy):
             momentum_weight=float(cfg.get("momentum_weight", 0.5)),
             liquidity_weight=float(cfg.get("liquidity_weight", 0.2)),
             volatility_weight=float(cfg.get("volatility_weight", 0.1)),
-            mr_weight=float(cfg.get("mr_weight", 0.15)),
+            mr_weight=float(cfg.get("mr_weight", 0.2)),
             buy_threshold=float(cfg.get("buy_threshold", 0.2)),
             sell_threshold=float(cfg.get("sell_threshold", -0.2)),
         )

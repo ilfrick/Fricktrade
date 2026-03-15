@@ -974,9 +974,14 @@ class TradingAgent:
         """Detect current market regime using HMM."""
         if self._regime_hmm is None:
             return None
-        # Extract return from market state
+        # Extract return from market state.
+        # Only update the regime buffer for a single reference instrument (BTC/USD for
+        # crypto cycles, SPY/QQQ for equity cycles) so the HMM sees a clean single-
+        # instrument return series rather than interleaved returns from 150 symbols.
         prices = market_state.get("prices", [])
-        if len(prices) >= 2:
+        symbol = market_state.get("symbol", "")
+        _is_ref = symbol in ("BTC/USD", "ETH/USD", "SPY", "QQQ")
+        if _is_ref and len(prices) >= 2:
             ret = (prices[-1] - prices[-2]) / prices[-2] if prices[-2] != 0 else 0.0
             self._regime_returns_buffer.append(ret)
             # Keep buffer size limited
@@ -2297,10 +2302,11 @@ class TradingAgent:
             if now_utc.hour < 4:
                 return 0.7
             return 1.0
-        # Equities (US Eastern = UTC-4 or UTC-5)
-        # Approximate ET from UTC (ignoring DST edge case — good enough for this filter)
-        et_hour = (now_utc.hour - 4) % 24
-        et_minute = now_utc.minute
+        # Equities — use proper DST-aware Eastern Time (handles EST/EDT automatically)
+        from zoneinfo import ZoneInfo as _ZI
+        _et = datetime.now(_ZI("America/New_York"))
+        et_hour = _et.hour
+        et_minute = _et.minute
         et_total = et_hour * 60 + et_minute
         # 9:30 ET = open; 9:30-9:35 (570-575 ET minutes) — no new entries (noise)
         if 570 <= et_total < 575 and action == "buy":
@@ -2351,12 +2357,16 @@ class TradingAgent:
         max_short_pct = float(self.cfg["risk"]["max_short_exposure_pct"])
         max_short_pct *= vol_scale * portfolio_scale * tod_scale
         # Half-Kelly position sizing using calibrated win probability.
-        # Always applied (floor 0.1×, ceil 1.0×) so that:
-        #   win_prob=0.0 (uncalibrated) → 0.1× → avoids blowing through venue caps
-        #   win_prob=0.8 → 0.3×;  win_prob=1.0 → 0.5× (hard ceiling)
+        #   win_prob=0.0 (uncalibrated) → 0.3× conservative fixed fraction
+        #   win_prob=0.5 → 0.3× (floor); win_prob=0.7 → 0.35×; win_prob=1.0 → 0.5×
+        # Floor raised from 0.1 to 0.3 — the old 0.1 floor caused near-zero sizing
+        # in 90%+ of trades because (2p-1)*0.5 < 0.1 for all p < 0.6.
         if action == "buy":
             win_prob = float(market_state.get("kelly_win_prob", 0.0) or 0.0)
-            kelly_scale = max(0.1, min(1.0, (2.0 * win_prob - 1.0) * 0.5))
+            if win_prob <= 0:
+                kelly_scale = 0.3  # uncalibrated: conservative fixed fraction
+            else:
+                kelly_scale = max(0.3, min(1.0, (2.0 * win_prob - 1.0) * 0.5))
             max_pos_pct *= kelly_scale
         allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
         limits = self.cfg.get("trading_limits", {})

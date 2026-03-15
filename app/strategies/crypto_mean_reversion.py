@@ -60,7 +60,7 @@ class CryptoMeanReversionStrategy(Strategy):
         # Bollinger Bands
         window = close[-self.params.bb_period :]
         sma = float(window.mean())
-        std = float(window.std(ddof=0))
+        std = float(window.std(ddof=1))
         lower_band = sma - self.params.bb_std * std
         upper_band = sma + self.params.bb_std * std
 
@@ -75,7 +75,11 @@ class CryptoMeanReversionStrategy(Strategy):
         _portfolio = market_state.get("portfolio") or {}
         position_qty = float((_portfolio.get("positions") or {}).get(symbol, {}).get("qty", 0.0))
         if position_qty > 0 and last >= sma:
-            return {"action": "sell", "confidence": 0.7, "name": "crypto_mean_reversion"}
+            # Scale exit confidence: higher when price is well past SMA (profit secured)
+            band_range = max(upper_band - lower_band, 1e-8)
+            sma_excess = (last - sma) / band_range
+            sell_conf = float(min(0.5 + sma_excess * 0.5, 0.9))
+            return {"action": "sell", "confidence": sell_conf, "name": "crypto_mean_reversion"}
 
         if last < lower_band and rsi < self.params.rsi_oversold and fast_drop:
             # Confidence scales with distance below lower band

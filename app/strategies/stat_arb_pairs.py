@@ -125,7 +125,7 @@ class StatArbPairsStrategy(Strategy):
                     continue
                 n_tested += 1
                 hedge_ratio, t_stat = self._cointegration_test(a_series, b_series)
-                if t_stat is not None and t_stat < -2.86:  # ~5% significance for ADF
+                if t_stat is not None and t_stat < -3.5:  # ~1% significance for ADF (Bonferroni-adjusted for many pairs)
                     n_passed += 1
                     candidates.append((symbols[i], symbols[j], hedge_ratio, t_stat))
         # Rank by most negative t-stat (strongest cointegration)

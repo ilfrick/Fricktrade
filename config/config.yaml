@@ -316,6 +316,7 @@ strategy:
       - crypto_mean_reversion
       - trend_following
       - top_movers_rf
+      - rl_policy
     alt_data_fear_greed_block: 20   # suppress crypto longs when F&G below this
     alt_data_oi_block: -5.0         # suppress crypto longs when OI change % below this
     alpha_decay_exit:

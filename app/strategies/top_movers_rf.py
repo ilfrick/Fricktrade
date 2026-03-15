@@ -578,14 +578,18 @@ class TopMoversRFStrategy(Strategy):
             volumes = frame["volume"].to_numpy(dtype=float)
             if closes.size <= warmup_bars + horizon_bars:
                 continue
-            day_low = float(np.min(lows))
             for t in range(warmup_bars, int(closes.size) - horizon_bars):
                 current = float(closes[t])
                 if current <= 0:
                     continue
                 future_h = highs[t + 1 : t + 1 + horizon_bars]
                 future_max = float(np.max(future_h)) if future_h.size else current
-                dist_to_day_low_pct = (current - day_low) / max(day_low, eps) * 100.0
+                # Use rolling 30-bar local low instead of full-day low to avoid
+                # look-ahead bias (the full-day low is known only at session end).
+                _lookback = 30
+                local_lows = lows[max(0, t - _lookback) : t + 1]
+                local_low = float(np.min(local_lows)) if local_lows.size else current
+                dist_to_day_low_pct = (current - local_low) / max(local_low, eps) * 100.0
                 future_rebound_pct = (future_max - current) / max(current, eps) * 100.0
                 target = 1 if (
                     dist_to_day_low_pct <= self._low_zone_tol_pct
