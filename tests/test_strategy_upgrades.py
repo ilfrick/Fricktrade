@@ -349,6 +349,7 @@ def test_pattern_atr_stop_uses_indicators():
     volumes = [200000, 200000, 200000, 200000, 200000, 200000, 200000, 200000, 500000]
 
     ms = {
+        "symbol": "TEST",
         "prices": prices,
         "highs": highs,
         "lows": lows,
@@ -361,9 +362,10 @@ def test_pattern_atr_stop_uses_indicators():
 
     sig = strat.generate_signal(ms)
     if sig["action"] == "buy":
-        assert strat.state.stop_price is not None
+        state = strat._states.get("TEST")
+        assert state is not None and state.stop_price is not None
         fixed_stop = 11.2 * (1 - 0.05)
-        assert strat.state.stop_price >= fixed_stop
+        assert state.stop_price >= fixed_stop
 
 
 def test_pattern_atr_stop_floor():
@@ -377,6 +379,7 @@ def test_pattern_atr_stop_floor():
     volumes = [200000] * 9
 
     ms = {
+        "symbol": "TEST2",
         "prices": prices,
         "highs": highs,
         "lows": lows,
@@ -389,8 +392,9 @@ def test_pattern_atr_stop_floor():
 
     sig = strat.generate_signal(ms)
     if sig["action"] == "buy":
+        state = strat._states.get("TEST2")
         fixed_stop = 15.0 * (1 - 0.05)
-        assert strat.state.stop_price >= fixed_stop
+        assert state is not None and state.stop_price >= fixed_stop
 
 
 def test_pattern_atr_stop_short_data():
@@ -406,6 +410,7 @@ def test_pattern_atr_stop_short_data():
     volumes = [200000, 200000, 500000]
 
     ms = {
+        "symbol": "TEST3",
         "prices": prices,
         "highs": highs,
         "lows": lows,

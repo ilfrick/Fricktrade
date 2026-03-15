@@ -80,6 +80,7 @@ class MacroRegime:
     confidence: float
     weight_overrides: dict[str, float] = field(default_factory=dict)
     rationale: str = ""
+    indicators: dict[str, str] = field(default_factory=dict)
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -208,6 +209,7 @@ class MacroRegimeAnalyzer:
                 confidence=float(data.get("confidence", 0.5)),
                 weight_overrides={k: float(v) for k, v in data.get("weight_overrides", {}).items()},
                 rationale=str(data.get("rationale", "")),
+                indicators=indicators,
             )
         except Exception as exc:
             logger.error("MacroRegime classification failed: %s", exc)

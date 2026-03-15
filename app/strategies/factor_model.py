@@ -51,9 +51,17 @@ class FactorModelStrategy(Strategy):
             lookback = min(10, returns.size)
             momentum = float(returns[-lookback:].mean()) if returns.size else 0.0
 
-        # Liquidity score
+        # Liquidity score — normalised to recent rolling average so the score
+        # reflects relative activity, not absolute dollar volume (which would
+        # permanently favour large-caps over small-caps).
         liquidity = float(sum(volumes[-3:])) if volumes else 0.0
-        liquidity_score = np.tanh(liquidity / 1_000_000.0)
+        if len(volumes) >= 20:
+            _avg_vol = float(np.mean(volumes[-20:])) * 3.0
+        elif volumes:
+            _avg_vol = float(np.mean(volumes)) * 3.0
+        else:
+            _avg_vol = 0.0
+        liquidity_score = np.tanh(liquidity / max(_avg_vol, 1.0)) if _avg_vol > 0 else 0.5
 
         # Volatility score
         vol = float(returns[-5:].std()) if returns.size >= 5 else float(returns.std()) if returns.size else 0.0

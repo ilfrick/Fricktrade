@@ -113,6 +113,7 @@ class AccountMetricsUpdater:
                     broker_name, new_deposits, (equity - broker_state.day_start_equity) / broker_state.day_start_equity * 100.0,
                 )
             broker_state.risk.update_daily_loss(day_pnl_pct)
+            broker_state.day_pnl_pct = day_pnl_pct
 
     def update(self, broker, broker_states: dict, broker_name: str, account: dict | None = None) -> dict | None:
         if account is None:

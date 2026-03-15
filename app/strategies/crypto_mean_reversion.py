@@ -73,8 +73,17 @@ class CryptoMeanReversionStrategy(Strategy):
 
         # Check if holding a position and price has reverted to midline
         _portfolio = market_state.get("portfolio") or {}
-        position_qty = float((_portfolio.get("positions") or {}).get(symbol, {}).get("qty", 0.0))
+        _pos_info = (_portfolio.get("positions") or {}).get(symbol, {})
+        position_qty = float(_pos_info.get("qty", 0.0))
         if position_qty > 0 and last >= sma:
+            # Only exit if meaningful profit has accumulated — prevents round-trips that
+            # barely cover transaction costs when price just kisses the SMA.
+            avg_entry = float(_pos_info.get("avg_entry") or 0.0)
+            min_profit_pct = 0.3  # require at least 0.3% profit before SMA exit
+            if avg_entry > 0:
+                profit_pct = (last - avg_entry) / avg_entry * 100.0
+                if profit_pct < min_profit_pct:
+                    return {"action": "hold", "confidence": 0.0, "name": "crypto_mean_reversion"}
             # Scale exit confidence: higher when price is well past SMA (profit secured)
             band_range = max(upper_band - lower_band, 1e-8)
             sma_excess = (last - sma) / band_range

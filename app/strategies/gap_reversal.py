@@ -89,12 +89,13 @@ class GapReversalStrategy(Strategy):
         # RSI on short period for intraday
         rsi = self._compute_rsi(close, self.params.rsi_period)
 
-        # Volume confirmation
+        # Volume confirmation — default True when history is sparse so gap signals
+        # fire during the first 4 bars of the session (the exact window gaps occur in).
         volumes = market_state.get("volumes", []) or []
-        vol_ok = False
+        vol_ok = True
         if len(volumes) >= 5:
             avg_vol = float(np.mean(volumes[-6:-1])) if len(volumes) > 5 else float(np.mean(volumes[:-1]))
-            vol_ok = avg_vol > 0 and float(volumes[-1]) >= avg_vol * self.params.volume_confirm_mult
+            vol_ok = avg_vol <= 0 or float(volumes[-1]) >= avg_vol * self.params.volume_confirm_mult
 
         # Gap DOWN reversal → BUY signal
         if gap_pct <= -self.params.min_gap_pct and rsi < self.params.rsi_oversold and vol_ok:

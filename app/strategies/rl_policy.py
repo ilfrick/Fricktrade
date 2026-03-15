@@ -130,10 +130,8 @@ class RLPolicyStrategy(Strategy):
 
         signal = {"action": "hold"}
         if action == 1:
-            self.position = 1.0
             signal["action"] = "buy"
         elif action == 2:
-            self.position = -1.0
             signal["action"] = "sell"
 
         # Extract value estimate and action probabilities for monitoring

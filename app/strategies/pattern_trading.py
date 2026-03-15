@@ -23,7 +23,7 @@ class _PositionState:
 class PatternTradingStrategy(Strategy):
     def __init__(self, cfg: dict):
         self.cfg = cfg
-        self.state = _PositionState()
+        self._states: dict[str, _PositionState] = {}
 
     def generate_signal(self, market_state: dict) -> dict:
         prices = market_state.get("prices", [])
@@ -31,30 +31,33 @@ class PatternTradingStrategy(Strategy):
         lows = market_state.get("lows", [])
         volumes = market_state.get("volumes", [])
         last_price = market_state.get("last_price")
+        symbol = market_state.get("symbol", "")
 
         if not prices or last_price is None:
-            return {"action": "hold"}
+            return {"action": "hold", "confidence": 0.0, "name": "pattern_trading"}
 
         if not self._passes_filters(market_state):
-            return {"action": "hold"}
+            return {"action": "hold", "confidence": 0.0, "name": "pattern_trading"}
+
+        state = self._states.get(symbol, _PositionState())
 
         # Re-hydrate state from portfolio on first call after restart to avoid
         # firing fresh buy signals on already-held positions.
-        if self.state.entry_price is None:
+        if state.entry_price is None:
             _portfolio = (market_state.get("portfolio") or {})
             _positions = (_portfolio.get("positions") or {})
-            _symbol = market_state.get("symbol", "")
-            if _symbol in _positions:
-                _qty = float(_positions[_symbol].get("qty", 0.0))
+            if symbol in _positions:
+                _qty = float(_positions[symbol].get("qty", 0.0))
                 if _qty > 0:
-                    _avg = float(_positions[_symbol].get("avg_entry") or last_price)
+                    _avg = float(_positions[symbol].get("avg_entry") or last_price)
                     _sp = float(self.cfg["risk"].get("stop_loss_pct", 0.05))
-                    self.state = _PositionState(
+                    state = _PositionState(
                         entry_price=_avg,
                         stop_price=_avg * (1.0 - _sp) if _avg > 0 else None,
                     )
+                    self._states[symbol] = state
 
-        if self.state.entry_price is None:
+        if state.entry_price is None:
             if self._entry_signal(prices, highs, lows, volumes, last_price):
                 stop_pct = float(self.cfg["risk"].get("stop_loss_pct", 0.05))
                 # ATR-based adaptive stop (2x ATR) with fixed stop as floor
@@ -69,11 +72,17 @@ class PatternTradingStrategy(Strategy):
                         atr_stop = last_price - 2.0 * atr_val
                 fixed_stop = last_price * (1.0 - stop_pct)
                 stop_price = max(atr_stop, fixed_stop)
-                self.state = _PositionState(entry_price=last_price, stop_price=stop_price)
-                return {"action": "buy"}
-            return {"action": "hold"}
+                self._states[symbol] = _PositionState(entry_price=last_price, stop_price=stop_price)
+                # Confidence: breakout strength above recent high, capped at 0.8
+                lookback = self._lookback_bars()
+                slice_h = highs[-lookback:-1] if len(highs) > lookback else highs[:-1]
+                recent_high_val = max(slice_h) if slice_h else last_price
+                breakout_pct = (last_price - recent_high_val) / recent_high_val * 100.0 if recent_high_val > 0 else 0.0
+                confidence = float(min(0.4 + breakout_pct / 2.0, 0.8))
+                return {"action": "buy", "confidence": confidence, "name": "pattern_trading"}
+            return {"action": "hold", "confidence": 0.0, "name": "pattern_trading"}
 
-        return self._manage_position(last_price)
+        return self._manage_position(symbol, last_price)
 
     def _passes_filters(self, market_state: dict) -> bool:
         selection = self.cfg["selection"]
@@ -164,31 +173,32 @@ class PatternTradingStrategy(Strategy):
         mult = float(self.cfg["entry"].get("volume_confirm_mult", 1.5))
         return volumes[-1] >= avg_vol * mult
 
-    def _manage_position(self, last_price: float) -> dict:
+    def _manage_position(self, symbol: str, last_price: float) -> dict:
         stop_pct = float(self.cfg["risk"].get("stop_loss_pct", 0.05))
         trail_pct = float(self.cfg["risk"].get("trailing_stop_pct", 0.02))
         take_profit_pct = float(self.cfg["risk"].get("partial_take_profit_pct", 0.10))
 
-        if self.state.entry_price is None:
-            return {"action": "hold"}
+        state = self._states.get(symbol)
+        if state is None or state.entry_price is None:
+            return {"action": "hold", "confidence": 0.0, "name": "pattern_trading"}
 
-        if self.state.stop_price is None:
-            self.state.stop_price = self.state.entry_price * (1.0 - stop_pct)
+        if state.stop_price is None:
+            state.stop_price = state.entry_price * (1.0 - stop_pct)
 
-        if self.state.trailing_stop is None:
-            self.state.trailing_stop = self.state.entry_price * (1.0 - trail_pct)
+        if state.trailing_stop is None:
+            state.trailing_stop = state.entry_price * (1.0 - trail_pct)
         else:
-            self.state.trailing_stop = max(self.state.trailing_stop, last_price * (1.0 - trail_pct))
+            state.trailing_stop = max(state.trailing_stop, last_price * (1.0 - trail_pct))
 
-        if not self.state.took_partial and last_price >= self.state.entry_price * (1.0 + take_profit_pct):
-            self.state.took_partial = True
-            return {"action": "sell", "reduce_pct": 0.5}
+        if not state.took_partial and last_price >= state.entry_price * (1.0 + take_profit_pct):
+            state.took_partial = True
+            return {"action": "sell", "reduce_pct": 0.5, "confidence": 0.7, "name": "pattern_trading"}
 
-        if last_price <= self.state.stop_price or last_price <= (self.state.trailing_stop or 0.0):
-            self.state = _PositionState()
-            return {"action": "exit"}
+        if last_price <= state.stop_price or last_price <= (state.trailing_stop or 0.0):
+            self._states.pop(symbol, None)
+            return {"action": "exit", "confidence": 0.9, "name": "pattern_trading"}
 
-        return {"action": "hold"}
+        return {"action": "hold", "confidence": 0.0, "name": "pattern_trading"}
 
     def _lookback_bars(self) -> int:
         return int(self.cfg["entry"].get("breakout_lookback_bars", 20))

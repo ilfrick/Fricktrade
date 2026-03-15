@@ -102,6 +102,7 @@ class BrokerState:
     day_start_date: date | None = None
     day_start_equity: float | None = None
     day_deposits_baseline: float = 0.0
+    day_pnl_pct: float = 0.0
     last_trade_at: datetime | None = None
     pending_entry_strategy: dict[str, dict[str, object]] = field(default_factory=dict)
     position_state: dict[str, dict[str, object]] = field(default_factory=dict)
@@ -330,7 +331,6 @@ class TradingAgent:
         self._portfolio_orchestrator = None
         self._tactical_meta_orch = None
         self._strategic_orch = None
-        self._risk_interpreter = None
         self._raw_news_cache: dict[str, list[dict]] = {}  # populated when news enrichment is added
         # Quote stream (real-time bid/ask data)
         self._quote_stream = None
@@ -1300,7 +1300,7 @@ class TradingAgent:
             if allowed_names != list(names) or (action_strategy and action_strategy not in allowed_names):
                 filtered_signals = [signal for signal in signals if signal.get("name") in allowed_names]
                 # Filter phantom short-entry signals (same logic as above)
-                if _cs_qty <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
+                if _cs_qty_meaningful <= 0 and not self._can_short(symbol, market_state.get("portfolio", {})):
                     filtered_signals = [s for s in filtered_signals if s.get("action") != "sell"]
                 filtered_weights = weights
                 if isinstance(weights, dict):
@@ -2768,10 +2768,11 @@ class TradingAgent:
                 self._live_reward_tracker.sync_positions(portfolio)
             except Exception as exc:
                 logging.warning("Live reward sync failed: %s", exc)
-        self._account_metrics.update(
-            self.broker, self._broker_states, self._broker_name,
-            account=self._account_snapshot if self._account_snapshot else None,
-        )
+        with self._lock:
+            self._account_metrics.update(
+                self.broker, self._broker_states, self._broker_name,
+                account=self._account_snapshot if self._account_snapshot else None,
+            )
         self._update_position_metrics(portfolio)
         if self._perf_tracker.enabled:
             brokers = portfolio.get("brokers", {})
@@ -3707,9 +3708,9 @@ class TradingAgent:
                         "rationale": cached.rationale,
                         "weight_overrides": cached.weight_overrides or {},
                         "age_minutes": round(age_min, 1),
-                        "vix": cached.indicators.get("vix", "?") if hasattr(cached, "indicators") else "?",
-                        "dgs10": cached.indicators.get("dgs10", "?") if hasattr(cached, "indicators") else "?",
-                        "dxy": cached.indicators.get("dxy", "?") if hasattr(cached, "indicators") else "?",
+                        "vix": cached.indicators.get("vix", "?"),
+                        "dgs10": cached.indicators.get("dgs10", "?"),
+                        "dxy": cached.indicators.get("dxy", "?"),
                     }
             except Exception:
                 pass
