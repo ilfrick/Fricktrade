@@ -317,21 +317,29 @@ def _is_sell_happy(model, eval_sets: list, window_size: int, feature_config: dic
     if not eval_sets:
         return False
     try:
-        probe_env = TradingEnv(
-            data=eval_sets[0] if not eval_sets[0].empty else eval_sets[-1],
-            window_size=window_size,
-            feature_config=feature_config,
-            random_start_pos_prob=1.0,
-        )
+        non_empty = [ds for ds in eval_sets if not ds.empty]
+        if not non_empty:
+            return False
         n_probes = 20
         sell_count = 0
+        probes_run = 0
+        import random as _random
         for _ in range(n_probes):
+            ds = _random.choice(non_empty)
+            probe_env = TradingEnv(
+                data=ds,
+                window_size=window_size,
+                feature_config=feature_config,
+                random_start_pos_prob=1.0,
+            )
             obs, _ = probe_env.reset()
             action, _ = model.predict(obs, deterministic=True)
             if int(action) == 2:  # 2 = sell
                 sell_count += 1
-        sell_rate = sell_count / n_probes
-        logging.info("Sell-happy gate: %.0f%% immediate sells on inherited positions (%d probes)", sell_rate * 100, n_probes)
+            probes_run += 1
+        sell_rate = sell_count / probes_run
+        logging.info("Sell-happy gate: %.0f%% immediate sells on inherited positions (%d probes, %d symbols)",
+                     sell_rate * 100, probes_run, len(non_empty))
         return sell_rate >= threshold
     except Exception as exc:
         logging.warning("Sell-happy gate check failed (%s); allowing publish.", exc)

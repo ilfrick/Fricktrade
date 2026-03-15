@@ -35,6 +35,7 @@ try:
     _PENDING_COUNT   = Gauge("meta_orch_pending_changes_count", "Changes queued, awaiting delay")
     _CYCLE_LATENCY   = Gauge("meta_orch_last_cycle_latency_seconds", "Last LLM call duration")
     _CHANGES_APPLIED = Counter("meta_orch_changes_applied_total", "Config changes applied", ["parameter"])
+    _CHANGES_FAILED  = Counter("meta_orch_changes_failed_total", "Config changes that failed to apply (path not found)", ["parameter"])
     _WEIGHT_GAUGE    = Gauge("meta_orch_strategy_weight", "Live strategy weight", ["strategy"])
     _OVERRIDE_WIN    = Gauge("meta_orch_llm_override_win_rate", "LLM override win rate (0-1)")
     _COMBINE_WIN     = Gauge("meta_orch_combine_win_rate", "Combine-signals win rate (0-1)")
@@ -448,6 +449,14 @@ class TacticalMetaOrchestrator:
         baseline_weights = strategic.get("strategy_weights") or {}
         corridors = strategic.get("weight_corridors") or {}
 
+        combine_mode = str((self._cfg.get("strategy") or {}).get("combine", "weighted"))
+        if combine_mode == "vote" and weight_changes:
+            logger.debug(
+                "TacticalMetaOrch: skipping %d weight change(s) — combine_mode is 'vote'",
+                len(weight_changes),
+            )
+            weight_changes = {}
+
         for param, new_val in weight_changes.items():
             new_val = float(new_val)
             # Enforce strategic corridor if baseline exists
@@ -546,6 +555,8 @@ class TacticalMetaOrchestrator:
                         param, old_val, new_val, change["rationale"])
         else:
             logger.warning("TacticalMetaOrch: failed to apply %s — path not found in cfg", param)
+            if _PROMETHEUS_OK:
+                _CHANGES_FAILED.labels(parameter=param).inc()
 
     # ------------------------------------------------------------------
     # Bounds validation

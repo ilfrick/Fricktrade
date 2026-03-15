@@ -172,6 +172,7 @@ class OrderQueue:
                             order_id=active_id,
                             side=self._active.side,
                             qty=self._active.qty,
+                            reserved_notional=float(self._active.notional or 0.0),
                         ))
                         self._cancel_requested.discard(active_id)
                         self._active = None

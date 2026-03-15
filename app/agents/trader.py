@@ -76,6 +76,7 @@ from app.utils.volatility import realized_volatility_pct
 
 _slog = StructuredLogger("trading_agent")
 from app.utils.ops_state import load_ops_state, ops_state_is_running, ops_state_is_sleeping
+from app.utils.gpu_state import is_gpu_disabled
 from app.utils.market import is_market_open, is_venue_extended
 from app.utils.restart import should_restart
 from app.agents.account_metrics import AccountMetricsUpdater
@@ -797,9 +798,13 @@ class TradingAgent:
         if _opp_cfg.get("enabled") and market_state is not None:
             _opp_elapsed = (datetime.now(timezone.utc) - opened_at).total_seconds() if opened_at else 0
             if _opp_elapsed >= float(_opp_cfg.get("min_hold_minutes", 60)) * 60:
-                _port = market_state.get("portfolio") or {}
-                _equity = float(_port.get("equity") or _port.get("account_value") or 1.0)
-                _gross = float(_port.get("gross_exposure") or 0.0)
+                # Use broker-scoped equity/exposure rather than cross-broker aggregate.
+                # broker_state.position_state has per-symbol qty and last price.
+                _equity = float(broker_state.equity_start or 1.0)
+                _gross = sum(
+                    abs(float(ps.get("qty", 0) or 0)) * float(ps.get("last_price") or broker_state.last_prices.get(sym, 0) or 0)
+                    for sym, ps in broker_state.position_state.items()
+                )
                 _total_exp_pct = (_gross / _equity * 100.0) if _equity > 0 else 0.0
                 if _total_exp_pct >= float(_opp_cfg.get("exposure_threshold_pct", 80)):
                     _ind = market_state.get("indicators") or {}
@@ -1411,7 +1416,7 @@ class TradingAgent:
                         if _lp is not None:
                             _should_exit, _exit_reason = self._check_position_exit(
                                 symbol, float(_lp), broker_state,
-                                market_state=market_state, signals=signals,
+                                market_state=market_state, signals=filtered_signals,
                             )
                             if _should_exit:
                                 action = "sell_to_close"
@@ -1474,10 +1479,25 @@ class TradingAgent:
                     return None
                 if self._cancel_pending_if_needed(symbol, action, broker=broker_name):
                     self._open_order_mgr.remove_pending(symbol, broker=broker_name)
+                # Register pending sell so the next cycle doesn't re-enter while broker
+                # position still shows qty > 0 (broker refresh lags close_position).
+                if _exit_qty > 0:
+                    _exit_ps_key = (broker_name, symbol)
+                    with self._pending_sell_qty_lock:
+                        self._pending_sell_qty[_exit_ps_key] = (
+                            self._pending_sell_qty.get(_exit_ps_key, 0.0) + _exit_qty
+                        )
                 try:
                     self.broker.close_position(symbol, broker=broker_name)
                 except Exception as _ce:
                     logging.warning("Exit close_position failed %s/%s: %s", broker_name, symbol, _ce)
+                    # Roll back the pending sell registration on failure
+                    if _exit_qty > 0:
+                        with self._pending_sell_qty_lock:
+                            _exit_ps_key = (broker_name, symbol)
+                            self._pending_sell_qty[_exit_ps_key] = max(
+                                0.0, self._pending_sell_qty.get(_exit_ps_key, 0.0) - _exit_qty
+                            )
                     self._record_exit_failure(broker_name, symbol)
                     self._emit_decision_trace(trace, "skip", "close_failed", "sizing")
                     return None
@@ -1785,7 +1805,12 @@ class TradingAgent:
                 _slices_enqueued = False
                 if slices:
                     order_id = None
-                    for order_slice in slices:
+                    # Only the last slice carries the full order_notional so that
+                    # _flush_order_responses releases the full reserved amount when
+                    # the last slice completes (handles partial-session restarts).
+                    # Earlier slices carry 0 notional — no release on their completion.
+                    for i, order_slice in enumerate(slices):
+                        slice_notional = order_notional if i == len(slices) - 1 else 0.0
                         order_queue.enqueue(
                             symbol,
                             action,
@@ -1794,7 +1819,7 @@ class TradingAgent:
                             limit_price=limit_price,
                             extended_hours=bool(market_state.get("market_extended", False)),
                             earliest_at=order_slice.earliest_at,
-                            notional=order_slice.qty * last_price,
+                            notional=slice_notional,
                             is_position_close=_is_closing_position,
                         )
                     _slices_enqueued = True
@@ -3102,7 +3127,11 @@ class TradingAgent:
                 winning_action = winners[0] if len(winners) == 1 else "hold"
             if winning_action == "hold":
                 return "hold", 1.0, None
-            winning_sigs = [s for s in signals if s.get("action") == winning_action]
+            winning_sigs = [
+                s for s in signals
+                if s.get("action") == winning_action
+                or (winning_action == "sell" and s.get("action") == "exit")
+            ]
             best = max(winning_sigs, key=lambda s: float(s.get("confidence", 0.0)))
             if winning_action == "sell":
                 reduce_pct = max(float(s.get("reduce_pct", 1.0)) for s in winning_sigs)

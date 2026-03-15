@@ -147,8 +147,14 @@ class BrokerRouter(Broker):
             if broker:
                 broker.cancel_order(order_id)
             return
-        for broker in self._brokers.values():
-            broker.cancel_order(order_id)
+        # No broker specified: try each broker and stop on first success to avoid
+        # flooding all brokers with cancel requests for a foreign order_id.
+        for name, broker in self._brokers.items():
+            try:
+                broker.cancel_order(order_id)
+                return
+            except Exception:
+                logging.debug("cancel_order: broker %s does not own order %s, trying next", name, order_id)
 
     def resolve_broker(self, symbol: str, strategy: str | None = None) -> str:
         routing = self._routing or {}
