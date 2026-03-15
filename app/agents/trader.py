@@ -1250,6 +1250,10 @@ class TradingAgent:
             # Dust positions (qty < 1e-6) are treated as not held so strategies
             # generate fresh buy signals instead of returning hold for a "held" symbol.
             _cs_qty_meaningful = _cs_qty if _cs_qty >= 1e-6 else 0.0
+            # Pre-assign broker_state using the hint so early references (last_market_state
+            # write below) have a valid object. broker_name/broker_state are re-resolved
+            # after signal combine in case routing changes.
+            broker_state = self._broker_state(strategy_broker)
             # Write last_market_state so _build_meta_orch_metrics can extract live
             # indicators (RSI, ATR, Hurst) for the tactical orchestrator health report.
             if _cs_qty_meaningful > 0:
