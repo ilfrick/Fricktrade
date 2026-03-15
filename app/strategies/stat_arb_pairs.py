@@ -80,6 +80,13 @@ class StatArbPairsStrategy(Strategy):
 
         confidence = float(np.clip(abs(z) / (self.params.z_entry * 1.5), 0.0, 1.0))
         if z >= self.params.z_entry:
+            # Long-only system: only vote sell if we actually hold this symbol.
+            # Without this check, stat_arb casts phantom sell votes that consume
+            # vote-tally space and suppress buy consensus on unrelated signals.
+            _portfolio = market_state.get("portfolio") or {}
+            _held = float((_portfolio.get("positions") or {}).get(symbol, {}).get("qty", 0) or 0)
+            if _held <= 0:
+                return {"action": "hold", "name": "stat_arb_pairs", "pair": other, "z_score": float(z)}
             return {"action": "sell", "name": "stat_arb_pairs", "pair": other, "z_score": float(z), "confidence": confidence}
         if z <= -self.params.z_entry:
             return {"action": "buy", "name": "stat_arb_pairs", "pair": other, "z_score": float(z), "confidence": confidence}

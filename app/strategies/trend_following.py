@@ -55,8 +55,9 @@ class TrendFollowingStrategy(Strategy):
             return {"action": "hold"}
         trend_strength = (fast - slow) / slow * 100.0
 
-        # RSI(14) — compute inline
-        rsi = self._compute_rsi(close)
+        # RSI(14) — prefer pre-computed indicator (from compute_all_indicators) to
+        # avoid redundant work; fall back to inline computation when not available.
+        rsi = float(indicators.get("rsi") or self._compute_rsi(close))
 
         # Volume confirmation — skipped for crypto (Alpaca bar volumes are platform-only,
         # not global exchange volume, and are unreliably thin on weekends).

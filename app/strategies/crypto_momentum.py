@@ -97,8 +97,9 @@ class CryptoMomentumStrategy(Strategy):
                 else:                # below VWAP in uptrend — caution
                     vwap_mult = 0.85
             # RSI overbought damper: crypto can stay overbought, but high RSI reduces
-            # entry quality — dampen confidence rather than gate entirely
-            rsi = self._wilder_rsi(list(close), 14)
+            # entry quality — dampen confidence rather than gate entirely.
+            # Prefer pre-computed indicator to avoid double-work; fall back to inline.
+            rsi = float(indicators.get("rsi") or self._wilder_rsi(list(close), 14))
             rsi_mult = 1.0
             if rsi > 80:
                 rsi_mult = 0.5   # strongly overbought — halve confidence

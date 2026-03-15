@@ -91,6 +91,11 @@ from app.portfolio import PortfolioOptimizer, PortfolioConstraints, RiskModel
 from app.strategies.confidence_calibrator import ConfidenceCalibrator
 
 
+# Macro regimes in which new entries are permitted. "crisis" is intentionally excluded
+# — the system holds existing positions but does not open new ones in tail-risk conditions.
+_ENTRY_ALLOWED_REGIMES: frozenset[str] = frozenset({"risk_on", "risk_off", "rotation", "range_bound"})
+
+
 @dataclass
 class BrokerState:
     risk: RiskManager
@@ -296,10 +301,9 @@ class TradingAgent:
         # PDT-blocked symbols: suppress sell retries until next trading day
         self._pdt_blocked: set[tuple[str, str]] = set()
         self._pdt_blocked_date: date | None = None
-        # Config strategy weights — used when orchestrator is disabled (returns uniform 1.0)
-        self._config_strategy_weights: dict[str, float] = dict(
-            self.cfg.get("orchestrator", {}).get("strategy_weights", {}) or {}
-        )
+        # _config_strategy_weights is a live view of cfg so TacticalMetaOrchestrator weight
+        # changes (which mutate cfg in-place) are immediately reflected without restart.
+        # Implemented as a property below; this placeholder keeps __init__ structure intact.
         # Pending sell qty tracking to prevent sell orders overshooting past zero
         self._pending_sell_qty: dict[tuple[str, str], float] = {}  # (broker, symbol) -> qty
         self._pending_sell_qty_lock = threading.Lock()
@@ -340,6 +344,11 @@ class TradingAgent:
         self._earnings_calendar_at: datetime | None = None
         # Alt data config
         self._alt_data_cfg: dict = {}
+        # Per-cycle fear/greed cache: avoids calling fetch_fear_greed() 150× per cycle
+        # (the underlying alt_data TTL cache prevents HTTP calls, but the overhead of
+        # 150 function calls + dict lookups per cycle is still wasteful)
+        self._cycle_fear_greed: float | None = None
+        self._cycle_fear_greed_at: datetime | None = None
         # Rebalance engine
         self._rebalance_engine = None
         self._signal_expected_returns: dict[str, float] = {}
@@ -347,6 +356,11 @@ class TradingAgent:
         self._init_quote_stream()
         self._init_rebalance_engine()
         self._load_checkpoint()
+
+    @property
+    def _config_strategy_weights(self) -> dict[str, float]:
+        """Live view of strategy weights from cfg — reflects TacticalMetaOrchestrator changes."""
+        return dict(self.cfg.get("orchestrator", {}).get("strategy_weights", {}) or {})
 
     def _init_llm(self) -> None:
         """Initialise LLM client and sub-modules if llm.enabled is true in config."""
@@ -499,10 +513,9 @@ class TradingAgent:
         sent_score = float(llm_sent.get("score", 0.5) if isinstance(llm_sent, dict) else 0.5)
         sent_mult = 0.85 + 0.3 * sent_score  # [0.85, 1.15] range
 
-        # Alt-data
-        alt = market_state.get("alt_data", {}) or {}
-        fear_greed = float(alt.get("fear_greed_index", 50) or 50)
-        oi_change = float(alt.get("oi_change_pct", 0.0) or 0.0)
+        # Alt-data: read flat keys written by _enrich_market_state (not nested under "alt_data")
+        fear_greed = float(market_state.get("fear_greed_index", 50) or 50)
+        oi_change = float(market_state.get("crypto_oi_change_pct", 0.0) or 0.0)
         fg_mult = 0.85 + 0.3 * (fear_greed / 100)  # 0.85 at extreme fear, 1.15 at extreme greed
 
         # Indicators
@@ -512,8 +525,8 @@ class TradingAgent:
         # High volatility penalty on confidence
         vol_mult = max(0.7, 1.0 - max(0.0, atr_pct - 0.02) * 10)
 
-        # Insider sentiment (equity only)
-        insider = float(alt.get("insider_net_sentiment", 0.0) or 0.0) if not is_crypto else 0.0
+        # Insider sentiment (equity only): _enrich_market_state writes flat key
+        insider = float(market_state.get("insider_sentiment", 0.0) or 0.0) if not is_crypto else 0.0
 
         for signal in signals:
             action = signal.get("action", "hold")
@@ -699,6 +712,7 @@ class TradingAgent:
             return False, ""
         avg_entry = float(avg_entry)
         risk_cfg = broker_state.risk.cfg
+        _now = datetime.now(timezone.utc)  # single timestamp for all elapsed-time checks below
 
         # Minimum hold time: suppress ALL exits for N minutes after position opens.
         # Prevents stop-outs from bid-ask spread noise on the first few bars.
@@ -706,7 +720,7 @@ class TradingAgent:
         if min_hold_minutes > 0:
             opened_at = pos.get("opened_at")
             if opened_at is not None:
-                elapsed = (datetime.now(timezone.utc) - opened_at).total_seconds()
+                elapsed = (_now - opened_at).total_seconds()
                 if elapsed < min_hold_minutes * 60:
                     return False, ""
 
@@ -767,7 +781,7 @@ class TradingAgent:
         if _alpha_cfg.get("enabled") and signals:
             _entry_strat = pos.get("strategy")
             _alpha_min_hold = float(_alpha_cfg.get("min_hold_minutes", 0) or 0)
-            _alpha_elapsed = (datetime.now(timezone.utc) - opened_at).total_seconds() if opened_at else 0
+            _alpha_elapsed = (_now - opened_at).total_seconds() if opened_at else 0
             if _entry_strat and _alpha_elapsed >= _alpha_min_hold * 60:
                 for _sig in signals:
                     if _sig.get("name") == _entry_strat and _sig.get("action") == "sell":
@@ -789,13 +803,13 @@ class TradingAgent:
             else:
                 _rh_horizon = _rh_base
             if opened_at is not None:
-                if (datetime.now(timezone.utc) - opened_at).total_seconds() > _rh_horizon * 60:
+                if (_now - opened_at).total_seconds() > _rh_horizon * 60:
                     return True, "time_exit"
         else:
             # Original fixed time exit
             horizon = float(self._strategy_params.get("position_horizon_minutes", 0) or 0)
             if horizon > 0 and opened_at is not None:
-                if (datetime.now(timezone.utc) - opened_at).total_seconds() > horizon * 60:
+                if (_now - opened_at).total_seconds() > horizon * 60:
                     return True, "time_exit"
 
         # --- Opportunity Cost Exit ---
@@ -803,7 +817,7 @@ class TradingAgent:
         # making room for stronger setups elsewhere.
         _opp_cfg = self._strategy_params.get("opportunity_cost_exit") or {}
         if _opp_cfg.get("enabled") and market_state is not None:
-            _opp_elapsed = (datetime.now(timezone.utc) - opened_at).total_seconds() if opened_at else 0
+            _opp_elapsed = (_now - opened_at).total_seconds() if opened_at else 0
             if _opp_elapsed >= float(_opp_cfg.get("min_hold_minutes", 60)) * 60:
                 # Use broker-scoped equity/exposure rather than cross-broker aggregate.
                 # broker_state.position_state has per-symbol qty and last price.
@@ -1378,10 +1392,28 @@ class TradingAgent:
                     if _cb_entry > 0 and _cb_lp is not None and float(_cb_lp) < _cb_entry:
                         _sym_dd = (_cb_entry - float(_cb_lp)) / _cb_entry * 100.0
                         if broker_state.risk.should_circuit_break(_sym_dd):
-                            self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
-                            logging.warning("Skipping %s: per-symbol drawdown %.1f%% hit", symbol, _sym_dd)
-                            self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
-                            return None
+                            _cb_qty = float(_cb_pos.get("qty", 0))
+                            if _cb_qty >= 1e-6:
+                                # Non-dust held position: force-exit immediately rather than
+                                # blocking all processing — the prior return None prevented
+                                # the stop from ever firing while the position kept losing.
+                                logging.warning(
+                                    "Circuit breaker %s/%s: %.1f%% drawdown — forcing sell_to_close",
+                                    broker_name, symbol, _sym_dd,
+                                )
+                                action = "sell_to_close"
+                                action_strategy = "circuit_breaker_exit"
+                                reduce_pct = 1.0
+                                if trace:
+                                    trace["circuit_breaker"] = True
+                                # Fall through to execution — do NOT return None
+                            else:
+                                self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
+                                logging.warning(
+                                    "Circuit breaker %s: %.1f%% drawdown (dust, skipping)", symbol, _sym_dd
+                                )
+                                self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
+                                return None
             if trace:
                 trace["orchestrator_selected"] = list(names)
                 trace["orchestrator_weights"] = list(weights) if isinstance(weights, (list, tuple)) else weights
@@ -2196,7 +2228,14 @@ class TradingAgent:
                 )
                 if side == "sell" and not _floors_to_zero and status in ("completed", "rejected", "canceled", "timed_out"):
                     _ps_key = (response.broker, response.symbol)
-                    _ps_resp_qty = float(response.qty or 0)
+                    # Use filled_qty for completed orders: a partial limit fill should only
+                    # release the filled portion; the remainder stays reserved until the
+                    # residual order resolves. Fall back to requested qty for non-fills.
+                    _ps_resp_qty = float(
+                        (getattr(response, "filled_qty", None) if status == "completed" else None)
+                        or response.qty
+                        or 0
+                    )
                     if _ps_resp_qty > 0 and _ps_key in self._pending_sell_qty:
                         with self._pending_sell_qty_lock:
                             self._pending_sell_qty[_ps_key] = max(
@@ -3187,7 +3226,6 @@ class TradingAgent:
             # rather than silently permitting them (prior blocklist had dead entries:
             # "recession" and "high_vol_crisis" are not valid regime names, so only
             # "crisis" ever matched).
-            _ENTRY_ALLOWED_REGIMES = frozenset({"risk_on", "risk_off", "rotation", "range_bound"})
             if not is_held and self._macro_regime is not None:
                 try:
                     _macro = self._macro_regime.get_regime(None)
@@ -4182,9 +4220,20 @@ class TradingAgent:
             try:
                 from app.data.alt_data import fetch_fear_greed, fetch_coinglass_oi, fetch_sec_insider_trades, insider_sentiment
                 if alt_cfg.get("fear_greed", {}).get("enabled", False):
-                    fg = fetch_fear_greed()
-                    if fg is not None:
-                        market_state["fear_greed_index"] = fg
+                    # Use per-cycle cache: fear_greed changes hourly, fetch once per
+                    # cycle (not once per symbol) to avoid 150 redundant calls.
+                    _fg_stale = (
+                        self._cycle_fear_greed is None
+                        or self._cycle_fear_greed_at is None
+                        or (datetime.now(timezone.utc) - self._cycle_fear_greed_at).total_seconds() > 60
+                    )
+                    if _fg_stale:
+                        _fg_val = fetch_fear_greed()
+                        if _fg_val is not None:
+                            self._cycle_fear_greed = _fg_val
+                            self._cycle_fear_greed_at = datetime.now(timezone.utc)
+                    if self._cycle_fear_greed is not None:
+                        market_state["fear_greed_index"] = self._cycle_fear_greed
                 is_crypto = "/" in symbol
                 if is_crypto and alt_cfg.get("coinglass", {}).get("enabled", False):
                     cg_cfg = alt_cfg["coinglass"]
@@ -4234,8 +4283,9 @@ class TradingAgent:
             equity_symbols = [s for s in self._symbol_mgr.symbols if "/" not in s]
             if not equity_symbols:
                 return
+            _max_cal_syms = int(av_cfg.get("max_symbols", 25))  # Alpha Vantage free tier: 25/day
             calendar = fetch_earnings_calendar(
-                equity_symbols[:25],  # free tier: 25 req/day; one bulk call
+                equity_symbols[:_max_cal_syms],
                 api_key,
                 str(av_cfg.get("base_url", "https://www.alphavantage.co/query")),
             )

@@ -54,9 +54,20 @@ class PatternTradingStrategy(Strategy):
                 if _qty > 0:
                     _avg = float(_positions[symbol].get("avg_entry") or last_price)
                     _sp = float(self.cfg["risk"].get("stop_loss_pct", 0.05))
+                    # Infer took_partial: if the position is already at or past the
+                    # partial TP level we would not have taken it yet on this restart —
+                    # mark it as already taken to prevent a duplicate partial exit.
+                    _ptp = float(self.cfg["risk"].get("partial_take_profit_pct", 0.10))
+                    _infer_took = (
+                        _ptp > 0
+                        and last_price is not None
+                        and _avg > 0
+                        and float(last_price) >= _avg * (1.0 + _ptp)
+                    )
                     state = _PositionState(
                         entry_price=_avg,
                         stop_price=_avg * (1.0 - _sp) if _avg > 0 else None,
+                        took_partial=_infer_took,
                     )
                     self._states[symbol] = state
 
