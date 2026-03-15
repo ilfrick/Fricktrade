@@ -710,6 +710,10 @@ class TopMoversRFStrategy(Strategy):
                 session["lows"],
                 session["volumes"],
             )
+            # Clip bars_seen to training range to avoid distribution shift:
+            # training used 0..cutoff_bars; inference accumulates unboundedly.
+            if "bars_seen" in entry_row:
+                entry_row["bars_seen"] = min(entry_row["bars_seen"], cutoff_bars)
             entry_score = _predict_proba(
                 self._bundle["models"]["entry"],
                 entry_row,

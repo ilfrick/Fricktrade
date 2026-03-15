@@ -101,11 +101,22 @@ class FactorModelStrategy(Strategy):
             else:
                 trend_quality = 0.5
 
+        # Normalize weights after Hurst-based adjustments so they always sum to 1.0
+        _total_w = eff_momentum_w + self.params.liquidity_weight + self.params.volatility_weight + eff_mr_w
+        if _total_w > 0:
+            eff_momentum_w /= _total_w
+            eff_liq_w = self.params.liquidity_weight / _total_w
+            eff_vol_w = self.params.volatility_weight / _total_w
+            eff_mr_w /= _total_w
+        else:
+            eff_liq_w = self.params.liquidity_weight
+            eff_vol_w = self.params.volatility_weight
+
         # Composite score
         score = (
             eff_momentum_w * momentum
-            + self.params.liquidity_weight * liquidity_score
-            + self.params.volatility_weight * vol_score
+            + eff_liq_w * liquidity_score
+            + eff_vol_w * vol_score
             + eff_mr_w * mr_score
         )
 

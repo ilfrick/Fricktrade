@@ -188,7 +188,7 @@ brokers:
       min_fee: 0.0
       spread_pct: 0.0
 risk:
-  enabled: false
+  enabled: true
   max_daily_loss_pct: 3.0
   crypto:
     max_daily_loss_pct: 5.0
@@ -310,7 +310,7 @@ strategy:
     min_hold_minutes: 15        # suppress all stop/take-profit exits for 15 min after entry
     exit_vote_threshold: 2     # vote mode: exit a held position when ≥N strategies say sell/exit
     buy_vote_threshold: 2      # vote mode: open a new position when ≥N strategies say buy (0=strict majority)
-    buy_vote_threshold_trending: 1  # in low_vol_trending regime, only 1 strategy needs to say buy (vs 2 normally)
+    buy_vote_threshold_trending: 2  # in low_vol_trending regime, require 2 strategies to agree (was 1 — fired on noise)
     crypto_eligible_strategies:
       - crypto_momentum
       - crypto_mean_reversion
@@ -326,7 +326,7 @@ strategy:
       enabled: true            # replace fixed position_horizon_minutes with Hurst-scaled hold
       base_minutes: 120         # baseline; replaces position_horizon_minutes when enabled
       trending_multiplier: 2.0  # H > hurst_trending_threshold → hold up to 240 min
-      mean_reverting_multiplier: 0.5  # H < hurst_mr_threshold → hold 60 min
+      mean_reverting_multiplier: 0.75  # H < hurst_mr_threshold → hold 90 min (was 60 — too short for crypto bounces)
       hurst_trending_threshold: 0.60
       hurst_mr_threshold: 0.45
     opportunity_cost_exit:
@@ -352,6 +352,7 @@ strategy:
       buy_threshold: 0.2
       sell_threshold: -0.2
     stat_arb_pairs:
+      enabled: false  # disabled: long-only mode produces unhedged directional bets; re-enable with allow_shorts: true
       lookback: 50
       z_entry: 1.5
       z_exit: 0.5
@@ -375,7 +376,7 @@ strategy:
       bb_period: 20
       bb_std: 2.0
       rsi_period: 14
-      rsi_oversold: 35.0  # relaxed from 25 — RSI rarely hits 25 in thin weekend markets
+      rsi_oversold: 30.0  # 35 catches normal pullbacks; 30 targets genuine oversold conditions
       drop_window_bars: 15
       hard_stop_pct: 3.0
     gap_reversal:

@@ -451,6 +451,14 @@ class BinanceBroker(Broker):
         return self._register_order(order, binance_sym)
 
     def _spot_close_position(self, symbol: str) -> None:
+        """Enforce wall-clock timeout via broker pool (same pattern as _spot_account)."""
+        _fut = self._broker_pool.submit(self._spot_close_position_inner, symbol)
+        try:
+            _fut.result(timeout=20)
+        except Exception as exc:
+            logging.warning("BinanceBroker: _spot_close_position timed out or failed for %s: %s", symbol, exc)
+
+    def _spot_close_position_inner(self, symbol: str) -> None:
         binance_sym = _to_binance_symbol(symbol)
         base = symbol.split("/")[0].upper() if "/" in symbol else symbol.upper()
         account = record_broker_call(

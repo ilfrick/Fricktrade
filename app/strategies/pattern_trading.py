@@ -38,6 +38,22 @@ class PatternTradingStrategy(Strategy):
         if not self._passes_filters(market_state):
             return {"action": "hold"}
 
+        # Re-hydrate state from portfolio on first call after restart to avoid
+        # firing fresh buy signals on already-held positions.
+        if self.state.entry_price is None:
+            _portfolio = (market_state.get("portfolio") or {})
+            _positions = (_portfolio.get("positions") or {})
+            _symbol = market_state.get("symbol", "")
+            if _symbol in _positions:
+                _qty = float(_positions[_symbol].get("qty", 0.0))
+                if _qty > 0:
+                    _avg = float(_positions[_symbol].get("avg_entry") or last_price)
+                    _sp = float(self.cfg["risk"].get("stop_loss_pct", 0.05))
+                    self.state = _PositionState(
+                        entry_price=_avg,
+                        stop_price=_avg * (1.0 - _sp) if _avg > 0 else None,
+                    )
+
         if self.state.entry_price is None:
             if self._entry_signal(prices, highs, lows, volumes, last_price):
                 stop_pct = float(self.cfg["risk"].get("stop_loss_pct", 0.05))

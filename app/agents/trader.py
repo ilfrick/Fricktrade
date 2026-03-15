@@ -2357,16 +2357,16 @@ class TradingAgent:
         max_short_pct = float(self.cfg["risk"]["max_short_exposure_pct"])
         max_short_pct *= vol_scale * portfolio_scale * tod_scale
         # Half-Kelly position sizing using calibrated win probability.
-        #   win_prob=0.0 (uncalibrated) → 0.3× conservative fixed fraction
-        #   win_prob=0.5 → 0.3× (floor); win_prob=0.7 → 0.35×; win_prob=1.0 → 0.5×
-        # Floor raised from 0.1 to 0.3 — the old 0.1 floor caused near-zero sizing
-        # in 90%+ of trades because (2p-1)*0.5 < 0.1 for all p < 0.6.
+        # Half-Kelly sizing: (2p-1)*0.5 scaled by calibrated win probability.
+        #   win_prob=0 (uncalibrated) → 0.15× fixed fraction
+        #   win_prob=0.55 → 0.10× (floor); win_prob=0.70 → 0.20×; win_prob=1.0 → 0.50×
+        # Floor is 0.10 (not 0.30 — the 0.30 floor was 6-15× Kelly for typical 52-55% edge).
         if action == "buy":
             win_prob = float(market_state.get("kelly_win_prob", 0.0) or 0.0)
             if win_prob <= 0:
-                kelly_scale = 0.3  # uncalibrated: conservative fixed fraction
+                kelly_scale = 0.15  # uncalibrated: reduced fraction until win_prob populated
             else:
-                kelly_scale = max(0.3, min(1.0, (2.0 * win_prob - 1.0) * 0.5))
+                kelly_scale = max(0.10, min(1.0, (2.0 * win_prob - 1.0) * 0.5))
             max_pos_pct *= kelly_scale
         allow_shorts = bool(self._strategy_params.get("allow_shorts", False))
         limits = self.cfg.get("trading_limits", {})
@@ -3148,6 +3148,14 @@ class TradingAgent:
                 _crypto_eligible = set(_strat_params_pre.get("crypto_eligible_strategies") or [])
                 if _crypto_eligible:
                     signals = [s for s in signals if s.get("name") in _crypto_eligible]
+            # Macro regime gate: suppress all new entries during crisis/recession regimes
+            if not is_held and self._macro_regime is not None:
+                try:
+                    _macro = self._macro_regime.get_regime(None)
+                    if _macro and _macro.name in ("crisis", "recession", "high_vol_crisis"):
+                        return "hold", 1.0, None
+                except Exception:
+                    pass
             # Alt-data pre-filter: suppress new crypto long entries in extreme fear + OI contraction
             if _is_crypto_vote and not is_held:
                 _alt_ms = market_state or {}

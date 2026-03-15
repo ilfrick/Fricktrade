@@ -117,7 +117,7 @@ def test_factor_mr_weight_in_params():
     """FactorParams should have mr_weight."""
     params = FactorParams()
     assert hasattr(params, "mr_weight")
-    assert params.mr_weight == 0.15
+    assert params.mr_weight == 0.2
 
 
 def test_factor_mr_weight_from_config():

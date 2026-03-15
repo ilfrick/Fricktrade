@@ -93,8 +93,9 @@ class TrendFollowingStrategy(Strategy):
             _portfolio = market_state.get("portfolio") or {}
             _held_qty = float((_portfolio.get("positions") or {}).get(symbol, {}).get("qty", 0.0))
             if _held_qty > 0:
-                # Overbought RSI exit
-                if rsi > 75:
+                # Overbought RSI exit: require RSI>80 AND trend weakening to avoid
+                # cutting strong trends (RSI 75-80 is normal in strong momentum)
+                if rsi > 80 and trend_strength is not None and trend_strength < 0.0:
                     return {"action": "sell", "confidence": 0.6, "trend_strength": trend_strength, "rsi": rsi}
                 # Bearish supertrend flip
                 if supertrend is not None and supertrend == -1 and trend_strength < 0:

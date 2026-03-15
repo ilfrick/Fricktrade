@@ -115,7 +115,6 @@ class CryptoMomentumStrategy(Strategy):
         if all_negative:
             # Long-only: signal to exit any existing position
             sell_conf = min(abs(vel_fast) / (per_bar_thr * 4.0), 1.0)
-            sell_conf = max(sell_conf, 0.4)
             return {"action": "sell", "confidence": float(sell_conf), "name": "crypto_momentum"}
 
         return {"action": "hold", "confidence": 0.0, "name": "crypto_momentum"}
