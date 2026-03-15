@@ -157,6 +157,11 @@ class BinanceBroker(Broker):
         self._order_symbol_map: dict[str, str] = {}
         # Ticker prices from last get_all_tickers() call; shared with _spot_positions_inner
         self._last_ticker_prices: dict[str, float] = {}
+        # Raw account balances from last _spot_account_inner call; reused by
+        # _spot_positions_inner and _spot_close_position_inner to avoid triple get_account().
+        # All three callers go through the single-worker _broker_pool so there are
+        # no concurrent writes — the GIL protects the reference assignment.
+        self._last_raw_balances: list[dict] = []
 
         # Persistent single-worker pool for account/position/order fetches.
         # max_workers=1 means at most one Binance call runs at a time; extra
@@ -336,6 +341,9 @@ class BinanceBroker(Broker):
         account = record_broker_call(
             self._name, "get_account", self.client.get_account
         )
+        # Cache raw balances so _spot_positions_inner / _spot_close_position_inner
+        # can reuse them without a second get_account() call.
+        self._last_raw_balances = account.get("balances", [])
         usdt_free = usdt_locked = 0.0
         usd_stable_free = usd_stable_locked = 0.0
         non_stable: list[tuple[str, float]] = []
@@ -388,11 +396,18 @@ class BinanceBroker(Broker):
             return getattr(self, "_last_spot_positions", [])
 
     def _spot_positions_inner(self) -> list[dict]:
-        account = record_broker_call(
-            self._name, "get_positions", self.client.get_account
-        )
+        # Reuse balances cached by the most recent _spot_account_inner call to avoid
+        # a redundant get_account() round-trip.  Fall back to a fresh call if the
+        # cache is empty (e.g., get_positions() called before get_account()).
+        if self._last_raw_balances:
+            balances = self._last_raw_balances
+        else:
+            account = record_broker_call(
+                self._name, "get_positions", self.client.get_account
+            )
+            balances = account.get("balances", [])
         positions: list[dict] = []
-        for balance in account.get("balances", []):
+        for balance in balances:
             asset = balance.get("asset", "")
             if asset in _BINANCE_STABLECOINS:
                 continue
@@ -461,11 +476,16 @@ class BinanceBroker(Broker):
     def _spot_close_position_inner(self, symbol: str) -> None:
         binance_sym = _to_binance_symbol(symbol)
         base = symbol.split("/")[0].upper() if "/" in symbol else symbol.upper()
-        account = record_broker_call(
-            self._name, "close_position", self.client.get_account
-        )
+        # Reuse cached balances when available; fall back to fresh call if stale.
+        if self._last_raw_balances:
+            balances = self._last_raw_balances
+        else:
+            account = record_broker_call(
+                self._name, "close_position", self.client.get_account
+            )
+            balances = account.get("balances", [])
         free_qty = 0.0
-        for balance in account.get("balances", []):
+        for balance in balances:
             if balance.get("asset") == base:
                 free_qty = float(balance.get("free", 0) or 0)
                 break

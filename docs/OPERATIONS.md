@@ -39,7 +39,7 @@ Access at http://localhost:3002 (admin / `GRAFANA_PASSWORD`).
 
 ### Per-Account Dashboard
 
-One dashboard per Alpaca account (`Realistic`, `Higher`). Key panels:
+One dashboard per configured Alpaca account. Key panels:
 
 | Panel | Metric | What to Watch |
 |-------|--------|---------------|
@@ -101,7 +101,7 @@ with open(f) as fh:
 | Field | Description |
 |-------|-------------|
 | `symbol` | Symbol being evaluated |
-| `broker` | Broker name (e.g., `alpaca:Realistic`) |
+| `broker` | Broker name (e.g., `alpaca:Main`) |
 | `action` | Final action taken: `buy`, `sell`, `hold`, `skip` |
 | `skip_reason` | Why skipped (if `action == "skip"`) |
 | `buy_votes`, `sell_votes` | Vote counts from strategies |

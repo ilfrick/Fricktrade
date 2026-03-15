@@ -114,6 +114,7 @@ class BrokerState:
     last_prices: dict[str, float] = field(default_factory=dict)
     last_bar_ts: dict[str, datetime] = field(default_factory=dict)
     buying_power: float = 0.0
+    price_histories: dict[str, list[float]] = field(default_factory=dict)
 
 
 class TradingAgent:
@@ -1145,6 +1146,17 @@ class TradingAgent:
                 market_state["indicators"] = _compute_ind(_ms_opens, _ms_highs, _ms_lows, _ms_closes, _ms_vols)
             except Exception as exc:
                 logging.debug("Indicator injection failed for %s: %s", symbol, exc)
+
+        # Update rolling price history for portfolio optimizer covariance estimation.
+        # Maintained outside the lock (GIL protects list.append on CPython).
+        _lp_for_hist = float(market_state.get("last_price") or 0)
+        if _lp_for_hist > 0:
+            _bs_for_hist = self._broker_states.get(strategy_broker)
+            if _bs_for_hist is not None:
+                _ph = _bs_for_hist.price_histories.setdefault(symbol, [])
+                _ph.append(_lp_for_hist)
+                if len(_ph) > 60:
+                    _bs_for_hist.price_histories[symbol] = _ph[-60:]
 
         # UNLOCKED: Run strategy inference (CPU heavy)
         signals = []
@@ -2518,11 +2530,19 @@ class TradingAgent:
                 return 1.0
             portfolio_cfg = self.cfg.get("portfolio", {})
             max_pos_pct = float(portfolio_cfg.get("constraints", {}).get("max_position_pct", 0.25))
-            # Collect symbols with price history for covariance estimation
+            # Collect symbols with price history for covariance estimation.
+            # Position dicts from brokers don't include price_history, so fall back
+            # to the rolling histories captured per-cycle in broker_state.price_histories.
             syms_with_prices = []
             returns_matrix = []
             for sym, pos in positions.items():
                 prices_list = pos.get("price_history") or []
+                if len(prices_list) < 10:
+                    for _bs in self._broker_states.values():
+                        _ph = _bs.price_histories.get(sym)
+                        if _ph and len(_ph) >= 10:
+                            prices_list = _ph
+                            break
                 if len(prices_list) < 10:
                     continue
                 arr = np.array(prices_list[-30:], dtype=float)
@@ -3149,11 +3169,16 @@ class TradingAgent:
                 _crypto_eligible = set(_strat_params_pre.get("crypto_eligible_strategies") or [])
                 if _crypto_eligible:
                     signals = [s for s in signals if s.get("name") in _crypto_eligible]
-            # Macro regime gate: suppress all new entries during crisis/recession regimes
+            # Macro regime gate: only allow new entries in favourable regimes.
+            # Allowlist approach fails closed — unknown or missing regime names block entries
+            # rather than silently permitting them (prior blocklist had dead entries:
+            # "recession" and "high_vol_crisis" are not valid regime names, so only
+            # "crisis" ever matched).
+            _ENTRY_ALLOWED_REGIMES = frozenset({"risk_on", "rotation", "range_bound"})
             if not is_held and self._macro_regime is not None:
                 try:
                     _macro = self._macro_regime.get_regime(None)
-                    if _macro and _macro.name in ("crisis", "recession", "high_vol_crisis"):
+                    if _macro and _macro.name not in _ENTRY_ALLOWED_REGIMES:
                         return "hold", 1.0, None
                 except Exception:
                     pass
@@ -3190,7 +3215,16 @@ class TradingAgent:
             else:
                 max_votes = max(vote_counts.values())
                 winners = [a for a, v in vote_counts.items() if v == max_votes]
-                winning_action = winners[0] if len(winners) == 1 else "hold"
+                if len(winners) == 1:
+                    winning_action = winners[0]
+                else:
+                    # Tie: use rl_policy as tiebreaker (it already voted, just
+                    # picks which tied side wins without double-counting).
+                    _rl_sig = next(
+                        (s for s in signals if s.get("name") == "rl_policy"), None
+                    )
+                    _rl_action = (_rl_sig.get("action", "hold") if _rl_sig else "hold")
+                    winning_action = _rl_action if _rl_action in winners else "hold"
             if winning_action == "hold":
                 return "hold", 1.0, None
             winning_sigs = [

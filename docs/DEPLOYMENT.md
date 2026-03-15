@@ -25,7 +25,7 @@ For GPU support: NVIDIA driver >= 525, `nvidia-container-toolkit` installed, Doc
 1. Sign up at [alpaca.markets](https://alpaca.markets)
 2. Create a **Paper Trading** account (free, no approval needed)
 3. Generate API keys under "API Keys" in your paper trading dashboard
-4. The default config uses two named accounts (`Realistic` and `Higher`) both pointing to the same Alpaca paper credentials — they share one API key but maintain separate `BrokerState` for risk and P&L tracking
+4. You can configure one or more named Alpaca accounts under `brokers.alpaca.accounts`. Each account shares the same API key but maintains separate `BrokerState` for independent risk and P&L tracking
 
 For live trading: create a live brokerage account, pass KYC, and replace the paper keys.
 
@@ -176,12 +176,10 @@ brokers:
     api_key: ${ALPACA_API_KEY}
     api_secret: ${ALPACA_API_SECRET}
     accounts:
-      - name: Realistic
+      - name: Main
         asset_filter: both      # both | crypto_only | equity_only
         risk:
           hard_stop_pct: 1.0    # Per-account risk override
-      - name: Higher
-        asset_filter: both
   binance:
     enabled: true               # Set false to disable Binance
     futures: false              # Spot only; set true for FAPI

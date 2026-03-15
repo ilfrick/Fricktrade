@@ -76,7 +76,7 @@ The architecture separates concerns into discrete layers: data ingestion, signal
 ┌──────────────────────────▼──────────────────────────────────┐
 │                    Broker Router                             │
 │  _broker_map: {name → Broker}  _broker_states: {name → BS}  │
-│  Parallel mode: both alpaca:Realistic + alpaca:Higher        │
+│  Parallel mode: multiple named Alpaca accounts               │
 │  binance: Spot demo (crypto only)                            │
 └──────────────────────────┬──────────────────────────────────┘
                            │
@@ -133,7 +133,7 @@ Each named broker account has a `BrokerState` dataclass holding:
 
 ### Broker Routing
 
-`execution.brokers.routing.mode: parallel` means both Alpaca accounts (`Realistic` and `Higher`) evaluate every symbol independently. Each account uses its own equity for position sizing (`buying_power_scaling: false`).
+`execution.brokers.routing.mode: parallel` means all configured Alpaca accounts evaluate every symbol independently. Each account uses its own equity for position sizing (`buying_power_scaling: false`).
 
 Symbol routing to Binance is handled by `build_symbols_by_broker()`, which assigns `/USDT`-quoted symbols to Binance and prevents them from appearing in Alpaca batches.
 

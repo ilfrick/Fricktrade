@@ -17,6 +17,8 @@ Exit: trailing stop or hold_days time-based exit (handled by risk manager).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from app.strategies.base import Strategy
 
 
@@ -29,6 +31,9 @@ class EarningsDriftStrategy(Strategy):
         self._min_volume_mult = float(cfg.get("min_volume_mult", 1.5))
         self._hold_days = int(cfg.get("hold_days", 20))
         self._trailing_stop_pct = float(cfg.get("trailing_stop_pct", 4.0))
+        # Per-symbol buy date tracking: prevents re-entry within hold_days window after
+        # a stop/TP closes the position while earnings_window is still "post".
+        self._last_buy: dict[str, datetime] = {}
 
     def generate_signal(self, market_state: dict) -> dict:
         symbol = market_state.get("symbol", "")
@@ -52,6 +57,17 @@ class EarningsDriftStrategy(Strategy):
             return {"action": "hold", "confidence": 0.0, "name": "earnings_drift",
                     "reason": f"rel_vol={rel_volume:.2f} < {self._min_volume_mult}"}
 
+        # Re-entry guard: don't re-buy within hold_days of the last buy on this symbol.
+        # Without this, a stop/TP that closes the position while earnings_window is still
+        # "post" immediately causes a new buy signal the next cycle.
+        now = datetime.now(timezone.utc)
+        last_buy_at = self._last_buy.get(symbol)
+        if last_buy_at is not None:
+            days_since = (now - last_buy_at).total_seconds() / 86400.0
+            if days_since < self._hold_days:
+                return {"action": "hold", "confidence": 0.0, "name": "earnings_drift",
+                        "reason": f"re-entry blocked: {days_since:.1f}d < {self._hold_days}d hold window"}
+
         # Confidence proportional to gap size, capped at 1.0
         # Larger gap → higher surprise → stronger drift signal
         raw_conf = min(gap_pct / (self._min_gap_pct * 3.0), 1.0)
@@ -59,6 +75,7 @@ class EarningsDriftStrategy(Strategy):
         if rel_volume >= self._min_volume_mult * 2:
             raw_conf = min(raw_conf + 0.1, 1.0)
 
+        self._last_buy[symbol] = now
         return {
             "action": "buy",
             "confidence": round(raw_conf, 3),

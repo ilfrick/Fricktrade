@@ -5,7 +5,7 @@
 
 Fricktrade is an automated algorithmic trading system for US equities (NYSE, Nasdaq) and crypto (24/7). It runs multiple signal-generating strategies in parallel, combines their votes, and routes orders through Alpaca and Binance brokers with layered risk controls, LLM-assisted oversight, and full observability.
 
-**Current mode**: Paper trading on Alpaca (two accounts: `Realistic` and `Higher`), with Binance Spot demo enabled.
+**Current mode**: Paper trading on Alpaca (one or more paper accounts), with Binance Spot demo enabled.
 
 ## What It Does
 
