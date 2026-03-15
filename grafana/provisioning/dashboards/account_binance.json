@@ -8,11 +8,46 @@
   "timezone": "browser",
   "panels": [
     {
-      "type": "stat",
-      "title": "Binance Connectivity",
-      "description": "Total successful API calls to Binance. Non-zero = connected.",
+      "type": "table",
+      "title": "Broker Market Status",
       "gridPos": {
         "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "broker_market_open{broker=\"binance\"}",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": "closed",
+                "1": "open"
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Connectivity",
+      "description": "Total successful API calls. Non-zero = connected.",
+      "gridPos": {
+        "x": 12,
         "y": 0,
         "w": 6,
         "h": 4
@@ -26,9 +61,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         },
         "colorMode": "background"
       },
@@ -37,14 +70,8 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
             ]
           },
           "mappings": []
@@ -56,7 +83,7 @@
       "type": "stat",
       "title": "API Errors (1h)",
       "gridPos": {
-        "x": 6,
+        "x": 18,
         "y": 0,
         "w": 6,
         "h": 4
@@ -70,9 +97,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         },
         "colorMode": "background"
       },
@@ -81,18 +106,9 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 10
-              }
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 10}
             ]
           }
         },
@@ -117,15 +133,13 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         }
       }
     },
     {
       "type": "stat",
-      "title": "Total Equity (USDT)",
+      "title": "Total Equity",
       "gridPos": {
         "x": 4,
         "y": 4,
@@ -140,9 +154,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         }
       },
       "fieldConfig": {
@@ -153,7 +165,7 @@
     },
     {
       "type": "stat",
-      "title": "Buying Power (USDT free)",
+      "title": "Buying Power",
       "gridPos": {
         "x": 8,
         "y": 4,
@@ -169,9 +181,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         }
       },
       "fieldConfig": {
@@ -198,9 +208,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         }
       },
       "fieldConfig": {
@@ -226,9 +234,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         }
       },
       "fieldConfig": {
@@ -254,9 +260,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         }
       }
     },
@@ -491,6 +495,60 @@
     },
     {
       "type": "table",
+      "title": "Active Broker",
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "broker_active{broker=\"binance\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Orchestrator Strategies",
+      "gridPos": {
+        "x": 6,
+        "y": 34,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "orchestrator_strategy_active",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
       "title": "Current Portfolio",
       "gridPos": {
         "x": 12,
@@ -578,16 +636,16 @@
     },
     {
       "type": "timeseries",
-      "title": "Binance API Calls (1m)",
+      "title": "Broker API Calls (1m)",
       "gridPos": {
         "x": 0,
-        "y": 34,
+        "y": 38,
         "w": 12,
         "h": 6
       },
       "targets": [
         {
-          "expr": "sum by (method, status) (increase(broker_requests_total{broker=\"binance\"}[1m]))",
+          "expr": "sum by (broker, method, status) (increase(broker_requests_total{broker=\"binance\"}[1m]))",
           "refId": "A"
         }
       ],
@@ -605,93 +663,128 @@
       }
     },
     {
-      "type": "timeseries",
-      "title": "Binance API Latency (p99, 5m)",
+      "type": "table",
+      "title": "Signal Metrics % (Latest)",
       "gridPos": {
         "x": 0,
-        "y": 40,
+        "y": 44,
         "w": 12,
-        "h": 6
+        "h": 8
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (method, le) (rate(broker_latency_seconds_bucket{broker=\"binance\"}[5m])))",
-          "legendFormat": "p99 {{method}}",
-          "refId": "A"
+          "expr": "signal_return_30m_pct",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
         },
         {
-          "expr": "histogram_quantile(0.50, sum by (method, le) (rate(broker_latency_seconds_bucket{broker=\"binance\"}[5m])))",
-          "legendFormat": "p50 {{method}}",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "axisPlacement": "auto"
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "type": "stat",
-      "title": "API Last Success (age)",
-      "description": "Seconds since last successful broker API call. Green = recent, red = stale.",
-      "gridPos": {
-        "x": 0,
-        "y": 46,
-        "w": 12,
-        "h": 4
-      },
-      "targets": [
-        {
-          "expr": "time() - broker_last_success_timestamp_seconds{broker=\"binance\", method=\"get_account\"}",
-          "legendFormat": "get_account",
-          "refId": "A"
+          "expr": "signal_return_60m_pct",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
         },
         {
-          "expr": "time() - broker_last_success_timestamp_seconds{broker=\"binance\", method=\"get_positions\"}",
-          "legendFormat": "get_positions",
-          "refId": "B"
+          "expr": "signal_early_volume_pct",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "signal_runup_pct",
+          "refId": "D",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "signal_drawdown_pct",
+          "refId": "E",
+          "instant": true,
+          "format": "table"
         }
       ],
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "orientation": "auto",
-        "textMode": "auto"
+        "showHeader": true
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 90
-              },
-              {
-                "color": "red",
-                "value": 300
-              }
-            ]
-          },
-          "mappings": []
+          "custom": {
+            "align": "auto"
+          }
         },
         "overrides": []
-      }
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "symbol",
+            "mode": "outer"
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Signal Metrics Abs (Latest)",
+      "gridPos": {
+        "x": 12,
+        "y": 44,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "signal_abs_move",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "signal_runup_abs",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "signal_drawdown_abs",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "symbol",
+            "mode": "outer"
+          }
+        }
+      ]
     }
   ]
 }
