@@ -167,6 +167,9 @@ brokers:
     accounts: []             # optional: named sub-accounts (same structure as alpaca.accounts)
     risk:
       max_crypto_exposure_pct: 95.0  # crypto-only broker — global 50% cap doesn't apply here
+      exposure_caps:
+        venues:
+          Crypto: 95.0  # override global 50% venue cap — Binance is crypto-only
     fees:
       commission_pct: 0.05  # 0.05% standard futures taker; 0.02% maker
       per_trade_fee: 0.0

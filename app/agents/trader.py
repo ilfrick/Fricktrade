@@ -1738,6 +1738,19 @@ class TradingAgent:
             # --- Entry-only risk gates (skipped for position closes) ---
             if not risk_disabled and not _is_closing_position:
                 caps_cfg = self.cfg.get("risk", {}).get("exposure_caps", {}) or {}
+                # Allow per-broker venue/sector cap overrides (e.g. Binance is crypto-only
+                # so its venue cap for Crypto should be 95%, not the global 50%).
+                _broker_base_caps = broker_name.split(":")[0]
+                _broker_caps_override = (
+                    (self.cfg.get("brokers", {}).get(_broker_base_caps, {}) or {})
+                    .get("risk", {}) or {}
+                ).get("exposure_caps", {}) or {}
+                if _broker_caps_override:
+                    caps_cfg = {
+                        **caps_cfg,
+                        "venues": {**(caps_cfg.get("venues") or {}), **(_broker_caps_override.get("venues") or {})},
+                        "sectors": {**(caps_cfg.get("sectors") or {}), **(_broker_caps_override.get("sectors") or {})},
+                    }
                 violates, _ = RiskManager.check_exposure_caps(
                     symbol, action, qty, last_price, portfolio, caps_cfg,
                     venue_fn=self._symbol_mgr.symbol_venue,
