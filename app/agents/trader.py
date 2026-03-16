@@ -295,6 +295,8 @@ class TradingAgent:
         self._exit_backoff_until: dict[tuple[str, str], datetime] = {}
         # Stuck-order cooldown: suppress buy re-submissions after timeout
         self._stuck_cooldown: dict[tuple[str, str], datetime] = {}
+        # Symbols confirmed non-fractionable by broker rejection; sized as integers thereafter
+        self._non_fractionable_symbols: set[str] = set()
         # Per-symbol stuck-count: blacklist symbol for 1h after 2 consecutive stuck buy timeouts
         self._stuck_timeout_counts: dict[tuple[str, str], int] = {}
         self._symbol_stuck_blacklist: dict[tuple[str, str], datetime] = {}
@@ -2310,6 +2312,14 @@ class TradingAgent:
                                 logging.debug("Dust conversion failed for %s/%s: %s", response.broker, response.symbol, _dust_exc)
                         else:
                             self._record_exit_failure(response.broker, response.symbol)
+                        if _rej_reason == "not_fractionable":
+                            # Alpaca says this equity doesn't support fractional qty.
+                            # Cache so _is_fractional() returns False and sizes as integer.
+                            self._non_fractionable_symbols.add(response.symbol)
+                            logging.warning(
+                                "not_fractionable %s/%s — will use integer qty from now on",
+                                response.broker, response.symbol,
+                            )
                         if _rej_reason == "pdt_protection":
                             self._pdt_blocked.add((response.broker, response.symbol))
                             logging.warning("PDT block recorded for %s/%s — suppressing sell retries", response.broker, response.symbol)
@@ -2423,9 +2433,12 @@ class TradingAgent:
         return 1.0
 
     def _is_fractional(self, symbol: str) -> bool:
-        """Crypto is always fractional; equities if fractional_shares: true in config."""
+        """Crypto is always fractional; equities if fractional_shares: true in config
+        and not confirmed non-fractionable by a prior broker rejection."""
         if "/" in symbol:
             return True
+        if symbol in self._non_fractionable_symbols:
+            return False
         return bool(self.cfg.get("trading_limits", {}).get("fractional_shares", False))
 
     def _size_order(

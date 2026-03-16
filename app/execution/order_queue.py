@@ -383,6 +383,8 @@ def _reject_reason(code: str, exc: Exception) -> str:
         return "insufficient_stablecoin"
     if "insufficient" in text or "insufficient buying power" in text:
         return "insufficient_cash"
+    if "not fractionable" in text or "is not fractionable" in text:
+        return "not_fractionable"  # Alpaca: asset doesn't support fractional qty
     if "cost basis" in text or "minimal amount" in text:
         return "min_order_notional"
     mapping = {
