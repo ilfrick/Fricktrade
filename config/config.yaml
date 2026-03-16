@@ -656,8 +656,8 @@ data:
     provider: alpaca
     feed: iex
     refresh_minutes: 1
-    max_symbols: 1000      # cap total active universe; splits proportionally across accounts
-    max_universe: 1000
+    max_symbols: 15000     # cap total active universe; splits proportionally across accounts
+    max_universe: 15000
     universe: alpaca_active_all  # equities + crypto; derived live from Alpaca account assets
     crypto_quote_currencies: [USD]  # only trade crypto pairs quoted in USD; add USDC/USDT if you hold stablecoin balances
     universe_price_filter: true
