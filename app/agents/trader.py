@@ -710,9 +710,10 @@ class TradingAgent:
         if not pos or float(pos.get("qty", 0)) <= 0:
             return False, ""
         avg_entry = pos.get("avg_entry")
-        if not avg_entry or float(avg_entry) <= 0:
-            return False, ""
-        avg_entry = float(avg_entry)
+        # avg_entry=None blocks price-based exits (stop/TP) but must NOT block
+        # time-based exits (time_exit, opportunity_cost) — those don't need entry price.
+        _avg_entry_valid = avg_entry is not None and float(avg_entry) > 0
+        avg_entry = float(avg_entry) if _avg_entry_valid else 0.0
         risk_cfg = broker_state.risk.cfg
         _now = datetime.now(timezone.utc)  # single timestamp for all elapsed-time checks below
 
@@ -752,23 +753,23 @@ class TradingAgent:
         partial_tp_pct = float(_crypto_cfg.get("partial_take_profit_pct") or risk_cfg.get("partial_take_profit_pct", 0) or 0)
 
         # Hard stop: price dropped X% from entry (fallback when ATR unavailable)
-        if hard_stop > 0 and last_price <= avg_entry * (1 - hard_stop / 100.0):
+        if _avg_entry_valid and hard_stop > 0 and last_price <= avg_entry * (1 - hard_stop / 100.0):
             return True, "hard_stop"
 
         # Trailing stop: price dropped X% from trail reference (peak or entry, whichever is higher)
         peak = float(pos.get("peak_price") or avg_entry)
-        if trailing_stop > 0:
+        if _avg_entry_valid and trailing_stop > 0:
             trail_ref = max(peak, avg_entry)
             if last_price <= trail_ref * (1 - trailing_stop / 100.0):
                 return True, "trailing_stop"
 
         # Take-profit: full exit when price >= entry * (1 + take_profit_pct/100)
-        if take_profit_pct > 0 and last_price >= avg_entry * (1 + take_profit_pct / 100.0):
+        if _avg_entry_valid and take_profit_pct > 0 and last_price >= avg_entry * (1 + take_profit_pct / 100.0):
             TAKE_PROFIT_EXITS.labels(symbol=symbol, reason="take_profit").inc()
             return True, "take_profit"
 
         # Partial take-profit: sell a fraction when first target hit, let rest run
-        if partial_tp_pct > 0 and not pos.get("took_partial"):
+        if _avg_entry_valid and partial_tp_pct > 0 and not pos.get("took_partial"):
             if last_price >= avg_entry * (1 + partial_tp_pct / 100.0):
                 pos["took_partial"] = True
                 TAKE_PROFIT_EXITS.labels(symbol=symbol, reason="partial_take_profit").inc()
