@@ -1137,6 +1137,16 @@ llm_orchestrator:
   exit_drawdown_pct_crypto: 1.5   # LLM may exit against hold vote when crypto position is down ≥ 1.5%
   exit_drawdown_pct_equity: 0.5   # LLM may exit against hold vote when equity position is down ≥ 0.5%
 
+health_reporter:
+  enabled: true
+  window_hours: 6                                      # report covers last N hours; also sleep interval between runs
+  output_dir: /data/reports/health
+  trader_metrics_url: http://trader:8001/metrics
+  compose_project: fricktrade                          # Docker Compose project name for container discovery
+  checkpoint_path: /data/checkpoints/trader.json
+  meta_orch_dir: /data/reports/meta_orch
+  decision_trace_dir: /data/reports/decision_trace
+
 tactical_meta_orchestrator:
   enabled: true
   interval_minutes: 15          # run every 15 minutes

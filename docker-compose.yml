@@ -256,6 +256,31 @@ services:
           devices:
             - capabilities: ["gpu"]
 
+  health-reporter:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    depends_on:
+      - docker-socket-proxy
+      - trader
+    environment:
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+    volumes:
+      - ./config:/app/config
+      - ./data:/data
+    command:
+      [
+        "python",
+        "/app/scripts/health_report.py",
+        "--config",
+        "/app/config/config.yaml"
+      ]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    restart: unless-stopped
+
   tests-when-closed:
     build:
       context: .
