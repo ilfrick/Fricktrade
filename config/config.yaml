@@ -656,8 +656,8 @@ data:
     provider: alpaca
     feed: iex
     refresh_minutes: 1
-    max_symbols: 15000     # cap total active universe; splits proportionally across accounts
-    max_universe: 15000
+    max_symbols: 500       # active set after pre-scan + AI filter; pre-scan reduces ~10k→500 before scoring
+    max_universe: 15000    # full equity universe loaded from Alpaca; pre-scan then narrows this down
     universe: alpaca_active_all  # equities + crypto; derived live from Alpaca account assets
     crypto_quote_currencies: [USD]  # only trade crypto pairs quoted in USD; add USDC/USDT if you hold stablecoin balances
     universe_price_filter: true
@@ -677,6 +677,15 @@ data:
       window: 20
       retrain_hours: 6
       max_inflight_seconds: 600
+      # Pre-scan: run a fast Alpaca snapshot pass to trim the full equity universe
+      # (~10k → ~500) before handing off to the AI filter. Crypto symbols always
+      # bypass the pre-scan and pass through directly.
+      pre_scan:
+        enabled: true
+        max_symbols: 1000          # keep top movers; AI filter further trims to max_symbols
+        price_min: 2.0             # skip penny stocks
+        relative_volume_min: 0.3   # relaxed — pre-scan is a coarse gate, AI filter is precise
+        min_shares_traded: 50000   # exclude truly illiquid tickers
       model_type: ppo
       model_path: /data/ai_symbol_filter.zip
       train_max_symbols: 100

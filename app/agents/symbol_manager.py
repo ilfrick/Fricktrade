@@ -19,6 +19,48 @@ except Exception:
     score_symbols = None
 
 
+def _prescan_then_score(universe, api_key, api_secret, ai_cfg_payload, brokers_cfg):
+    """Run a lightweight Alpaca-snapshot pre-scan to shrink equity universe before AI filter.
+
+    Separates equity and crypto; crypto symbols bypass the scan (no Alpaca snapshot
+    for /USD pairs). Equity symbols are filtered by price + relaxed volume thresholds
+    using a single batch of snapshot API calls (~100 symbols/call). Falls back to the
+    full equity universe if the scan returns nothing.
+    """
+    pre_scan_cfg = ai_cfg_payload.get("pre_scan") or {}
+    pre_max = int(pre_scan_cfg.get("max_symbols", 1000))
+    price_min = float(pre_scan_cfg.get("price_min", 2.0))
+    rel_vol_min = float(pre_scan_cfg.get("relative_volume_min", 0.3))
+    min_shares = float(pre_scan_cfg.get("min_shares_traded", 50_000))
+    feed = ai_cfg_payload.get("feed", "iex")
+
+    eq_uni = [s for s in universe if "/" not in s]
+    cr_uni = [s for s in universe if "/" in s]
+
+    if eq_uni and api_key and api_secret:
+        pre_filters = ScanFilters(
+            price_min=price_min,
+            price_max=float("inf"),
+            relative_volume_min=rel_vol_min,
+            premarket_gain_min_pct=0.0,
+            min_shares_traded=min_shares,
+        )
+        scanned = scan_symbols(
+            eq_uni,
+            api_key=api_key,
+            api_secret=api_secret,
+            feed=feed,
+            filters=pre_filters,
+            max_symbols=pre_max,
+        )
+        logging.info("AI pre-scan: equity %d → %d (+ %d crypto passed through)", len(eq_uni), len(scanned), len(cr_uni))
+        # Fallback: if pre-scan returned nothing, use original equity universe so AI filter
+        # still runs (better to score everyone than to trade blind).
+        universe = (scanned if scanned else eq_uni) + cr_uni
+
+    return score_symbols(universe, api_key, api_secret, ai_cfg_payload, brokers_cfg)
+
+
 class SymbolManager:
     """Manages active symbol selection, filtering, and venue resolution."""
 
@@ -487,9 +529,19 @@ class SymbolManager:
             signal_map: dict = {}
             with self._ai_filter_future_lock:
                 if self._ai_filter_future is None:
-                    logging.info("AI filter run starting; universe=%d", len(universe))
+                    pre_scan_cfg = ai_cfg.get("pre_scan") or {}
+                    use_prescan = pre_scan_cfg.get("enabled", False) and bool(api_key) and bool(api_secret)
+                    if use_prescan:
+                        ai_cfg_payload["pre_scan"] = pre_scan_cfg
+                        _submit_fn = _prescan_then_score
+                        logging.info(
+                            "AI filter run starting (with pre-scan); universe=%d", len(universe)
+                        )
+                    else:
+                        _submit_fn = score_symbols
+                        logging.info("AI filter run starting; universe=%d", len(universe))
                     self._ai_filter_future = self._ai_filter_executor.submit(
-                        score_symbols,
+                        _submit_fn,
                         universe,
                         api_key,
                         api_secret,

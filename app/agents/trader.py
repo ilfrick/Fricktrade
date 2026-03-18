@@ -4024,6 +4024,13 @@ class TradingAgent:
             "equity_peak": self._account_metrics.equity_peak,
             "broker_states": broker_states_payload,
             "confidence_calibrator": self._confidence_calibrator.to_dict(),
+            # Persist exit backoffs so sub-LOT_SIZE dust suppression survives restarts.
+            # Key: "broker||symbol" to avoid ambiguity with "/" in crypto symbols.
+            "exit_backoffs": {
+                f"{broker}||{symbol}": t.isoformat()
+                for (broker, symbol), t in self._exit_backoff_until.items()
+                if t > datetime.now(timezone.utc)
+            },
         }
         self._checkpoint_at = maybe_save_checkpoint("trader", payload, self.cfg, self._checkpoint_at)
 
@@ -4072,6 +4079,14 @@ class TradingAgent:
                             _epoch = datetime.now(timezone.utc) - timedelta(hours=24)
                             pos_restored["opened_at"] = (_oa - timedelta(hours=24)) if _oa is not None else _epoch
                             broker_state.position_state[sym] = pos_restored
+        # Restore exit backoffs (persisted to survive sub-LOT_SIZE dust loops across restarts).
+        _now_utc = datetime.now(timezone.utc)
+        for key, dt_str in (payload.get("exit_backoffs") or {}).items():
+            parts = key.split("||", 1)
+            if len(parts) == 2:
+                dt = _dt_from_str(dt_str)
+                if dt is not None and dt > _now_utc:
+                    self._exit_backoff_until[(parts[0], parts[1])] = dt
         calibrator_data = payload.get("confidence_calibrator")
         if isinstance(calibrator_data, dict):
             self._confidence_calibrator = ConfidenceCalibrator.from_dict(calibrator_data)

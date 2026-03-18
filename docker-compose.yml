@@ -79,6 +79,10 @@ services:
     command: ["python", "-m", "app.data.market_cache_service", "--config", "/app/config/config.yaml"]
     depends_on:
       - redis
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     labels:
       - "autoheal=true"
     restart: unless-stopped
