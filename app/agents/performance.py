@@ -176,15 +176,27 @@ class PerformanceTracker:
             prev_avg = prev.get("avg_entry")
             strategy = prev.get("strategy")
             if curr_qty > prev_qty:
-                if strategy is None:
+                # Detect fresh re-entry after dust: previous qty was < 1% of new qty
+                # (e.g. 0.007 FIL dust → 2050 FIL). Reset opened_at so time_exit
+                # doesn't fire immediately using the stale timestamp from the dust era.
+                _is_fresh_reentry = prev_qty > 0 and prev_qty < 0.01 * curr_qty
+                if strategy is None or _is_fresh_reentry:
                     strategy = self.consume_pending_entry_strategy(
                         symbol, broker_state, strategy_names
                     )
                 prev["qty"] = curr_qty
                 if curr_avg_entry is not None:
                     prev["avg_entry"] = curr_avg_entry
+                elif _is_fresh_reentry:
+                    # Binance Spot: no cost basis — fall back to last_price on fresh entry
+                    _lp_entry = last_prices.get(symbol)
+                    if _lp_entry:
+                        prev["avg_entry"] = _lp_entry
                 if strategy is not None:
                     prev["strategy"] = strategy
+                if _is_fresh_reentry:
+                    prev["opened_at"] = now
+                    prev["took_partial"] = False
                 _lp = last_prices.get(symbol)
                 if _lp is not None:
                     prev["peak_price"] = max(float(prev.get("peak_price") or 0), _lp)
