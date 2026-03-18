@@ -285,6 +285,26 @@ services:
           memory: 256M
     restart: unless-stopped
 
+  data-pruner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ./data:/data
+    command:
+      [
+        "python",
+        "/app/scripts/prune_old_data.py",
+        "--data-dir", "/data",
+        "--retention-days", "7",
+        "--interval-hours", "24"
+      ]
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    restart: unless-stopped
+
   tests-when-closed:
     build:
       context: .
