@@ -18,6 +18,13 @@ try:
 except Exception:
     score_symbols = None
 
+# Canonical set of stablecoin base currencies that should never be traded as
+# directional assets.  Applied by _sanitize_crypto_symbols in every code path
+# that builds the active symbol list.
+_CRYPTO_STABLECOIN_BASES: frozenset[str] = frozenset({
+    "USDC", "USDT", "USDG", "BUSD", "DAI", "TUSD", "FRAX", "PYUSD", "GUSD"
+})
+
 
 def _prescan_then_score(universe, api_key, api_secret, ai_cfg_payload, brokers_cfg):
     """Run a lightweight Alpaca-snapshot pre-scan to shrink equity universe before AI filter.
@@ -422,6 +429,7 @@ class SymbolManager:
         # LLM symbol filter: may fire pre-market (equity) or every N hours (crypto)
         llm_filtered = self.maybe_run_llm_filter(portfolio=portfolio)
         if llm_filtered is not None:
+            llm_filtered = self._sanitize_crypto_symbols(llm_filtered, dyn_cfg)
             ordered = self.merge_with_positions(llm_filtered, portfolio, int(dyn_cfg.get("max_symbols", len(llm_filtered))))
             self._symbols_by_strategy = {}
             self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)
@@ -457,24 +465,7 @@ class SymbolManager:
                 return
             if not crypto_syms:
                 return
-            # Filter to allowed quote currencies (default: USD only).
-            # USDC/USDT pairs require the stablecoin balance; without it every
-            # order fails with "insufficient balance for USDC/USDT".
-            quote_currencies = dyn_cfg.get("crypto_quote_currencies", ["USD"])
-            if quote_currencies:
-                allowed = {str(q).upper() for q in quote_currencies}
-                crypto_syms = [
-                    s for s in crypto_syms
-                    if "/" in s and s.split("/", 1)[1].upper() in allowed
-                ]
-            # Exclude stablecoin base currencies (USDC/USD, USDT/USD, USDG/USD …).
-            # These are valid Alpaca pairs but carry no directional signal and
-            # would generate spurious "price below min_price" blocks when priced at ~$1.
-            _stablecoin_bases = {"USDC", "USDT", "USDG", "BUSD", "DAI", "TUSD", "FRAX", "PYUSD", "GUSD"}
-            crypto_syms = [
-                s for s in crypto_syms
-                if "/" not in s or s.split("/", 1)[0].upper() not in _stablecoin_bases
-            ]
+            crypto_syms = self._sanitize_crypto_symbols(crypto_syms, dyn_cfg)
             if not crypto_syms:
                 return
             ordered = self.merge_with_positions(crypto_syms, portfolio, max_symbols)
@@ -509,6 +500,7 @@ class SymbolManager:
             max_age = interval_to_seconds(cache_interval)
             cached_symbols = self._market_cache.get_filtered_symbols(cache_interval, max_age_seconds=max_age)
             if cached_symbols:
+                cached_symbols = self._sanitize_crypto_symbols(cached_symbols, dyn_cfg)
                 ordered = self.merge_with_positions(cached_symbols, portfolio, max_symbols)
                 self._symbols_by_strategy = {}
                 self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)
@@ -621,6 +613,7 @@ class SymbolManager:
                         removed = before - len(ordered)
                         if removed > 0:
                             logging.info("AI filter coverage removed %d symbols without bars.", removed)
+                ordered = self._sanitize_crypto_symbols(ordered, dyn_cfg)
                 ordered = self.merge_with_positions(ordered, portfolio, max_symbols)
                 self._symbols_by_strategy = {}
                 self._symbols_by_broker = self.build_symbols_by_broker(ordered, portfolio, dyn_cfg)
@@ -655,7 +648,7 @@ class SymbolManager:
             max_symbols=max_symbols,
         )
         if global_candidates:
-            self._symbols_by_strategy["__global__"] = global_candidates
+            self._symbols_by_strategy["__global__"] = self._sanitize_crypto_symbols(global_candidates, dyn_cfg)
         for name in strategy_names:
             if name == "pattern_trading":
                 filters_cfg = self._cfg.get("pattern_trading", {}).get("selection", {})
@@ -671,7 +664,7 @@ class SymbolManager:
                 max_symbols=max_symbols,
             )
             if candidates:
-                self._symbols_by_strategy[name] = candidates
+                self._symbols_by_strategy[name] = self._sanitize_crypto_symbols(candidates, dyn_cfg)
         if self._symbols_by_strategy:
             self._symbols = self._symbols_by_strategy.get("__global__", self._symbols)
             self._dynamic_symbols = list(self._symbols)
@@ -779,6 +772,46 @@ class SymbolManager:
             return data
         return portfolio
 
+    @staticmethod
+    def _sanitize_crypto_symbols(
+        symbols: list[str],
+        dyn_cfg: dict,
+        held: set[str] | None = None,
+    ) -> list[str]:
+        """Remove disallowed crypto pairs from a symbol list.
+
+        Rules applied to every symbol containing "/":
+          - Quote currency must be in ``crypto_quote_currencies`` (default: USD).
+          - Base currency must not be a stablecoin (see _CRYPTO_STABLECOIN_BASES).
+
+        Equity symbols (no "/") pass through untouched.
+
+        ``held`` is an optional set of symbols that bypass both rules — they
+        must remain visible so position-exit logic can fire even for positions
+        accidentally acquired in disallowed pairs (e.g. CRV/USDC from a prior
+        session before this filter existed).
+        """
+        _held = held or set()
+        quote_currencies = dyn_cfg.get("crypto_quote_currencies", ["USD"])
+        allowed_quotes: set[str] | None = (
+            {str(q).upper() for q in quote_currencies} if quote_currencies else None
+        )
+        result: list[str] = []
+        for sym in symbols:
+            if "/" not in sym:
+                result.append(sym)
+                continue
+            if sym in _held:
+                result.append(sym)
+                continue
+            base, _, quote = sym.partition("/")
+            if allowed_quotes is not None and quote.upper() not in allowed_quotes:
+                continue
+            if base.upper() in _CRYPTO_STABLECOIN_BASES:
+                continue
+            result.append(sym)
+        return result
+
     def build_symbols_by_broker(self, ordered: list[str], portfolio: dict, dyn_cfg: dict) -> dict[str, list[str]]:
         from app.execution import routing as routing_utils
 
@@ -813,18 +846,18 @@ class SymbolManager:
             return str(b_cfg.get("asset_filter", "both")).lower()
 
         def _apply_broker_asset_filter(broker_name: str, syms: list[str]) -> list[str]:
+            held = _broker_held.get(broker_name, set())
             if "binance" in broker_name.lower():
                 # Only allow USD-quoted pairs (converted to USDT on Binance).
                 # Pass through already-held non-USD pairs so exit logic still fires.
-                held = _broker_held.get(broker_name, set())
                 return [s for s in syms if "/" in s and (s.upper().endswith("/USD") or s in held)]
             af = _asset_filter(broker_name)
             if af == "crypto_only":
-                return [s for s in syms if "/" in s and s.upper().endswith("/USD")]
+                return [s for s in syms if "/" in s and (s.upper().endswith("/USD") or s in held)]
             if af == "equity_only":
                 return [s for s in syms if "/" not in s]
-            # "both" (default): strip /USDT and other non-/USD crypto pairs
-            return [s for s in syms if "/" not in s or s.upper().endswith("/USD")]
+            # "both" (default): equities + /USD crypto; pass through held non-/USD for exits
+            return [s for s in syms if "/" not in s or s.upper().endswith("/USD") or s in held]
 
         # When buying_power_scaling is disabled every broker scans the full universe
         # independently — no per-broker symbol cap, no exclusive held-symbol assignment.
