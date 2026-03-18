@@ -4072,19 +4072,21 @@ class TradingAgent:
                 disabled = state.get("disabled_strategies")
                 if isinstance(disabled, list):
                     broker_state.disabled_strategies = {str(item) for item in disabled}
-                # Restore position_state: opened_at deserialised back to datetime.
-                # Backdate all loaded positions by 24h so they immediately clear
-                # min_hold_minutes — positions held before a restart are never "new".
-                # When opened_at was never serialised (old checkpoint or Binance None),
-                # substitute now-24h so time_exit and alpha_decay still fire correctly.
+                # Restore position_state: use the real opened_at from checkpoint so
+                # time_exit and alpha_decay see accurate hold durations.  For positions
+                # with no stored timestamp (Binance Spot which has no trade history API,
+                # or checkpoints predating opened_at serialisation) use now so they get
+                # a fresh min_hold window rather than appearing months old and triggering
+                # immediate time_exit loops.  The old -24h backdating caused opened_at
+                # to drift backwards by one day on every restart.
                 saved_pos_state = state.get("position_state")
+                _now_for_restore = datetime.now(timezone.utc)
                 if isinstance(saved_pos_state, dict):
                     for sym, pos in saved_pos_state.items():
                         if isinstance(pos, dict) and float(pos.get("qty", 0) or 0) > 0:
                             pos_restored = dict(pos)
                             _oa = _dt_from_str(pos.get("opened_at"))
-                            _epoch = datetime.now(timezone.utc) - timedelta(hours=24)
-                            pos_restored["opened_at"] = (_oa - timedelta(hours=24)) if _oa is not None else _epoch
+                            pos_restored["opened_at"] = _oa if _oa is not None else _now_for_restore
                             broker_state.position_state[sym] = pos_restored
         # Restore exit backoffs (persisted to survive sub-LOT_SIZE dust loops across restarts).
         _now_utc = datetime.now(timezone.utc)
