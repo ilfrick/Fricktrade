@@ -792,6 +792,14 @@ class SymbolManager:
         # Build asset_filter lookup: broker_name → "both"|"crypto_only"|"equity_only"
         brokers_cfg = self._cfg.get("brokers", {})
 
+        # Per-broker held positions: non-USD pairs that are already held must still be
+        # visible so position_exit logic fires for them (e.g. accidentally accumulated
+        # CRV/USDC from a previous session before this filter was tightened).
+        _broker_held: dict[str, set[str]] = {}
+        for _bn in broker_names:
+            _bp = self.portfolio_snapshot_for_broker_symbols(portfolio, _bn)
+            _broker_held[_bn] = set((_bp.get("positions") or {}).keys())
+
         def _asset_filter(broker_name: str) -> str:
             """Return asset_filter for a broker (e.g. 'alpaca:Realistic' → 'both')."""
             parts = broker_name.split(":", 1)
@@ -806,7 +814,10 @@ class SymbolManager:
 
         def _apply_broker_asset_filter(broker_name: str, syms: list[str]) -> list[str]:
             if "binance" in broker_name.lower():
-                return [s for s in syms if "/" in s]
+                # Only allow USD-quoted pairs (converted to USDT on Binance).
+                # Pass through already-held non-USD pairs so exit logic still fires.
+                held = _broker_held.get(broker_name, set())
+                return [s for s in syms if "/" in s and (s.upper().endswith("/USD") or s in held)]
             af = _asset_filter(broker_name)
             if af == "crypto_only":
                 return [s for s in syms if "/" in s and s.upper().endswith("/USD")]
