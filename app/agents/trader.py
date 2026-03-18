@@ -1413,6 +1413,13 @@ class TradingAgent:
                         if broker_state.risk.should_circuit_break(_sym_dd):
                             _cb_qty = float(_cb_pos.get("qty", 0))
                             if _cb_qty >= 1e-6:
+                                # Sub-LOT_SIZE positions have a floors_to_zero exit backoff set
+                                # after the first failed sell attempt.  Honour it here so the
+                                # circuit breaker does not loop every cycle on unsellable dust.
+                                if self._should_skip_exit(broker_name, symbol):
+                                    self._record_skip(symbol, "hold", "circuit_breaker_backoff", broker_name)
+                                    self._emit_decision_trace(trace, "skip", "circuit_breaker_backoff", "risk")
+                                    return None
                                 # Non-dust held position: force-exit immediately rather than
                                 # blocking all processing — the prior return None prevented
                                 # the stop from ever firing while the position kept losing.
