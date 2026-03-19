@@ -1411,18 +1411,15 @@ class TradingAgent:
                     if _cb_entry > 0 and _cb_lp is not None and float(_cb_lp) < _cb_entry:
                         _sym_dd = (_cb_entry - float(_cb_lp)) / _cb_entry * 100.0
                         if broker_state.risk.should_circuit_break(_sym_dd):
+                            # Honour any active exit backoff before attempting a forced sell.
+                            # Covers both floors_to_zero Binance dust and sub-1e-6 Alpaca dust.
+                            if self._should_skip_exit(broker_name, symbol):
+                                self._record_skip(symbol, "hold", "circuit_breaker_backoff", broker_name)
+                                self._emit_decision_trace(trace, "skip", "circuit_breaker_backoff", "risk")
+                                return None
                             _cb_qty = float(_cb_pos.get("qty", 0))
                             if _cb_qty >= 1e-6:
-                                # Sub-LOT_SIZE positions have a floors_to_zero exit backoff set
-                                # after the first failed sell attempt.  Honour it here so the
-                                # circuit breaker does not loop every cycle on unsellable dust.
-                                if self._should_skip_exit(broker_name, symbol):
-                                    self._record_skip(symbol, "hold", "circuit_breaker_backoff", broker_name)
-                                    self._emit_decision_trace(trace, "skip", "circuit_breaker_backoff", "risk")
-                                    return None
-                                # Non-dust held position: force-exit immediately rather than
-                                # blocking all processing — the prior return None prevented
-                                # the stop from ever firing while the position kept losing.
+                                # Non-dust held position: force-exit immediately.
                                 logging.warning(
                                     "Circuit breaker %s/%s: %.1f%% drawdown — forcing sell_to_close",
                                     broker_name, symbol, _sym_dd,
@@ -1434,9 +1431,13 @@ class TradingAgent:
                                     trace["circuit_breaker"] = True
                                 # Fall through to execution — do NOT return None
                             else:
+                                # Sub-1e-6 dust: can't sell. Suppress for 8h then re-check.
+                                self._exit_backoff_until[(broker_name, symbol)] = (
+                                    datetime.now(timezone.utc) + timedelta(hours=8)
+                                )
                                 self._record_skip(symbol, "hold", "circuit_breaker", broker_name)
                                 logging.warning(
-                                    "Circuit breaker %s: %.1f%% drawdown (dust, skipping)", symbol, _sym_dd
+                                    "Circuit breaker %s: %.1f%% drawdown (dust, suppressed 8h)", symbol, _sym_dd
                                 )
                                 self._emit_decision_trace(trace, "skip", "circuit_breaker", "risk")
                                 return None
