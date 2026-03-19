@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.brokers.config_utils import get_alpaca_account_cfg
+from app.data.binance_market_data import (
+    _build_binance_client_from_cfg,
+    fetch_binance_bars,
+)
 from app.data.market_cache import (
     MarketCache,
     build_market_cache_config,
@@ -44,6 +48,12 @@ def main() -> None:
     _configure_yfinance_cache(cache_cfg.file_dir)
 
     cache = MarketCache(cache_cfg.redis_url, cache_cfg.file_dir, ignore_staleness=cache_cfg.ignore_staleness)
+    # Build Binance client for crypto market data (crypto symbols must NOT go through yfinance)
+    binance_client = _build_binance_client_from_cfg(cfg)
+    if binance_client is None:
+        logging.warning("Market cache: Binance client unavailable; crypto symbols will not be cached.")
+    else:
+        logging.info("Market cache: Binance client ready for crypto data.")
     dyn_cfg = cfg.get("data", {}).get("dynamic_symbols", {}) or {}
     universe_cfg = dyn_cfg.get("universe", "alpaca_active")
     max_universe = int(dyn_cfg.get("max_universe", 50000))
@@ -107,27 +117,59 @@ def main() -> None:
             if last_at and (now - last_at).total_seconds() < interval_seconds:
                 continue
             lookback_days = lookbacks.get(interval, 1)
-            # Fetch bars and also get the list of failed symbols from yfinance
-            bars, newly_failed_symbols = fetch_yfinance_bars(
-                effective_universe,
-                lookback_days,
-                interval,
-                batch_size=batch_size,
-                lowercase=False,
-                drop_zero_volume=False,
-                delay_seconds=delay_seconds,
-            )
-            logging.debug("Market cache: Received newly_failed_symbols from fetch_yfinance_bars: %s", newly_failed_symbols)
-            # Update temporary_failed_symbols with new failures
-            for s in newly_failed_symbols:
-                temporary_failed_symbols[s] = now
-                logging.warning("Market cache: Temporarily blacklisting symbol '%s' due to yfinance error.", s)
+
+            # Split universe: crypto symbols (contain "/") go to Binance; equities go to yfinance.
+            # Sending crypto to yfinance causes TypeError failures and permanent blacklisting.
+            equity_symbols = [s for s in effective_universe if "/" not in s]
+            crypto_symbols = [s for s in effective_universe if "/" in s]
+
+            bars: dict = {}
+
+            # --- Equity bars via yfinance ---
+            if equity_symbols:
+                equity_bars, newly_failed_symbols = fetch_yfinance_bars(
+                    equity_symbols,
+                    lookback_days,
+                    interval,
+                    batch_size=batch_size,
+                    lowercase=False,
+                    drop_zero_volume=False,
+                    delay_seconds=delay_seconds,
+                )
+                bars.update(equity_bars)
+                logging.debug("Market cache: yfinance failed symbols: %s", newly_failed_symbols)
+                for s in newly_failed_symbols:
+                    temporary_failed_symbols[s] = now
+                    logging.warning("Market cache: Temporarily blacklisting symbol '%s' due to yfinance error.", s)
+
+            # --- Crypto bars via Binance ---
+            if crypto_symbols:
+                if binance_client is not None:
+                    crypto_bars = fetch_binance_bars(
+                        crypto_symbols,
+                        binance_client,
+                        interval,
+                        lookback_days,
+                    )
+                    bars.update(crypto_bars)
+                    logging.debug(
+                        "Market cache: Binance fetched %d/%d crypto symbols",
+                        len(crypto_bars),
+                        len(crypto_symbols),
+                    )
+                else:
+                    logging.debug(
+                        "Market cache: skipping %d crypto symbols (no Binance client)",
+                        len(crypto_symbols),
+                    )
 
             cache.set_bars(bars, interval, ttl_seconds=max_age_seconds)
             last_run[interval] = now
             logging.info(
-                "Market cache refreshed interval=%s symbols=%d lookback_days=%d",
+                "Market cache refreshed interval=%s equity=%d crypto=%d total=%d lookback_days=%d",
                 interval,
+                len([s for s in bars if "/" not in s]),
+                len([s for s in bars if "/" in s]),
                 len(bars),
                 lookback_days,
             )
