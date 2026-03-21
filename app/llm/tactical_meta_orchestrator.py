@@ -343,6 +343,10 @@ class TacticalMetaOrchestrator:
         self._last_strategic_baseline: dict = {}
         # Order flow counters — reset by trader each call
         self._order_flow_window: dict[str, int] = {}
+        # Per-parameter change cooldown: prevent parameter oscillation
+        # A parameter cannot be changed again for N minutes after last applied change.
+        self._param_change_cooldown_sec = int(tmo_cfg.get("param_change_cooldown_minutes", 60)) * 60
+        self._last_param_change: dict[str, datetime] = {}  # {param: last_applied_at}
         logger.info("TacticalMetaOrchestrator initialised (interval=%smin, delay=%smin)",
                     self._interval_sec // 60, self._apply_delay_sec // 60)
 
@@ -496,6 +500,15 @@ class TacticalMetaOrchestrator:
 
     def _enqueue_change(self, param: str, new_val: Any, rationale: str,
                         now: datetime, immediate: bool) -> None:
+        # Per-parameter cooldown: skip if this param was changed too recently
+        last_changed = self._last_param_change.get(param)
+        if last_changed and (now - last_changed).total_seconds() < self._param_change_cooldown_sec:
+            remaining = self._param_change_cooldown_sec - (now - last_changed).total_seconds()
+            logger.debug(
+                "TacticalMetaOrch: skipping %s — changed %d min ago (cooldown %d min remaining)",
+                param, (now - last_changed).total_seconds() // 60, remaining // 60,
+            )
+            return
         apply_at = now if immediate else now + timedelta(seconds=self._apply_delay_sec)
         with self._lock:
             # Deduplicate: replace any existing pending entry for same param
@@ -537,6 +550,7 @@ class TacticalMetaOrchestrator:
                 sw = self._cfg.setdefault("orchestrator", {}).setdefault("strategy_weights", {})
                 sw[strategy] = float(new_val)
                 self._log_applied(param, old_val, new_val, change["rationale"])
+                self._last_param_change[param] = datetime.now(timezone.utc)
                 if _PROMETHEUS_OK:
                     _WEIGHT_GAUGE.labels(strategy=strategy).set(float(new_val))
                     _CHANGES_APPLIED.labels(parameter=param).inc()
@@ -549,6 +563,7 @@ class TacticalMetaOrchestrator:
         applied = _set_nested(self._cfg, keys, new_val)
         if applied:
             self._log_applied(param, old_val, new_val, change["rationale"])
+            self._last_param_change[param] = datetime.now(timezone.utc)
             if _PROMETHEUS_OK:
                 _CHANGES_APPLIED.labels(parameter=param).inc()
             logger.info("TacticalMetaOrch applied %s: %s → %s | %s",

@@ -955,6 +955,7 @@ execution:
   symbol_executor_workers: 4
   stuck_cooldown_minutes: 15
   insufficient_stablecoin_cooldown_minutes: 5  # cooldown after insufficient_stablecoin rejection to stop per-cycle retry loop
+  stop_exit_reentry_cooldown_minutes: 30  # cooldown after trailing_stop/hard_stop/atr_stop exit to prevent immediate re-buy churn
   stuck_blacklist_after: 3      # consecutive timed-out buys before blacklist (raised from 2; demo API unreliable)
   stuck_blacklist_hours: 2      # hours to blacklist a symbol after repeated stuck orders
   limit_orders:
@@ -1160,6 +1161,7 @@ tactical_meta_orchestrator:
   enabled: true
   interval_minutes: 15          # run every 15 minutes
   apply_delay_minutes: 5        # delay before applying weights / stop / TP changes
+  param_change_cooldown_minutes: 60  # min interval between changes to the same parameter (prevents oscillation)
   backend: gemini
   model: gemini-2.5-flash
   session_reports_dir: /data/reports/session   # PostSessionAnalyst output dir
@@ -1176,12 +1178,12 @@ tactical_meta_orchestrator:
     strategy.params.regime_hold_minutes.base_minutes: [60, 480]
     # Risk: equity
     risk.hard_stop_pct:                              [0.5, 3.0]
-    risk.trailing_stop_pct:                          [1.0, 10.0]
+    risk.trailing_stop_pct:                          [1.5, 10.0]
     risk.take_profit_pct:                            [0.5, 5.0]
     risk.partial_take_profit_pct:                    [0.3, 3.0]
     # Risk: crypto
     risk.crypto.hard_stop_pct:                       [1.5, 6.0]
-    risk.crypto.trailing_stop_pct:                   [1.0, 10.0]
+    risk.crypto.trailing_stop_pct:                   [2.5, 10.0]
     risk.crypto.take_profit_pct:                     [2.0, 8.0]
     # LLM orchestrator
     llm_orchestrator.price_invalidation_pct:         [0.005, 0.03]

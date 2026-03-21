@@ -351,6 +351,7 @@ class TradingAgent:
         # 150 function calls + dict lookups per cycle is still wasteful)
         self._cycle_fear_greed: float | None = None
         self._cycle_fear_greed_at: datetime | None = None
+        self._cycle_correlation_map: dict[str, list[tuple[str, float]]] = {}
         # Rebalance engine
         self._rebalance_engine = None
         self._signal_expected_returns: dict[str, float] = {}
@@ -1427,6 +1428,13 @@ class TradingAgent:
                                 action = "sell_to_close"
                                 action_strategy = "circuit_breaker_exit"
                                 reduce_pct = 1.0
+                                # Re-entry cooldown after circuit breaker exit
+                                _reentry_cool = int(
+                                    self.cfg.get("execution", {}).get("stop_exit_reentry_cooldown_minutes", 30)
+                                )
+                                self._stuck_cooldown[(broker_name, symbol)] = (
+                                    datetime.now(timezone.utc) + timedelta(minutes=_reentry_cool)
+                                )
                                 if trace:
                                     trace["circuit_breaker"] = True
                                 # Fall through to execution — do NOT return None
@@ -1514,6 +1522,19 @@ class TradingAgent:
                                     "Position exit for %s: %s (reduce_pct=%.2f)", symbol, _exit_reason, reduce_pct
                                 )
                                 _slog.event("info", "position_exit", symbol=symbol, reason=_exit_reason, broker=broker_name, reduce_pct=reduce_pct)
+                                # Re-entry cooldown: after stop-loss exits, suppress re-buy
+                                # for N minutes to prevent immediate buy-sell churn loops.
+                                if _exit_reason in ("trailing_stop", "hard_stop", "atr_stop", "circuit_breaker_exit"):
+                                    _reentry_cool = int(
+                                        self.cfg.get("execution", {}).get("stop_exit_reentry_cooldown_minutes", 30)
+                                    )
+                                    self._stuck_cooldown[(broker_name, symbol)] = (
+                                        datetime.now(timezone.utc) + timedelta(minutes=_reentry_cool)
+                                    )
+                                    logging.info(
+                                        "Stop-exit re-entry cooldown: %s/%s suppressed for %d min after %s",
+                                        broker_name, symbol, _reentry_cool, _exit_reason,
+                                    )
                                 if trace:
                                     trace.update(
                                         action="sell_to_close",
@@ -2318,7 +2339,7 @@ class TradingAgent:
                                         _client.transfer_dust(asset=[_base])
                                         logging.info("Dust converted to BNB: %s/%s", response.broker, response.symbol)
                             except Exception as _dust_exc:
-                                logging.debug("Dust conversion failed for %s/%s: %s", response.broker, response.symbol, _dust_exc)
+                                logging.warning("Dust conversion failed for %s/%s: %s", response.broker, response.symbol, _dust_exc)
                         else:
                             self._record_exit_failure(response.broker, response.symbol)
                         if _rej_reason == "not_fractionable":
@@ -2944,6 +2965,9 @@ class TradingAgent:
         self._symbol_mgr.update_active_symbol_metrics(symbols, self._routing_cfg, self._get_broker_buying_power)
         self._open_order_mgr.refresh(self.broker, self._broker_map, symbols)
         self._maybe_force_liquidation(portfolio)
+        # Compute per-cycle cross-symbol correlation map for portfolio-aware strategies.
+        # Uses rolling price_histories from broker_state (up to 60 closes per symbol).
+        self._cycle_correlation_map = self._compute_correlation_map(portfolio)
         return symbols
 
     def _process_single_symbol(
@@ -2999,6 +3023,22 @@ class TradingAgent:
             self._enrich_market_state(market_state, portfolio, sym,
                                      news_snapshot=news_snapshot,
                                      orders_snapshot=orders_snapshot)
+
+            # Portfolio-level context: drawdown, day PnL, position concentration,
+            # cross-symbol correlations, held symbols list — lets strategies
+            # make portfolio-aware decisions.
+            _positions = portfolio.get("positions", {})
+            _held_symbols = [s for s, p in _positions.items() if float(p.get("qty", 0) or 0) > 0]
+            _corr_map = getattr(self, "_cycle_correlation_map", {}) or {}
+            market_state["portfolio_context"] = {
+                "day_pnl_pct": broker_state.day_pnl_pct,
+                "current_drawdown_pct": broker_state.current_drawdown_pct,
+                "position_count": len(_held_symbols),
+                "held_symbols": _held_symbols,
+                "disabled_strategies": list(broker_state.disabled_strategies),
+                "is_held": sym in _held_symbols,
+                "correlated_symbols": _corr_map.get(sym, []),
+            }
 
             if broker_override:
                 market_state["broker_override"] = broker_override
@@ -4387,6 +4427,64 @@ class TradingAgent:
             logging.debug("Earnings calendar refreshed for %d symbols", len(calendar))
         except Exception as exc:
             logging.debug("Earnings calendar refresh failed: %s", exc)
+
+    def _compute_correlation_map(self, portfolio: dict) -> dict[str, list[tuple[str, float]]]:
+        """Compute cross-symbol correlations from rolling price histories.
+
+        Returns {symbol: [(correlated_sym, corr), ...]} for held positions only,
+        sorted by absolute correlation descending. Only includes correlations > 0.5.
+        Light computation: ~150 symbols × 60 prices max.
+        """
+        try:
+            # Gather price histories from all broker states
+            histories: dict[str, list[float]] = {}
+            for bs in self._broker_states.values():
+                for sym, ph in bs.price_histories.items():
+                    if len(ph) >= 10:  # need minimum for meaningful correlation
+                        histories[sym] = ph
+            if len(histories) < 2:
+                return {}
+            # Only compute correlations for held symbols (keep it cheap)
+            held = set()
+            for p_sym, p_data in portfolio.get("positions", {}).items():
+                if float(p_data.get("qty", 0) or 0) > 0:
+                    held.add(p_sym)
+            if not held:
+                return {}
+            # Compute returns for common length
+            import numpy as np
+            symbols = list(histories.keys())
+            min_len = min(len(histories[s]) for s in symbols)
+            if min_len < 10:
+                return {}
+            min_len = min(min_len, 60)
+            returns = {}
+            for s in symbols:
+                prices = histories[s][-min_len:]
+                r = [(prices[i] - prices[i - 1]) / prices[i - 1] if prices[i - 1] != 0 else 0.0
+                     for i in range(1, len(prices))]
+                returns[s] = np.array(r)
+            result: dict[str, list[tuple[str, float]]] = {}
+            for sym in held:
+                if sym not in returns:
+                    continue
+                corrs = []
+                for other in symbols:
+                    if other == sym or other not in returns:
+                        continue
+                    r1, r2 = returns[sym], returns[other]
+                    l = min(len(r1), len(r2))
+                    if l < 5:
+                        continue
+                    c = float(np.corrcoef(r1[:l], r2[:l])[0, 1])
+                    if abs(c) > 0.5:
+                        corrs.append((other, round(c, 3)))
+                if corrs:
+                    corrs.sort(key=lambda x: abs(x[1]), reverse=True)
+                    result[sym] = corrs[:10]  # top 10 most correlated
+            return result
+        except Exception:
+            return {}
 
     def _recalculate_exposure(self, market_state: dict, portfolio: dict, symbol: str) -> None:
         self._calc_exposure_metrics(market_state, portfolio, symbol)

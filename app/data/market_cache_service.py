@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import gc
 import logging
 import os
 import time
@@ -164,15 +166,23 @@ def main() -> None:
                     )
 
             cache.set_bars(bars, interval, ttl_seconds=max_age_seconds)
+            del bars  # release DataFrame references before GC
             last_run[interval] = now
             logging.info(
                 "Market cache refreshed interval=%s equity=%d crypto=%d total=%d lookback_days=%d",
                 interval,
-                len([s for s in bars if "/" not in s]),
-                len([s for s in bars if "/" in s]),
-                len(bars),
+                len([s for s in effective_universe if "/" not in s]),
+                len([s for s in effective_universe if "/" in s]),
+                len(effective_universe),
                 lookback_days,
             )
+        # Force garbage collection + glibc malloc_trim to return freed heap
+        # pages to the OS, preventing monotonic RSS growth from pandas/yfinance.
+        gc.collect()
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            pass
         sleep_seconds = min(interval_to_seconds(interval) for interval in intervals) if intervals else 60
         time.sleep(max(int(sleep_seconds), 30))
 
