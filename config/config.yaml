@@ -198,7 +198,7 @@ risk:
     max_position_size_pct: 90.0
     max_crypto_exposure_pct: 50.0
     hard_stop_pct: 4.0
-    trailing_stop_pct: 1.5
+    trailing_stop_pct: 3.0
     take_profit_pct: 4.0
     circuit_breaker_drawdown_pct: 8.0
     vol_targeting:
@@ -1183,7 +1183,7 @@ tactical_meta_orchestrator:
     risk.partial_take_profit_pct:                    [0.3, 3.0]
     # Risk: crypto
     risk.crypto.hard_stop_pct:                       [1.5, 6.0]
-    risk.crypto.trailing_stop_pct:                   [2.5, 10.0]
+    risk.crypto.trailing_stop_pct:                   [2.0, 10.0]
     risk.crypto.take_profit_pct:                     [2.0, 8.0]
     # LLM orchestrator
     llm_orchestrator.price_invalidation_pct:         [0.005, 0.03]
