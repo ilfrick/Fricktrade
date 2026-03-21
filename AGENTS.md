@@ -52,7 +52,7 @@ This repo contains a Python trading agent for 24/7 crypto (with dormant equity s
 
 ### Signal combine mode
 
-`strategy.combine: vote`. All 3 enabled strategies run every cycle; each casts one unweighted vote (buy/sell/hold). Majority wins with configurable thresholds (`buy_vote_threshold: 2`, `exit_vote_threshold: 2`). Weights are completely ignored. Half-Kelly sizing with uncalibrated floor of 0.50.
+`strategy.combine: vote`. All 3 enabled strategies run every cycle; each casts one unweighted vote (buy/sell/hold). `buy_vote_threshold: 1` (any single strategy can trigger entry), `exit_vote_threshold: 2`. Weights are completely ignored. Half-Kelly sizing with uncalibrated floor of 0.50. Threshold=1 validated via 90-day backtest: +2.7% vs -10.7% at threshold=2.
 
 ### Active LLM components
 
