@@ -61,9 +61,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         },
         "colorMode": "background"
       },
@@ -72,14 +70,8 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
             ]
           },
           "mappings": []
@@ -105,9 +97,7 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         },
         "colorMode": "background"
       },
@@ -116,18 +106,9 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 10
-              }
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 10}
             ]
           }
         },
@@ -880,64 +861,6 @@
           }
         }
       ]
-    },
-    {
-      "type": "stat",
-      "title": "API Last Success (age)",
-      "description": "Seconds since last successful broker API call. Green = recent, red = stale.",
-      "gridPos": {
-        "x": 0,
-        "y": 58,
-        "w": 12,
-        "h": 4
-      },
-      "targets": [
-        {
-          "expr": "time() - broker_last_success_timestamp_seconds{broker=\"alpaca:Realistic\", method=\"get_account\"}",
-          "legendFormat": "get_account",
-          "refId": "A"
-        },
-        {
-          "expr": "time() - broker_last_success_timestamp_seconds{broker=\"alpaca:Realistic\", method=\"get_positions\"}",
-          "legendFormat": "get_positions",
-          "refId": "B"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "orientation": "auto",
-        "textMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 90
-              },
-              {
-                "color": "red",
-                "value": 300
-              }
-            ]
-          },
-          "mappings": []
-        },
-        "overrides": []
-      }
     }
   ]
 }
