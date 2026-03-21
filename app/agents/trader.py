@@ -737,7 +737,8 @@ class TradingAgent:
             atr = float(indicators.get("atr", 0.0) or 0.0)
             if atr > 0 and avg_entry > 0:
                 _crypto_cfg_atr = (risk_cfg.get("crypto") or {}) if is_crypto else {}
-                _hs = float(_crypto_cfg_atr.get("hard_stop_pct") or risk_cfg.get("hard_stop_pct", 0) or 0)
+                _equity_cfg_atr = (risk_cfg.get("equity") or {}) if not is_crypto else {}
+                _hs = float(_crypto_cfg_atr.get("hard_stop_pct") or _equity_cfg_atr.get("hard_stop_pct") or risk_cfg.get("hard_stop_pct", 0) or 0)
                 atr_mult = 2.5 if is_crypto else 1.5
                 atr_stop_price = avg_entry - atr * atr_mult
                 if _hs > 0:
@@ -745,13 +746,15 @@ class TradingAgent:
                 if last_price <= atr_stop_price:
                     return True, "atr_stop"
 
-        # Resolve crypto-specific stop/profit thresholds (wider bands than equity).
-        # risk.crypto.* values take precedence for crypto symbols; equity values used otherwise.
+        # Resolve asset-class-specific stop/profit thresholds.
+        # risk.crypto.* for crypto, risk.equity.* for equities, then global risk.* fallback.
         _crypto_cfg = (risk_cfg.get("crypto") or {}) if is_crypto else {}
-        hard_stop = float(_crypto_cfg.get("hard_stop_pct") or risk_cfg.get("hard_stop_pct", 0) or 0)
-        trailing_stop = float(_crypto_cfg.get("trailing_stop_pct") or risk_cfg.get("trailing_stop_pct", 0) or 0)
-        take_profit_pct = float(_crypto_cfg.get("take_profit_pct") or risk_cfg.get("take_profit_pct", 0) or 0)
-        partial_tp_pct = float(_crypto_cfg.get("partial_take_profit_pct") or risk_cfg.get("partial_take_profit_pct", 0) or 0)
+        _equity_cfg = (risk_cfg.get("equity") or {}) if not is_crypto else {}
+        _asset_cfg = _crypto_cfg or _equity_cfg
+        hard_stop = float(_asset_cfg.get("hard_stop_pct") or risk_cfg.get("hard_stop_pct", 0) or 0)
+        trailing_stop = float(_asset_cfg.get("trailing_stop_pct") or risk_cfg.get("trailing_stop_pct", 0) or 0)
+        take_profit_pct = float(_asset_cfg.get("take_profit_pct") or risk_cfg.get("take_profit_pct", 0) or 0)
+        partial_tp_pct = float(_asset_cfg.get("partial_take_profit_pct") or risk_cfg.get("partial_take_profit_pct", 0) or 0)
 
         # Hard stop: price dropped X% from entry (fallback when ATR unavailable)
         if _avg_entry_valid and hard_stop > 0 and last_price <= avg_entry * (1 - hard_stop / 100.0):
@@ -1412,7 +1415,12 @@ class TradingAgent:
                         _cb_lp = float(_cb_pp[-1]) if _cb_pp else None
                     if _cb_entry > 0 and _cb_lp is not None and float(_cb_lp) < _cb_entry:
                         _sym_dd = (_cb_entry - float(_cb_lp)) / _cb_entry * 100.0
-                        if broker_state.risk.should_circuit_break(_sym_dd):
+                        # Use asset-class-specific circuit breaker threshold
+                        _is_cb_crypto = "/" in symbol
+                        _cb_risk_cfg = broker_state.risk.cfg
+                        _cb_asset_cfg = (_cb_risk_cfg.get("crypto") or {}) if _is_cb_crypto else (_cb_risk_cfg.get("equity") or {})
+                        _cb_threshold = float(_cb_asset_cfg.get("circuit_breaker_drawdown_pct") or _cb_risk_cfg.get("circuit_breaker_drawdown_pct", 100) or 100)
+                        if _sym_dd >= _cb_threshold:
                             # Honour any active exit backoff before attempting a forced sell.
                             # Covers both floors_to_zero Binance dust and sub-1e-6 Alpaca dust.
                             if self._should_skip_exit(broker_name, symbol):

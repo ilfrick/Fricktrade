@@ -203,6 +203,12 @@ risk:
     circuit_breaker_drawdown_pct: 8.0
     vol_targeting:
       target_vol_pct: 4.0
+  equity:
+    hard_stop_pct: 2.5
+    trailing_stop_pct: 8.0
+    take_profit_pct: 3.0
+    partial_take_profit_pct: 1.5
+    circuit_breaker_drawdown_pct: 10.0
   max_position_size_pct: 90.0
   max_portfolio_leverage: 3.0
   max_short_exposure_pct: 30.0
@@ -344,8 +350,8 @@ strategy:
       liquidity_weight: 0.2
       volatility_weight: 0.1
       mr_weight: 0.15
-      buy_threshold: 0.2
-      sell_threshold: -0.2
+      buy_threshold: 0.4
+      sell_threshold: -0.3
     stat_arb_pairs:
       enabled: false  # disabled: long-only mode produces unhedged directional bets; re-enable with allow_shorts: true
       lookback: 50
@@ -556,23 +562,23 @@ backtest:
     - BTC/USD
     - ETH/USD
     - SOL/USD
-    - XRP/USD
-    - ADA/USD
     - DOGE/USD
+    - ADA/USD
     - AVAX/USD
     - LINK/USD
     - DOT/USD
+    - MATIC/USD
     - UNI/USD
+    - SHIB/USD
+    - XRP/USD
     - LTC/USD
-    - BCH/USD
-    - AAVE/USD
-    - FIL/USD
-    - RENDER/USD
-    - ONDO/USD
     - NEAR/USD
     - ATOM/USD
+    - FIL/USD
+    - APT/USD
     - ARB/USD
     - OP/USD
+    - SUI/USD
   commission_pct: 0.10
   slippage_bps: 5
   spread_bps: 10
