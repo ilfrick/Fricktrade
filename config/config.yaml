@@ -143,14 +143,14 @@ brokers:
     api_secret: ${ALPACA_API_SECRET}
     accounts:
     - name: Realistic
-      asset_filter: both        # both | crypto_only | equity_only
+      asset_filter: crypto_only  # both | crypto_only | equity_only
       risk:
         hard_stop_pct: 1.0
       reward:
         time_penalty_weight: 0.8
         time_normalizer: 240.0
     - name: Higher
-      asset_filter: both        # both | crypto_only | equity_only
+      asset_filter: crypto_only  # both | crypto_only | equity_only
     fees:
       commission_pct: 0.0
       per_trade_fee: 0.0
@@ -204,9 +204,9 @@ risk:
     vol_targeting:
       target_vol_pct: 4.0
   max_position_size_pct: 90.0
-  max_portfolio_leverage: 1.5
+  max_portfolio_leverage: 3.0
   max_short_exposure_pct: 30.0
-  max_positions: 30
+  max_positions: 15
   cooldown_seconds: 5
   hard_stop_pct: 0.8
   trailing_stop_pct: 5.0
@@ -215,7 +215,7 @@ risk:
   partial_take_profit_pct: 1.0
   partial_take_profit_ratio: 0.5
   vol_targeting:
-    enabled: true
+    enabled: false
     target_vol_pct: 2.0
     min_scale: 0.5
     max_scale: 1.5
@@ -229,13 +229,13 @@ risk:
     max_spread_pct: 1.0
     volume_haircut_pct: 50.0
   var:
-    enabled: true
+    enabled: false
     window: 60
     confidence: 0.95
     max_var_pct: 4.0
     max_cvar_pct: 6.0
   exposure_caps:
-    enabled: true
+    enabled: false
     venues:
       NYSE: 60.0      # max 60% in NYSE-listed equities
       Nasdaq: 60.0    # max 60% in Nasdaq-listed equities
@@ -278,22 +278,16 @@ trading_limits:
   min_notional: 10.0         # minimum USD order value; Alpaca crypto minimum is $10
   crypto_order_margin: 0.97  # safety haircut on crypto buy notional to absorb price drift between sizing and market-order fill
 strategy:
-  name: trend_following
+  name: crypto_momentum
   names:
-  - trend_following
-  - factor_model
-  - pattern_trading
-  - stat_arb_pairs
-  - top_movers_rf
   - crypto_momentum
   - crypto_mean_reversion
-  - gap_reversal
-  - earnings_drift
+  - trend_following
   combine: vote
   # min_conviction / single_sided_conviction_multiplier / fee_aware are weighted-mode only;
   # unused in vote mode (votes are unweighted action counts).
   signal_bias_guard:
-    enabled: true
+    enabled: false
     threshold: 0.65
   performance:
     enabled: true
@@ -304,7 +298,7 @@ strategy:
     report_interval_minutes: 10
     report_path: /data/reports/strategy_performance.json
     kill_switch:
-      enabled: true
+      enabled: false
   params:
     lookback_minutes: 10
     entry_threshold_pct: 0.5
@@ -318,8 +312,6 @@ strategy:
       - crypto_momentum
       - crypto_mean_reversion
       - trend_following
-      - top_movers_rf
-      - rl_policy
     alt_data_fear_greed_block: 20   # suppress crypto longs when F&G below this
     alt_data_oi_block: -5.0         # suppress crypto longs when OI change % below this
     alpha_decay_exit:
@@ -341,8 +333,8 @@ strategy:
     trend_following:
       fast_window: 10
       slow_window: 30
-      breakout_pct: 0.3
-      exit_pct: 0.15
+      breakout_pct: 1.0
+      exit_pct: 0.5
       # enabled: false   # uncomment to disable this strategy without restart
       min_conviction_by_regime:
         low_vol_trending: 0.25   # lower bar — strong trending conditions
@@ -1158,7 +1150,7 @@ health_reporter:
   decision_trace_dir: /data/reports/decision_trace  # JSONL per-day decision records; used for window-scoped trade counts
 
 tactical_meta_orchestrator:
-  enabled: true
+  enabled: false
   interval_minutes: 15          # run every 15 minutes
   apply_delay_minutes: 5        # delay before applying weights / stop / TP changes
   param_change_cooldown_minutes: 60  # min interval between changes to the same parameter (prevents oscillation)
@@ -1194,7 +1186,7 @@ tactical_meta_orchestrator:
     strategy_weight_max: 0.45
 
 strategic_meta_orchestrator:
-  enabled: true
+  enabled: false
   weekly_day: 6                 # 0=Mon … 6=Sun — runs Sunday
   weekly_hour_utc: 6            # 06:00 UTC
   emergency_threshold: 3        # trigger after 3 consecutive D/F session grades

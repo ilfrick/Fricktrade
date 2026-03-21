@@ -2510,7 +2510,7 @@ class TradingAgent:
         if action == "buy":
             win_prob = float(market_state.get("kelly_win_prob", 0.0) or 0.0)
             if win_prob <= 0:
-                kelly_scale = 0.15  # uncalibrated: reduced fraction until win_prob populated
+                kelly_scale = 0.50  # uncalibrated: deploy meaningful capital until win_prob populated
             else:
                 kelly_scale = max(0.10, min(1.0, (2.0 * win_prob - 1.0) * 0.5))
             max_pos_pct *= kelly_scale
