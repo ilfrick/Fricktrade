@@ -97,7 +97,10 @@ class SimBroker:
         else:
             self.cash += cost - commission
             self.positions[symbol] = self.positions.get(symbol, 0.0) - qty
-            if self.positions[symbol] <= 0:
+            # Clean up dust: if remaining position is <$1 notional, zero it out
+            remaining = self.positions.get(symbol, 0.0)
+            if remaining <= 0 or (remaining * exec_price < 1.0):
+                self.positions.pop(symbol, None)
                 self.avg_entry_prices.pop(symbol, None)
         self._order_id += 1
         self.trades += 1
@@ -343,6 +346,15 @@ def _update_backtest_positions(agent: TradingAgent, broker) -> None:
                 broker_state, portfolio, agent._broker_name,
                 agent._strategy_names, broker_state.last_prices,
             )
+    # Cleanup: remove stale position_state entries for closed positions.
+    # update_from_positions should handle this, but in backtest the order
+    # queue drain + portfolio snapshot timing can leave stale entries that
+    # cause the circuit breaker to spam on every bar.
+    positions = portfolio.get("positions", {})
+    for bs in agent._broker_states.values():
+        stale = [s for s in bs.position_state if float(positions.get(s, {}).get("qty", 0)) == 0]
+        for s in stale:
+            bs.position_state.pop(s, None)
 
 
 def _drain_order_queues(agent: TradingAgent, max_rounds: int = 100) -> None:
@@ -598,6 +610,19 @@ def _backtest_cfg_override(cfg: dict) -> dict:
     rl_cfg["pretrain"] = rl_pretrain
     orchestrator_cfg["rl"] = rl_cfg
     new_cfg["orchestrator"] = orchestrator_cfg
+    # Disable per-broker cooldown in backtest — all symbols process in the
+    # same tick so the cooldown blocks every symbol after the first trade.
+    new_cfg["risk"] = dict(cfg.get("risk", {}))
+    new_cfg["risk"]["cooldown_seconds"] = 0
+    # Disable min_hold in backtest — all bars process in real-time seconds,
+    # so wall-clock elapsed is always ~0 and min_hold blocks every exit.
+    new_cfg["strategy"] = dict(cfg.get("strategy", {}))
+    new_cfg["strategy"]["params"] = dict(cfg.get("strategy", {}).get("params", {}))
+    new_cfg["strategy"]["params"]["min_hold_minutes"] = 0
+    # Disable stop-exit re-entry cooldown — uses wall-clock time, blocks all
+    # re-entries in backtest since 30 real minutes never elapse between bars.
+    new_cfg["execution"] = dict(new_cfg.get("execution", {}))
+    new_cfg["execution"]["stop_exit_reentry_cooldown_minutes"] = 0
     return new_cfg
 
 
