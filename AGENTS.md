@@ -3,7 +3,7 @@
 
 ## Fricktrade Agent Guide
 
-This repo contains a Python trading agent for US equities (NYSE, Nasdaq) and 24/7 crypto, with broker adapters (Alpaca, Binance), risk controls, backtesting, data download, and metrics/monitoring. Current state: **v3.0, live on Alpaca paper + Binance Spot demo**.
+This repo contains a Python trading agent for 24/7 crypto (with dormant equity support), with broker adapters (Alpaca, Binance), risk controls, backtesting, data download, and metrics/monitoring. Current state: **v3.0, crypto-only mode, live on Alpaca paper + Binance Spot demo**.
 
 ## Quick Orientation
 
@@ -31,42 +31,42 @@ This repo contains a Python trading agent for US equities (NYSE, Nasdaq) and 24/
 
 ## Current System State (v3.0)
 
-### Active strategies (9 total, all running in vote mode)
+### Active strategies (3 total, crypto-only, vote mode)
 
 | Strategy | Asset Class | Notes |
 |----------|-------------|-------|
-| `trend_following` | Both | EMA crossover + Supertrend + VWAP + RSI + volume |
-| `factor_model` | Equities only | Hurst-adaptive composite factor score |
-| `pattern_trading` | Both | Breakout + ATR stop + partial TP |
-| `stat_arb_pairs` | Equities (disabled) | Long-only mode; disabled via `enabled: false` |
-| `top_movers_rf` | Both | RF nowcast + session low-zone entry |
 | `crypto_momentum` | Crypto only | Multi-timeframe momentum |
 | `crypto_mean_reversion` | Crypto only | Bollinger + VWAP + RSI |
-| `gap_reversal` | Equities only | 9:35–10:30 ET gap fill |
-| `earnings_drift` | Equities only | PEAD — requires Alpha Vantage key |
+| `trend_following` | Both (crypto-only in practice) | EMA crossover + Supertrend + VWAP + RSI + volume |
 
-### Inactive strategies (disabled by default)
+### Inactive strategies (disabled in Mar 21 strategic reset)
 
+- `factor_model` — Equities only; Hurst-adaptive composite factor score
+- `pattern_trading` — Equities only; breakout + ATR stop + partial TP
+- `stat_arb_pairs` — Equities; disabled via `enabled: false`
+- `top_movers_rf` — RF nowcast + session low-zone entry
+- `gap_reversal` — Equities only; 9:35–10:30 ET gap fill
+- `earnings_drift` — Equities only; PEAD — requires Alpha Vantage key
 - `rl_policy` — PPO policy; disabled pending convergence work
 - `intraday_momentum`, `market_maker`, `rl_policy_fees`
 
 ### Signal combine mode
 
-`strategy.combine: vote`. All enabled strategies run every cycle; each casts one unweighted vote (buy/sell/hold). Majority wins with configurable thresholds (`buy_vote_threshold: 2`, `exit_vote_threshold: 2`). Weights are completely ignored. Ties broken by `rl_policy` signal; final fallback: hold.
+`strategy.combine: vote`. All 3 enabled strategies run every cycle; each casts one unweighted vote (buy/sell/hold). Majority wins with configurable thresholds (`buy_vote_threshold: 2`, `exit_vote_threshold: 2`). Weights are completely ignored. Half-Kelly sizing with uncalibrated floor of 0.50.
 
 ### Active LLM components
 
 | Component | Cadence | Model |
 |-----------|---------|-------|
-| Tactical Meta Orchestrator | Every 15 min | Gemini 2.5 Flash |
-| Strategic Meta Orchestrator | Weekly (Sun 06 UTC) | Gemini 2.5 Flash |
 | Post-Session Analyst | Daily at session end | Gemini 2.5 Flash |
 | Macro Regime Analyzer | Every 4h | Gemini 2.5 Flash |
 | Risk Interpreter | On risk events | Gemini 2.5 Flash |
 | Ollama Aggregate Sentiment | Every 15 min | llama3.2:3b (local) |
 
-### Disabled LLM components
+### Disabled LLM components (Mar 21 strategic reset)
 
+- `TacticalMetaOrchestrator` — `enabled: false`; was injecting noise via oscillating parameters
+- `StrategicMetaOrchestrator` — `enabled: false`; disabled alongside tactical
 - `LLMPortfolioOrchestrator` — `llm_orchestrator.mode: vote`; class exists but is not instantiated
 - Per-symbol sentiment (`llm.sentiment.enabled: false`) — vote mode skips `_enrich_signals()` entirely
 - `symbols_filter` (`llm.symbols_filter.enabled: false`) — manual-only
@@ -123,6 +123,9 @@ docker compose run --rm trader python3 -m app.main ingest --config /app/config/c
 - `brokers.binance.futures: false` — Spot mode only; demo endpoint.
 - `brokers.ibkr.enabled: false` — IBKR adapter present but inactive.
 - `trading_limits.crypto_order_margin: 0.97` — 3% haircut on crypto buys to absorb price drift.
+- `brokers.alpaca.accounts[*].asset_filter: crypto_only` — equity trading disabled (Mar 21 strategic reset)
+- Guard rails disabled (Mar 21): `var.enabled: false`, `vol_targeting.enabled: false`, `exposure_caps.enabled: false`, `signal_bias_guard.enabled: false`, `kill_switch.enabled: false`
+- `risk.max_portfolio_leverage: 3.0` (was 1.5); `risk.max_positions: 15` (was 30)
 - `data.dynamic_symbols.universe: alpaca_active_all` — equities + crypto from Alpaca; no hardcoded lists.
 - `data.dynamic_symbols.max_symbols: 150` — both accounts evaluate full 150-symbol universe; `buying_power_scaling: false`.
 - `risk.pdt.force_swing: true` — holds equity positions overnight on PDT-restricted accounts (< $2500).
@@ -135,8 +138,8 @@ All LLM modules use **Gemini 2.5 Flash** by default. Switch any module via its `
 | Module | Backend | When Active | Purpose |
 |--------|---------|-------------|---------|
 | `client.py` | Both | On demand | `LLMClient` — unified API, $5/day budget circuit breaker, retry/backoff. `complete(backend, system_prompt, user_prompt, model=)` → `LLMResponse`. |
-| `tactical_meta_orchestrator.py` | Gemini | Every 15 min | Reads live metrics + macro regime + PostSession report. Proposes config changes within declared bounds. Two-tier application: operational params immediately; weights/stops after 5-min delay. Writes `changes.jsonl`. API: `GET /meta_orch`. |
-| `meta_orchestrator.py` (StrategicOrchestrator) | Gemini | Weekly (Sun 06 UTC) or emergency | Reads 7-day PostSession history + tactical change log. Writes `strategic_baseline.json` with baselines and corridors for tactical orchestrator. API: `GET /strategic_orch`. |
+| `tactical_meta_orchestrator.py` | Gemini | **DISABLED** (was every 15 min) | Reads live metrics + macro regime + PostSession report. Proposes config changes within declared bounds. Disabled Mar 21 — was injecting noise. |
+| `meta_orchestrator.py` (StrategicOrchestrator) | Gemini | **DISABLED** (was weekly) | Reads 7-day PostSession history + tactical change log. Writes `strategic_baseline.json`. Disabled Mar 21 alongside tactical. |
 | `post_session.py` | Gemini | After market close | Grades session A–F; key findings with P&L estimates; per-strategy assessment. Writes `report_*.json` consumed by orchestrators. |
 | `macro_regime.py` | Gemini | 4h TTL | FRED (VIX/DGS10/DXY) + Gemini → 5-regime classification. Used by tactical orchestrator and strategy weight adjustment. |
 | `risk_interpreter.py` | Gemini | On `DriftMonitor` alert | Triages structural break vs noise; may set 1h trading pause or log recommended_action. |
@@ -239,6 +242,8 @@ Key test areas: risk manager, order queue, execution algos, strategy signals, br
 ## History
 
 See `AGENTS.md` history section and git log for full commit-by-commit record. Major milestones (newest first):
+
+- **Strategic reset — crypto-only, 3 strategies (2026-03-21, commit b1bf267):** System was losing money consistently (-5.1% over 3 months). Root causes: guard rail paralysis, tactical orchestrator noise injection, broken capital deployment (Kelly 0.15 floor). Changes: disabled equity trading (`asset_filter: crypto_only`), reduced from 9 strategies to 3 (`crypto_momentum`, `crypto_mean_reversion`, `trend_following`), killed both meta-orchestrators, disabled VaR/vol_targeting/exposure_caps/signal_bias_guard/kill_switch, raised Kelly floor to 0.50, tuned trend_following breakout/exit thresholds. Also: Docker resource limits on all services, stop-exit re-entry cooldown (30 min), per-parameter tactical hysteresis (60 min), portfolio-aware strategy context injection, cross-symbol correlations.
 
 - **Round-7 safety and correctness fixes (2026-03-15, commit c4d74f4):** 14 fixes. `_pending_sell_qty` now released in enqueue() exception path (stuck-position safety). `EarningsDriftStrategy._last_buy` re-armed on restart from `opened_at`. EDGAR hot-path call removed (always returned 0). `twap_slices()` TypeError on fractional qty fixed. `position_state["last_market_state"]` now written per cycle (TMO was getting null indicators). `exit_vote_threshold: [1,3]` added to TMO bounds. MacroRegime FRED I/O moved outside `_refresh_lock`. SEC tickers cached 24h + User-Agent fixed. Yahoo/Google news fetches parallelised (removes 52s serial sleeps). `trend_following` crisis gate uses integer code 2 as primary. `_portfolio_for_broker()` returns safe empty dict on missing broker. CoinGlass upgraded to v3 API. `opportunity_cost_exit` uses current equity. `crypto_momentum` RSI `is not None` guard.
 
