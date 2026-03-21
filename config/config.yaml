@@ -306,8 +306,8 @@ strategy:
     position_horizon_minutes: 0    # disabled — hard/trailing stops and TP handle exits
     min_hold_minutes: 15        # suppress all stop/take-profit exits for 15 min after entry
     exit_vote_threshold: 2     # vote mode: exit a held position when ≥N strategies say sell/exit
-    buy_vote_threshold: 2      # vote mode: open a new position when ≥N strategies say buy (0=strict majority)
-    buy_vote_threshold_trending: 2  # in low_vol_trending regime, require 2 strategies to agree (was 1 — fired on noise)
+    buy_vote_threshold: 1      # vote mode: open a new position when ≥N strategies say buy (0=strict majority)
+    buy_vote_threshold_trending: 1  # in low_vol_trending regime, require 1 strategy to agree
     crypto_eligible_strategies:
       - crypto_momentum
       - crypto_mean_reversion
@@ -549,33 +549,33 @@ portfolio:
     min_interval_minutes: 60
 backtest:
   data_dir: /data
-  start: '2025-11-20'
-  end: '2026-02-13'
-  initial_cash: 100000
+  start: '2025-12-21'
+  end: '2026-03-21'
+  initial_cash: 10000
   symbols:
-    - AAPL
-    - MSFT
-    - NVDA
-    - GOOGL
-    - AMZN
-    - META
-    - TSLA
-    - JPM
-    - V
-    - UNH
-    - HD
-    - PG
-    - JNJ
-    - BAC
-    - XOM
-    - COST
-    - AMD
-    - CRM
-    - NFLX
-    - INTC
-  commission_pct: 0.05
-  slippage_bps: 2
-  spread_bps: 0
+    - BTC/USD
+    - ETH/USD
+    - SOL/USD
+    - XRP/USD
+    - ADA/USD
+    - DOGE/USD
+    - AVAX/USD
+    - LINK/USD
+    - DOT/USD
+    - UNI/USD
+    - LTC/USD
+    - BCH/USD
+    - AAVE/USD
+    - FIL/USD
+    - RENDER/USD
+    - ONDO/USD
+    - NEAR/USD
+    - ATOM/USD
+    - ARB/USD
+    - OP/USD
+  commission_pct: 0.10
+  slippage_bps: 5
+  spread_bps: 10
   use_gpu: true
   mode: agent
   symbols_source: config
@@ -584,7 +584,7 @@ backtest:
     format: npz
     dir: /data/backtest_cache
     compress: false
-  dynamic_symbols_enabled: true
+  dynamic_symbols_enabled: false
   news_enabled: false
   news_source: none
   news_path: /data/news_cache.json

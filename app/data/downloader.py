@@ -88,7 +88,7 @@ def download_yfinance(
         ordered = ["Open", "High", "Low", "Close", "Volume"]
         if all(col in data.columns for col in ordered):
             data = data[ordered]
-        file_path = out_path / f"{symbol.replace('.', '_')}_{interval}.csv"
+        file_path = out_path / f"{symbol.replace('/', '_').replace('.', '_')}_{interval}.csv"
         data.to_csv(file_path, index_label="Datetime")
         files.append(file_path)
         time.sleep(rate_limit_seconds)
@@ -174,7 +174,7 @@ def download_alpaca_bars(
         ordered = ["Open", "High", "Low", "Close", "Volume"]
         if all(col in data.columns for col in ordered):
             data = data[ordered]
-        file_path = out_path / f"{symbol.replace('.', '_')}_{interval}.csv"
+        file_path = out_path / f"{symbol.replace('/', '_').replace('.', '_')}_{interval}.csv"
         data.to_csv(file_path, index_label="Datetime")
         files.append(file_path)
         time.sleep(rate_limit_seconds)

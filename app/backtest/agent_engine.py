@@ -241,7 +241,7 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
 
     frames = {}
     for symbol in symbols:
-        path = data_dir / f"{symbol.replace('.', '_')}_{interval}.csv"
+        path = data_dir / f"{symbol.replace('/', '_').replace('.', '_')}_{interval}.csv"
         if not path.exists():
             continue
         frames[symbol] = _load_csv(
@@ -265,11 +265,16 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
     lookback_minutes = int(sim_cfg["strategy"]["params"].get("lookback_minutes", 30))
     lookback_bars = max(2, int(lookback_minutes / interval_minutes))
 
-    state = {sym: _SymbolState(max_len=max(lookback_bars, 60)) for sym in prepared_frames}
+    # Strategies need sufficient history: crypto_momentum uses slow_window=60,
+    # trend_following uses EMA-30 (needs ~90 bars to converge), indicators need ~20.
+    # Use at least 200 bars to ensure all strategies have enough data.
+    state = {sym: _SymbolState(max_len=max(lookback_bars, 200)) for sym in prepared_frames}
     start_value = broker.get_account()["equity"]
 
     news_cache = _load_backtest_news(backtest_cfg)
     timeline = timeline_index.to_pydatetime()
+    _bt_signal_counts: dict[str, int] = {}
+    _bt_total_bars = 0
     for ts_idx, ts in enumerate(timeline):
         _apply_news_cache(agent, news_cache, ts)
         for symbol, frame_data in prepared_frames.items():
@@ -287,6 +292,9 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
             agent._enrich_market_state(market_state, portfolio, symbol)
             market_state["strategy_symbols"] = getattr(agent, "_symbols_by_strategy", {})
             agent.run_once(symbol, market_state)
+            _bt_total_bars += 1
+        if ts_idx > 0 and ts_idx % 2000 == 0:
+            logging.info("Backtest progress: bar %d/%d, trades=%d", ts_idx, len(timeline), broker.trades)
         # Drain order queue: SimBroker completes instantly but queue processes one per update()
         _drain_order_queues(agent)
         agent._flush_order_responses()
@@ -387,9 +395,17 @@ def _symbols_from_data_dir(data_dir: Path, interval: str | None) -> list[str]:
         suffix = f"_{interval}"
         if not name.endswith(suffix):
             continue
-        symbol = name[: -len(suffix)]
-        if symbol:
-            symbols.append(symbol.replace("_", "."))
+        raw = name[: -len(suffix)]
+        if not raw:
+            continue
+        # Detect crypto: exactly TWO parts separated by _ where second is a
+        # known quote currency (USD, USDT, etc.) → restore "/"
+        parts = raw.split("_")
+        _crypto_quotes = {"USD", "USDT", "USDC", "BUSD"}
+        if len(parts) == 2 and parts[1] in _crypto_quotes:
+            symbols.append(f"{parts[0]}/{parts[1]}")
+        else:
+            symbols.append(raw.replace("_", "."))
     return sorted(set(symbols))
 
 
@@ -559,6 +575,15 @@ def _backtest_cfg_override(cfg: dict) -> dict:
     # Disable algo slicing in backtest — SimBroker has no market impact
     new_cfg["execution"]["algos"] = dict(cfg.get("execution", {}).get("algos", {}))
     new_cfg["execution"]["algos"]["enabled"] = False
+    # Disable LLM components that depend on live data (macro regime fetches
+    # current FRED indicators, not historical — would block all entries if
+    # current regime is "crisis")
+    new_cfg["llm"] = dict(cfg.get("llm", {}))
+    new_cfg["llm"]["macro_regime"] = {"enabled": False}
+    new_cfg["llm"]["risk_interpreter"] = {"enabled": False}
+    new_cfg["llm"]["sentiment"] = {"enabled": False}
+    new_cfg["tactical_meta_orchestrator"] = {"enabled": False}
+    new_cfg["strategic_meta_orchestrator"] = {"enabled": False}
     orchestrator_cfg = dict(cfg.get("orchestrator", {}))
     ml_cfg = dict(orchestrator_cfg.get("ml", {}))
     pretrain_cfg = dict(ml_cfg.get("pretrain", {}))
@@ -602,7 +627,7 @@ def _resolve_dynamic_symbols(cfg: dict) -> list[str]:
 def _download_missing_bars(cfg: dict, symbols: list[str], interval: str, data_dir: Path) -> None:
     missing = []
     for symbol in symbols:
-        path = data_dir / f"{symbol.replace('.', '_')}_{interval}.csv"
+        path = data_dir / f"{symbol.replace('/', '_').replace('.', '_')}_{interval}.csv"
         if not path.exists():
             missing.append(symbol)
     if not missing:

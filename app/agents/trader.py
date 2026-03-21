@@ -1191,6 +1191,7 @@ class TradingAgent:
             signal["name"] = name
             signals.append(signal)
 
+
         # UNLOCKED: Signal bias calculation (pure logic)
         bias = self._signal_bias(market_state)
         guard_cfg = self._strategy_cfg.signal_bias_guard or {}
@@ -3242,7 +3243,9 @@ class TradingAgent:
         # Missing broker data: return a safe empty portfolio rather than the aggregate.
         # Returning aggregate would cause cross-broker exposure contamination in sizing
         # and risk checks (e.g. Binance equity leaking into Alpaca leverage calculations).
-        if broker_name and isinstance(brokers, dict):
+        # Exception: when brokers dict is empty (single-broker mode, e.g. SimBroker backtest),
+        # the aggregate IS the single broker — return it as-is.
+        if broker_name and isinstance(brokers, dict) and brokers:
             return {
                 "equity": 0.0,
                 "cash": 0.0,
