@@ -4,6 +4,7 @@
 
 alpaca-py==0.26.1
 python-binance>=1.0.19
+websocket-client>=1.6.0
 backtrader==1.9.78.123
 
 ib-insync==0.9.86
