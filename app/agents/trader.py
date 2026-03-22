@@ -316,19 +316,13 @@ class TradingAgent:
                 self._strategy_params,
                 cfg.get("data", {}),
             )
-        # Order book imbalance stream — live Binance WebSocket depth data
+        # Data streams — initialized in _start_data_streams() after symbols are set
         self._order_book_stream = None
-        _ob_cfg = cfg.get("order_book", {})
-        if _ob_cfg.get("enabled", False):
-            try:
-                from app.data.order_book import OrderBookStream
-                _ob_symbols = list(self._symbol_mgr.get_crypto_symbols() if hasattr(self._symbol_mgr, "get_crypto_symbols") else [])
-                if _ob_symbols:
-                    _binance_url = cfg.get("brokers", {}).get("binance", {}).get("base_url", "")
-                    self._order_book_stream = OrderBookStream(_ob_symbols, base_url=_binance_url)
-                    self._order_book_stream.start()
-            except Exception as exc:
-                logging.warning("OrderBookStream init failed: %s", exc)
+        self._liquidation_stream = None
+        self._funding_poller = None
+        self._cross_exchange_stream = None
+        self._social_velocity_poller = None
+        self._stablecoin_flow_tracker = None
 
         # LLM integration — initialised lazily; missing API keys don't crash startup
         # Rolling order-flow counters — must be before _init_llm() (early-return when disabled)
@@ -1223,6 +1217,26 @@ class TradingAgent:
             if "indicators" not in market_state:
                 market_state["indicators"] = {}
             market_state["indicators"]["order_book_imbalance"] = _ob_imb
+
+        # Inject non-price signals (all default to 0.0 in backtest / when unavailable)
+        if "indicators" not in market_state:
+            market_state["indicators"] = {}
+        _ind = market_state["indicators"]
+        if self._liquidation_stream is not None:
+            _ind["cascade_score"] = self._liquidation_stream.get_cascade_score(symbol)
+        if self._funding_poller is not None:
+            _ind["funding_rate"] = self._funding_poller.get_funding_rate(symbol)
+            _ind["funding_extreme"] = self._funding_poller.get_funding_extreme(symbol)
+        if self._cross_exchange_stream is not None:
+            # Feed Binance price to cross-exchange for divergence calc
+            _lp = float(market_state.get("last_price") or 0)
+            if _lp > 0:
+                self._cross_exchange_stream.update_reference_price(symbol, _lp)
+            _ind["exchange_divergence_pct"] = self._cross_exchange_stream.get_divergence_pct(symbol)
+        if self._social_velocity_poller is not None:
+            _ind["social_velocity"] = self._social_velocity_poller.get_velocity(symbol)
+        if self._stablecoin_flow_tracker is not None:
+            _ind["stablecoin_inflow"] = self._stablecoin_flow_tracker.get_inflow_score()
 
         # Update rolling price history for portfolio optimizer covariance estimation.
         # Maintained outside the lock (GIL protects list.append on CPython).
@@ -3758,9 +3772,68 @@ class TradingAgent:
                 logging.warning("Reporting loop error: %s", exc)
             time.sleep(15)
 
+    def _start_data_streams(self, active_symbols: list[str] | None = None) -> None:
+        """Start order book + alt data streams. Called from loop() after symbols are populated."""
+        cfg = self.cfg
+        syms = active_symbols or self._symbol_mgr.symbols or []
+        _crypto_syms = [s for s in syms if "/" in s]
+        if not _crypto_syms:
+            return
+
+        # Order book imbalance stream
+        _ob_cfg = cfg.get("order_book", {})
+        if _ob_cfg.get("enabled", False) and self._order_book_stream is None:
+            try:
+                from app.data.order_book import OrderBookStream
+                _binance_url = cfg.get("brokers", {}).get("binance", {}).get("base_url", "")
+                self._order_book_stream = OrderBookStream(_crypto_syms, base_url=_binance_url)
+                self._order_book_stream.start()
+                logging.info("OrderBookStream started for %d symbols", len(_crypto_syms))
+            except Exception as exc:
+                logging.warning("OrderBookStream init failed: %s", exc)
+
+        # Non-price data streams
+        _alt_data_cfg = cfg.get("alt_data_streams", {})
+        if not _alt_data_cfg.get("enabled", False):
+            return
+        try:
+            from app.data.liquidation_stream import LiquidationStream
+            self._liquidation_stream = LiquidationStream(_crypto_syms)
+            self._liquidation_stream.start()
+            logging.info("LiquidationStream started")
+        except Exception as exc:
+            logging.warning("LiquidationStream init failed: %s", exc)
+        try:
+            from app.data.funding_rate import FundingRatePoller
+            self._funding_poller = FundingRatePoller(_crypto_syms)
+            self._funding_poller.start()
+            logging.info("FundingRatePoller started for %d symbols", len(_crypto_syms))
+        except Exception as exc:
+            logging.warning("FundingRatePoller init failed: %s", exc)
+        try:
+            from app.data.cross_exchange import CrossExchangeStream
+            self._cross_exchange_stream = CrossExchangeStream(_crypto_syms)
+            self._cross_exchange_stream.start()
+            logging.info("CrossExchangeStream started")
+        except Exception as exc:
+            logging.warning("CrossExchangeStream init failed: %s", exc)
+        try:
+            from app.data.social_velocity import SocialVelocityPoller
+            self._social_velocity_poller = SocialVelocityPoller(_crypto_syms)
+            self._social_velocity_poller.start()
+        except Exception as exc:
+            logging.warning("SocialVelocityPoller init failed: %s", exc)
+        try:
+            from app.data.stablecoin_flow import StablecoinFlowTracker
+            self._stablecoin_flow_tracker = StablecoinFlowTracker()
+            self._stablecoin_flow_tracker.start()
+        except Exception as exc:
+            logging.warning("StablecoinFlowTracker init failed: %s", exc)
+
     def loop(self, symbol: str | list[str], market_data_provider, interval_seconds: int = 60):
         self._symbol_mgr.symbols = symbol if isinstance(symbol, list) else [symbol]
-        
+        self._data_streams_started = False
+
         # Start decoupled reporting thread
         reporting_thread = threading.Thread(target=self._run_reporting_loop, daemon=True)
         reporting_thread.start()
@@ -3798,6 +3871,9 @@ class TradingAgent:
                 continue
             self._last_portfolio = portfolio  # reporting thread reads this for position metrics
             symbols = self._symbol_mgr.resolve_active_symbols()
+            if not self._data_streams_started and symbols:
+                self._start_data_streams(symbols)
+                self._data_streams_started = True
             symbols = self._run_cycle_maintenance(symbols, portfolio)
             self._update_open_order_queues()
             self._flush_order_responses()

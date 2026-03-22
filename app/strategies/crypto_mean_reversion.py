@@ -83,7 +83,7 @@ class CryptoMeanReversionStrategy(Strategy):
             # (we only buy below lower_band). Don't issue sell votes for foreign positions.
             if avg_entry > 0 and avg_entry >= sma:
                 return {"action": "hold", "confidence": 0.0, "name": "crypto_mean_reversion"}
-            min_profit_pct = 0.3  # require at least 0.3% profit before SMA exit
+            min_profit_pct = 0.5  # require at least 0.5% profit before SMA exit (must exceed ~0.40% round-trip cost)
             if avg_entry > 0:
                 profit_pct = (last - avg_entry) / avg_entry * 100.0
                 if profit_pct < min_profit_pct:
@@ -99,6 +99,31 @@ class CryptoMeanReversionStrategy(Strategy):
             band_range = max(upper_band - lower_band, 1e-8)
             depth = (lower_band - last) / band_range
             confidence = min(0.4 + depth * 0.6, 1.0)
+
+            # Non-price signal boosters — reward entries backed by causal data
+            indicators = market_state.get("indicators") or {}
+            _cascade = float(indicators.get("cascade_score", 0.0) or 0.0)
+            _funding = float(indicators.get("funding_extreme", 0.0) or 0.0)
+            _divergence = float(indicators.get("exchange_divergence_pct", 0.0) or 0.0)
+            _social = float(indicators.get("social_velocity", 0.0) or 0.0)
+            _stablecoin = float(indicators.get("stablecoin_inflow", 0.0) or 0.0)
+
+            # Cascade: long liquidations (positive) confirm the dip is forced selling
+            if _cascade > 0.3:
+                confidence = min(confidence + 0.15, 1.0)
+            # Funding extreme positive: longs overleveraged, unwind likely
+            if _funding > 0.5:
+                confidence = min(confidence + 0.10, 1.0)
+            # Coinbase price higher than Binance: expect upward convergence
+            if _divergence > 0.05:
+                confidence = min(confidence + 0.05, 1.0)
+            # Stablecoin inflow: money arriving at exchanges to buy
+            if _stablecoin > 0.3:
+                confidence = min(confidence + 0.05, 1.0)
+            # Social velocity positive: rising attention (can be noise, small boost)
+            if _social > 0.3:
+                confidence = min(confidence + 0.03, 1.0)
+
             return {
                 "action": "buy",
                 "confidence": float(confidence),

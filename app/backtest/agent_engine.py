@@ -623,6 +623,12 @@ def _backtest_cfg_override(cfg: dict) -> dict:
     # re-entries in backtest since 30 real minutes never elapse between bars.
     new_cfg["execution"] = dict(new_cfg.get("execution", {}))
     new_cfg["execution"]["stop_exit_reentry_cooldown_minutes"] = 0
+    # Disable alpha_decay and regime_hold_minutes — both use datetime.now()
+    # which is wall-clock, not simulated bar time.  In backtest the entire
+    # timeline processes in minutes of real time, causing non-deterministic
+    # spurious exits.
+    new_cfg["strategy"]["params"]["alpha_decay_exit"] = {"enabled": False}
+    new_cfg["strategy"]["params"]["regime_hold_minutes"] = {"enabled": False}
     return new_cfg
 
 
