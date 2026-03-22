@@ -221,9 +221,9 @@ risk:
   partial_take_profit_pct: 1.0
   partial_take_profit_ratio: 0.5
   vol_targeting:
-    enabled: false
-    target_vol_pct: 2.0
-    min_scale: 0.5
+    enabled: true
+    target_vol_pct: 4.0   # crypto is structurally more volatile; 2% would over-shrink positions
+    min_scale: 0.3
     max_scale: 1.5
   stress:
     enabled: false
@@ -289,9 +289,12 @@ strategy:
   - crypto_momentum
   - crypto_mean_reversion
   - trend_following
-  combine: vote
-  # min_conviction / single_sided_conviction_multiplier / fee_aware are weighted-mode only;
-  # unused in vote mode (votes are unweighted action counts).
+  combine: weighted
+  weights:
+    crypto_mean_reversion: 0.50   # primary: buy the dip (user's core intent)
+    crypto_momentum: 0.25         # confirmation: momentum aligns with entry
+    trend_following: 0.25         # confirmation: trend supports direction
+  min_conviction: 0.15            # minimum weighted signal to act (0.5 MR weight × 0.3 confidence = 0.15)
   signal_bias_guard:
     enabled: false
     threshold: 0.65
@@ -337,8 +340,8 @@ strategy:
       exposure_threshold_pct: 80  # only trigger when portfolio ≥ 80% of max exposure
     allow_shorts: true
     trend_following:
-      fast_window: 10
-      slow_window: 30
+      fast_window: 50      # 50 bars × 1m = 50min (was 10 × 5m)
+      slow_window: 150     # 150 bars × 1m = 150min (was 30 × 5m)
       breakout_pct: 1.0
       exit_pct: 0.5
       # enabled: false   # uncomment to disable this strategy without restart
@@ -367,18 +370,18 @@ strategy:
       skew_pct: 0.15
       min_qty: 1
     crypto_momentum:
-      fast_window: 5
-      medium_window: 15
-      slow_window: 60
+      fast_window: 25       # 25 bars × 1m = 25min (was 5 × 5m)
+      medium_window: 75     # 75 bars × 1m = 75min (was 15 × 5m)
+      slow_window: 300      # 300 bars × 1m = 300min (was 60 × 5m)
       volume_mult: 1.5    # used as confidence boost multiplier, not a hard gate
-      min_return_pct: 0.15  # relaxed from 0.3 — 0.3% is too strict for 5m bars at off-peak hours
+      min_return_pct: 0.15  # per-bar threshold scales automatically with window size
       trailing_stop_pct: 2.0
     crypto_mean_reversion:
-      bb_period: 20
+      bb_period: 100      # 100 bars × 1m = 100min (was 20 × 5m)
       bb_std: 2.0
-      rsi_period: 14
+      rsi_period: 70      # 70 bars × 1m = 70min (was 14 × 5m)
       rsi_oversold: 30.0  # 35 catches normal pullbacks; 30 targets genuine oversold conditions
-      drop_window_bars: 15
+      drop_window_bars: 75  # 75 bars × 1m = 75min (was 15 × 5m)
       hard_stop_pct: 3.0
     gap_reversal:
       min_gap_pct: 2.0
@@ -553,6 +556,9 @@ portfolio:
     drift_threshold_pct: 5.0
     min_trade_pct: 0.5
     min_interval_minutes: 60
+order_book:
+  enabled: true             # live Binance WebSocket depth stream for bid/ask imbalance
+  depth_levels: 10          # top N price levels to aggregate
 backtest:
   data_dir: /data
   start: '2025-12-21'
@@ -638,7 +644,7 @@ data:
   prefetch_after_filter: false
   process_on_new_bar_only: false
   symbols: []
-  interval: 5m
+  interval: 1m
   lookback_days: 7
   session_gain_mode: gap
   quality:

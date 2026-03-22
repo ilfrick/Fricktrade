@@ -268,10 +268,10 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
     lookback_minutes = int(sim_cfg["strategy"]["params"].get("lookback_minutes", 30))
     lookback_bars = max(2, int(lookback_minutes / interval_minutes))
 
-    # Strategies need sufficient history: crypto_momentum uses slow_window=60,
-    # trend_following uses EMA-30 (needs ~90 bars to converge), indicators need ~20.
-    # Use at least 200 bars to ensure all strategies have enough data.
-    state = {sym: _SymbolState(max_len=max(lookback_bars, 200)) for sym in prepared_frames}
+    # Strategies need sufficient history. At 1m bars, crypto_momentum slow_window=300,
+    # trend_following EMA-150 (needs ~450 bars to converge), indicators need ~100.
+    # Use at least 500 bars to ensure all strategies have enough data at any interval.
+    state = {sym: _SymbolState(max_len=max(lookback_bars, 500)) for sym in prepared_frames}
     start_value = broker.get_account()["equity"]
 
     news_cache = _load_backtest_news(backtest_cfg)

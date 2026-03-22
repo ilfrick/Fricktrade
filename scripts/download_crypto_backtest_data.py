@@ -105,6 +105,7 @@ def main():
     parser.add_argument("--days", type=int, default=90, help="Days of history to fetch")
     parser.add_argument("--symbols", nargs="*", help="Override symbol list")
     parser.add_argument("--out-dir", help="Output directory (default: backtest.data_dir from config)")
+    parser.add_argument("--interval", help="Bar interval (default: from config, e.g. 1m, 5m)")
     args = parser.parse_args()
 
     from app.utils.config import load_config
@@ -119,11 +120,12 @@ def main():
     symbols = args.symbols or DEFAULT_SYMBOLS
     out_dir = Path(args.out_dir or cfg.get("backtest", {}).get("data_dir", "/data"))
     out_dir.mkdir(parents=True, exist_ok=True)
+    interval = args.interval or cfg.get("data", {}).get("interval", "5m")
 
-    log.info("Downloading %d crypto symbols, %d days of 5m bars → %s", len(symbols), args.days, out_dir)
+    log.info("Downloading %d crypto symbols, %d days of %s bars → %s", len(symbols), args.days, interval, out_dir)
     downloaded = 0
     for sym in symbols:
-        path = download_symbol(client, sym, args.days, out_dir)
+        path = download_symbol(client, sym, args.days, out_dir, interval=interval)
         if path:
             downloaded += 1
         time.sleep(0.5)  # Rate limiting

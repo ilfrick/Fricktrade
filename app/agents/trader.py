@@ -316,6 +316,20 @@ class TradingAgent:
                 self._strategy_params,
                 cfg.get("data", {}),
             )
+        # Order book imbalance stream — live Binance WebSocket depth data
+        self._order_book_stream = None
+        _ob_cfg = cfg.get("order_book", {})
+        if _ob_cfg.get("enabled", False):
+            try:
+                from app.data.order_book import OrderBookStream
+                _ob_symbols = list(self._symbol_mgr.get_crypto_symbols() if hasattr(self._symbol_mgr, "get_crypto_symbols") else [])
+                if _ob_symbols:
+                    _binance_url = cfg.get("brokers", {}).get("binance", {}).get("base_url", "")
+                    self._order_book_stream = OrderBookStream(_ob_symbols, base_url=_binance_url)
+                    self._order_book_stream.start()
+            except Exception as exc:
+                logging.warning("OrderBookStream init failed: %s", exc)
+
         # LLM integration — initialised lazily; missing API keys don't crash startup
         # Rolling order-flow counters — must be before _init_llm() (early-return when disabled)
         self._tmo_counters: dict[str, int] = {
@@ -362,8 +376,15 @@ class TradingAgent:
 
     @property
     def _config_strategy_weights(self) -> dict[str, float]:
-        """Live view of strategy weights from cfg — reflects TacticalMetaOrchestrator changes."""
-        return dict(self.cfg.get("orchestrator", {}).get("strategy_weights", {}) or {})
+        """Live view of strategy weights from cfg — reflects TacticalMetaOrchestrator changes.
+
+        Checks orchestrator.strategy_weights first (set by meta-orchestrators at runtime),
+        then strategy.weights (static config).
+        """
+        w = self.cfg.get("orchestrator", {}).get("strategy_weights", {}) or {}
+        if not w:
+            w = self.cfg.get("strategy", {}).get("weights", {}) or {}
+        return dict(w)
 
     def _init_llm(self) -> None:
         """Initialise LLM client and sub-modules if llm.enabled is true in config."""
@@ -779,6 +800,30 @@ class TradingAgent:
                 TAKE_PROFIT_EXITS.labels(symbol=symbol, reason="partial_take_profit").inc()
                 return True, "partial_take_profit"
 
+        # --- Signal-Driven Peak Detection Exit ---
+        # Detects distribution tops: RSI overbought + price at/above upper Bollinger Band
+        # + order book imbalance shifting to sell-heavy (when available).
+        # This is the primary "detect peak and sell" mechanism.
+        if _avg_entry_valid and market_state is not None:
+            indicators = market_state.get("indicators") or {}
+            _peak_rsi = float(indicators.get("rsi", 50.0) or 50.0)
+            _peak_bb_upper = float(indicators.get("bb_upper", 0.0) or 0.0)
+            _peak_bb_mid = float(indicators.get("bb_mid", 0.0) or 0.0)
+            _ob_imbalance = float(indicators.get("order_book_imbalance", 0.0) or 0.0)
+            _pnl_pct = (last_price - avg_entry) / avg_entry * 100.0 if avg_entry > 0 else 0.0
+            # Only trigger when in profit (don't sell losers on RSI overbought)
+            if _pnl_pct > 0.5:
+                _peak_signals = 0
+                if _peak_rsi > 70:
+                    _peak_signals += 1
+                if _peak_bb_upper > 0 and last_price >= _peak_bb_upper:
+                    _peak_signals += 1
+                if _ob_imbalance < -0.2:  # sell-heavy order book
+                    _peak_signals += 1
+                # Require at least 2 of 3 peak signals to confirm distribution
+                if _peak_signals >= 2:
+                    return True, "peak_detection"
+
         # --- Alpha Decay Exit ---
         # Exit when the strategy that created this position now actively signals sell.
         # Only fires when the entry strategy is currently bearish (not merely neutral),
@@ -1171,6 +1216,13 @@ class TradingAgent:
                 market_state["indicators"] = _compute_ind(_ms_opens, _ms_highs, _ms_lows, _ms_closes, _ms_vols)
             except Exception as exc:
                 logging.debug("Indicator injection failed for %s: %s", symbol, exc)
+
+        # Inject order book imbalance from live WebSocket stream (0.0 in backtest)
+        if hasattr(self, "_order_book_stream") and self._order_book_stream is not None:
+            _ob_imb = self._order_book_stream.get_imbalance(symbol)
+            if "indicators" not in market_state:
+                market_state["indicators"] = {}
+            market_state["indicators"]["order_book_imbalance"] = _ob_imb
 
         # Update rolling price history for portfolio optimizer covariance estimation.
         # Maintained outside the lock (GIL protects list.append on CPython).

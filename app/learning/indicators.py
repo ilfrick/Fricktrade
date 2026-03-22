@@ -331,6 +331,10 @@ def compute_all_indicators(
 
     # Volatility indicators
     result["atr_pct"] = atr_percent(highs, lows, closes, period)
+    _bb_upper, _bb_mid, _bb_lower = bollinger_bands(closes, 20)
+    result["bb_upper"] = _bb_upper
+    result["bb_mid"] = _bb_mid
+    result["bb_lower"] = _bb_lower
     result["bollinger_pct_b"] = bollinger_pct_b(closes, 20)
     result["bollinger_bandwidth"] = bollinger_bandwidth(closes, 20)
     result["hist_volatility"] = historical_volatility(closes, 20)

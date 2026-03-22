@@ -113,13 +113,16 @@ def _interval_seconds(interval: str) -> int:
     return 60
 
 
-def _bars_for_lookback(lookback_days: int, interval: str) -> int:
+def _bars_for_lookback(lookback_days: int, interval: str, *, crypto: bool = True) -> int:
+    # crypto trades 24h/day (1440 min); equities ~6.5h (390 min)
+    minutes_per_day = 1440 if crypto else 390
+    hours_per_day = 24.0 if crypto else 6.5
     if interval.endswith("m"):
         minutes = max(int(interval[:-1]), 1)
-        per_day = max(int(390 / minutes), 1)
+        per_day = max(int(minutes_per_day / minutes), 1)
     elif interval.endswith("h"):
         hours = max(int(interval[:-1]), 1)
-        per_day = max(int(6.5 / hours), 1)
+        per_day = max(int(hours_per_day / hours), 1)
     elif interval.endswith("d"):
         per_day = 1
     else:
