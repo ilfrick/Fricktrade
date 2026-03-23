@@ -197,7 +197,7 @@ risk:
     max_daily_loss_pct: 5.0
     max_position_size_pct: 90.0
     max_crypto_exposure_pct: 50.0
-    hard_stop_pct: 4.0
+    hard_stop_pct: 6.0       # raised from 4.0 — altcoins need room before reversion completes
     trailing_stop_pct: 4.5
     take_profit_pct: 5.0
     circuit_breaker_drawdown_pct: 8.0
@@ -288,13 +288,11 @@ strategy:
   names:
   - crypto_momentum
   - crypto_mean_reversion
-  - trend_following
   combine: weighted
   weights:
-    crypto_mean_reversion: 0.50   # primary: buy the dip (user's core intent)
-    crypto_momentum: 0.25         # confirmation: momentum aligns with entry
-    trend_following: 0.25         # confirmation: trend supports direction
-  min_conviction: 0.25            # minimum weighted signal to act (needs 2+ strategies or high MR confidence)
+    crypto_mean_reversion: 0.60   # primary: buy the dip (user's core intent)
+    crypto_momentum: 0.40         # confirmation: momentum aligns with entry
+  min_conviction: 0.25            # minimum weighted signal to act
   signal_bias_guard:
     enabled: false
     threshold: 0.65
@@ -320,7 +318,6 @@ strategy:
     crypto_eligible_strategies:
       - crypto_momentum
       - crypto_mean_reversion
-      - trend_following
     alt_data_fear_greed_block: 20   # suppress crypto longs when F&G below this
     alt_data_oi_block: -5.0         # suppress crypto longs when OI change % below this
     alpha_decay_exit:
@@ -382,7 +379,8 @@ strategy:
       rsi_period: 70      # 70 bars × 1m = 70min (was 14 × 5m)
       rsi_oversold: 30.0  # 35 catches normal pullbacks; 30 targets genuine oversold conditions
       drop_window_bars: 75  # 75 bars × 1m = 75min (was 15 × 5m)
-      hard_stop_pct: 3.0
+      hard_stop_pct: 5.0       # raised from 3.0 — altcoins whipsaw through tight stops
+      crash_filter_pct: 0       # disabled — suppressed too many good entries in backtest
     gap_reversal:
       min_gap_pct: 2.0
       target_fill_pct: 50.0

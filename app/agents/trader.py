@@ -1388,6 +1388,16 @@ class TradingAgent:
                     filtered_signals, weights, order=names, market_state=market_state,
                     is_held=(_cs_qty_meaningful > 0),
                 )
+            # Expose per-strategy signals + final action for backtest analysis
+            self._last_bar_signals = {
+                "symbol": symbol,
+                "signals": [
+                    {"name": s.get("name"), "action": s.get("action"), "confidence": s.get("confidence", 0.0)}
+                    for s in filtered_signals
+                ],
+                "final_action": action,
+                "final_strategy": action_strategy,
+            }
             # Track expected returns for portfolio optimizer / rebalance engine
             if action == "buy":
                 self._signal_expected_returns[symbol] = float(

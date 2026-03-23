@@ -28,6 +28,8 @@ class BacktestResult:
     start: str = ""
     end: str = ""
     symbols: list[str] = field(default_factory=list)
+    trade_details: list[dict] = field(default_factory=list)  # per-trade records for analysis
+    signal_log: list[dict] = field(default_factory=list)  # per-bar strategy signals vs final action
 
 
 @dataclass
@@ -54,6 +56,8 @@ class SimBroker:
         self.current_prices: dict[str, float] = {}
         self._order_id = 0
         self.trades = 0
+        self.trade_log: list[dict] = []  # detailed per-trade records
+        self.signal_log: list[dict] = []  # per-bar strategy signals
 
     def get_account(self) -> dict:
         equity = self.cash + sum(self.positions.get(sym, 0.0) * self.current_prices.get(sym, 0.0) for sym in self.positions)
@@ -86,10 +90,12 @@ class SimBroker:
         exec_price = _apply_slippage(price, side, self.slippage_bps, self.spread_bps)
         cost = qty * exec_price
         commission = cost * (self.commission_pct / 100.0)
+        # Capture avg_entry BEFORE position update (needed for sell P&L calc)
+        _pre_avg_entry = self.avg_entry_prices.get(symbol, 0.0)
         if side.lower() == "buy":
             self.cash -= cost + commission
             prev_qty = self.positions.get(symbol, 0.0)
-            prev_avg = self.avg_entry_prices.get(symbol, 0.0)
+            prev_avg = _pre_avg_entry
             new_qty = prev_qty + qty
             if new_qty > 0:
                 self.avg_entry_prices[symbol] = (prev_avg * prev_qty + exec_price * qty) / new_qty
@@ -104,6 +110,20 @@ class SimBroker:
                 self.avg_entry_prices.pop(symbol, None)
         self._order_id += 1
         self.trades += 1
+        trade_rec = {
+            "id": self._order_id,
+            "symbol": symbol,
+            "side": side.lower(),
+            "qty": qty,
+            "price": exec_price,
+            "commission": commission,
+            "notional": cost,
+        }
+        if side.lower() == "sell":
+            avg_entry = _pre_avg_entry if _pre_avg_entry > 0 else exec_price
+            trade_rec["avg_entry"] = avg_entry
+            trade_rec["pnl_pct"] = (exec_price - avg_entry) / avg_entry * 100.0 if avg_entry > 0 else 0.0
+        self.trade_log.append(trade_rec)
         return f"sim-{self._order_id}"
 
     def close_position(self, symbol: str, **kwargs) -> None:
@@ -119,6 +139,7 @@ class SimBrokerRouter:
     def __init__(self, brokers: dict[str, SimBroker], routing: dict | None = None):
         self._brokers = brokers
         self._routing = routing or {}
+        self.signal_log: list[dict] = []  # per-bar strategy signals (set by backtest loop)
 
     @property
     def brokers(self) -> dict[str, SimBroker]:
@@ -295,6 +316,14 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
             agent._enrich_market_state(market_state, portfolio, symbol)
             market_state["strategy_symbols"] = getattr(agent, "_symbols_by_strategy", {})
             agent.run_once(symbol, market_state)
+            # Capture per-strategy signals when any strategy has a non-hold vote
+            _bar_sigs = getattr(agent, "_last_bar_signals", None)
+            if _bar_sigs and any(
+                s.get("action") != "hold" for s in _bar_sigs.get("signals", [])
+            ):
+                _bar_sigs["ts"] = str(ts)
+                _bar_sigs["price"] = market_state["last_price"]
+                broker.signal_log.append(_bar_sigs)
             _bt_total_bars += 1
         if ts_idx > 0 and ts_idx % 2000 == 0:
             logging.info("Backtest progress: bar %d/%d, trades=%d", ts_idx, len(timeline), broker.trades)
@@ -316,7 +345,22 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
         start=start.strftime("%Y-%m-%d"),
         end=end.strftime("%Y-%m-%d"),
         symbols=sorted(prepared_frames.keys()),
+        trade_details=_collect_trade_log(broker),
+        signal_log=broker.signal_log,
     )
+
+
+def _collect_trade_log(broker) -> list[dict]:
+    """Collect trade_log from SimBroker or all sub-brokers in SimBrokerRouter."""
+    if hasattr(broker, "trade_log"):
+        return broker.trade_log
+    if hasattr(broker, "_brokers"):
+        logs: list[dict] = []
+        for name, sub in broker._brokers.items():
+            for rec in sub.trade_log:
+                logs.append({**rec, "broker": name})
+        return sorted(logs, key=lambda x: x.get("id", 0))
+    return []
 
 
 def _update_backtest_positions(agent: TradingAgent, broker) -> None:

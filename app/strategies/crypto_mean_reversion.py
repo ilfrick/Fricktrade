@@ -18,6 +18,8 @@ class CryptoMeanReversionParams:
     rsi_oversold: float = 25.0
     drop_window_bars: int = 15
     hard_stop_pct: float = 3.0
+    crash_filter_window: int = 100  # bars to look back for crash detection
+    crash_filter_pct: float = 15.0  # suppress entries if drawdown from window high > this %
 
 
 class CryptoMeanReversionStrategy(Strategy):
@@ -42,6 +44,8 @@ class CryptoMeanReversionStrategy(Strategy):
             rsi_oversold=float(cfg.get("rsi_oversold", 25.0)),
             drop_window_bars=int(cfg.get("drop_window_bars", 15)),
             hard_stop_pct=float(cfg.get("hard_stop_pct", 3.0)),
+            crash_filter_window=int(cfg.get("crash_filter_window", 100)),
+            crash_filter_pct=float(cfg.get("crash_filter_pct", 15.0)),
         )
 
     def generate_signal(self, market_state: dict) -> dict:
@@ -93,6 +97,14 @@ class CryptoMeanReversionStrategy(Strategy):
             sma_excess = (last - sma) / band_range
             sell_conf = float(min(0.5 + sma_excess * 0.5, 0.9))
             return {"action": "sell", "confidence": sell_conf, "name": "crypto_mean_reversion"}
+
+        # Crash filter: suppress entries when price is in sustained freefall
+        if self.params.crash_filter_pct > 0 and len(close) > self.params.crash_filter_window:
+            window_high = float(close[-self.params.crash_filter_window:].max())
+            if window_high > 0:
+                drawdown_pct = (window_high - last) / window_high * 100.0
+                if drawdown_pct >= self.params.crash_filter_pct:
+                    return {"action": "hold", "confidence": 0.0, "name": "crypto_mean_reversion"}
 
         if last < lower_band and rsi < self.params.rsi_oversold and fast_drop:
             # Confidence scales with distance below lower band

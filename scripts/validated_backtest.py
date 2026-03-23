@@ -45,6 +45,7 @@ HOLDOUT_FRACTION = 0.20  # Reserve last 20% of data
 # ---------------------------------------------------------------------------
 
 _STRATEGY_KEYS = [
+    "strategy.names",
     "strategy.combine",
     "strategy.weights",
     "strategy.min_conviction",
@@ -281,6 +282,8 @@ def cmd_validate(cfg: dict, candidate_id: int | None) -> None:
     fold_returns: list[float] = []
     fold_trades: list[int] = []
     fold_sharpes: list[float] = []
+    all_trade_details: list[dict] = []
+    all_signal_logs: list[dict] = []
 
     header = f"{'Fold':>4}  {'Test period':>23}  {'Return%':>8}  {'Trades':>6}  {'Sharpe':>8}"
     print(header)
@@ -297,6 +300,17 @@ def cmd_validate(cfg: dict, candidate_id: int | None) -> None:
             trades = int(result.trades) if hasattr(result, "trades") else int(result.total_trades)
             sc = _scorecard([ret_pct])
             sharpe = sc["sharpe"]
+            # Collect trade details for analysis
+            all_trade_details.extend(
+                {**t, "fold": idx, "fold_start": test_start.strftime("%Y-%m-%d"),
+                 "fold_end": test_end.strftime("%Y-%m-%d")}
+                for t in getattr(result, "trade_details", [])
+            )
+            # Collect per-strategy signal logs
+            all_signal_logs.extend(
+                {**s, "fold": idx}
+                for s in getattr(result, "signal_log", [])
+            )
         except Exception as exc:
             logger.warning("Fold %d failed: %s", idx, exc)
             ret_pct, trades, sharpe = 0.0, 0, 0.0
@@ -361,6 +375,158 @@ def cmd_validate(cfg: dict, candidate_id: int | None) -> None:
         print(f"\n→ Candidate #{candidate['id']} FAILS Bonferroni-corrected validation.")
         print(f"  OOS performance not significantly > 0 at adjusted α={adj_alpha:.4f}")
         print(f"  Do NOT run hold-out. Tune the strategy and register a new candidate.")
+
+    # --- Detailed trade analysis ---
+    if all_trade_details:
+        _print_trade_analysis(all_trade_details, fold_returns)
+        # Persist to JSON for deeper analysis
+        analysis_path = REGISTRY_PATH.parent / f"backtest_trades_c{candidate['id']}.json"
+        try:
+            with open(analysis_path, "w") as f:
+                json.dump(all_trade_details, f, default=str)
+            print(f"\nTrade details saved to {analysis_path}")
+        except Exception as exc:
+            logger.warning("Failed to save trade details: %s", exc)
+
+    # --- Per-strategy signal analysis ---
+    if all_signal_logs:
+        _print_signal_analysis(all_signal_logs, all_trade_details)
+        sig_path = REGISTRY_PATH.parent / f"backtest_signals_c{candidate['id']}.json"
+        try:
+            with open(sig_path, "w") as f:
+                json.dump(all_signal_logs, f, default=str)
+            print(f"Signal log saved to {sig_path}")
+        except Exception as exc:
+            logger.warning("Failed to save signal log: %s", exc)
+
+
+def _print_trade_analysis(trades: list[dict], fold_returns: list[float]) -> None:
+    """Print per-symbol and per-fold trade analysis."""
+    sells = [t for t in trades if t.get("side") == "sell" and "pnl_pct" in t]
+    if not sells:
+        print("\nNo completed trades to analyze.")
+        return
+
+    print(f"\n{'='*70}")
+    print("TRADE ANALYSIS")
+    print(f"{'='*70}")
+
+    # Per-fold breakdown
+    print(f"\n{'Fold':>4}  {'Buys':>5}  {'Sells':>5}  {'Wins':>4}  {'Losses':>6}  {'WinRate':>7}  {'AvgPnL%':>8}  {'TotalPnL%':>10}")
+    print("-" * 70)
+    for fi in sorted(set(t["fold"] for t in trades)):
+        fold_sells = [t for t in sells if t["fold"] == fi]
+        fold_buys = [t for t in trades if t["fold"] == fi and t["side"] == "buy"]
+        wins = [t for t in fold_sells if t["pnl_pct"] > 0]
+        losses = [t for t in fold_sells if t["pnl_pct"] <= 0]
+        wr = len(wins) / len(fold_sells) * 100 if fold_sells else 0
+        avg_pnl = sum(t["pnl_pct"] for t in fold_sells) / len(fold_sells) if fold_sells else 0
+        total_pnl = sum(t["pnl_pct"] for t in fold_sells)
+        print(f"{fi:>4}  {len(fold_buys):>5}  {len(fold_sells):>5}  {len(wins):>4}  {len(losses):>6}  {wr:>6.1f}%  {avg_pnl:>+7.3f}%  {total_pnl:>+9.3f}%")
+
+    # Per-symbol breakdown
+    print(f"\n{'Symbol':>12}  {'Sells':>5}  {'Wins':>4}  {'WinRate':>7}  {'AvgPnL%':>8}  {'TotalPnL%':>10}")
+    print("-" * 60)
+    sym_data = {}
+    for t in sells:
+        sym_data.setdefault(t["symbol"], []).append(t)
+    for sym in sorted(sym_data, key=lambda s: sum(t["pnl_pct"] for t in sym_data[s])):
+        st = sym_data[sym]
+        wins = [t for t in st if t["pnl_pct"] > 0]
+        wr = len(wins) / len(st) * 100 if st else 0
+        avg_pnl = sum(t["pnl_pct"] for t in st) / len(st) if st else 0
+        total_pnl = sum(t["pnl_pct"] for t in st)
+        print(f"{sym:>12}  {len(st):>5}  {len(wins):>4}  {wr:>6.1f}%  {avg_pnl:>+7.3f}%  {total_pnl:>+9.3f}%")
+
+    # Overall summary
+    wins = [t for t in sells if t["pnl_pct"] > 0]
+    losses = [t for t in sells if t["pnl_pct"] <= 0]
+    avg_win = sum(t["pnl_pct"] for t in wins) / len(wins) if wins else 0
+    avg_loss = sum(t["pnl_pct"] for t in losses) / len(losses) if losses else 0
+    print(f"\nOverall: {len(sells)} sells, {len(wins)} wins ({len(wins)/len(sells)*100:.1f}%), {len(losses)} losses")
+    print(f"Avg win: {avg_win:+.3f}%  Avg loss: {avg_loss:+.3f}%  Ratio: {abs(avg_win/avg_loss) if avg_loss else 0:.2f}")
+
+
+def _print_signal_analysis(signals: list[dict], trades: list[dict]) -> None:
+    """Print per-strategy signal accuracy vs final execution outcome."""
+    if not signals:
+        return
+
+    print(f"\n{'='*70}")
+    print("STRATEGY SIGNAL ANALYSIS")
+    print(f"{'='*70}")
+
+    # Aggregate per-strategy vote counts and agreement with final action
+    strat_stats: dict[str, dict] = {}
+    for rec in signals:
+        final = rec.get("final_action", "hold")
+        for sig in rec.get("signals", []):
+            name = sig.get("name", "?")
+            action = sig.get("action", "hold")
+            conf = float(sig.get("confidence", 0) or 0)
+            s = strat_stats.setdefault(name, {
+                "buy": 0, "sell": 0, "hold": 0,
+                "agree_buy": 0, "agree_sell": 0, "total_conf": 0.0, "n_nonhold": 0,
+            })
+            s[action] = s.get(action, 0) + 1
+            if action != "hold":
+                s["total_conf"] += conf
+                s["n_nonhold"] += 1
+            if action == final and action != "hold":
+                s[f"agree_{action}"] += 1
+
+    print(f"\n{'Strategy':<25} {'Buy':>5} {'Sell':>5} {'Hold':>6} {'AvgConf':>8} {'BuyAgree':>9} {'SellAgree':>10}")
+    print("-" * 75)
+    for name in sorted(strat_stats):
+        s = strat_stats[name]
+        avg_conf = s["total_conf"] / s["n_nonhold"] if s["n_nonhold"] > 0 else 0
+        buy_agree = f"{s['agree_buy']}/{s['buy']}" if s["buy"] else "-"
+        sell_agree = f"{s['agree_sell']}/{s['sell']}" if s["sell"] else "-"
+        print(f"{name:<25} {s['buy']:>5} {s['sell']:>5} {s['hold']:>6} {avg_conf:>7.3f} {buy_agree:>9} {sell_agree:>10}")
+
+    # Signal-to-outcome: when a strategy said "buy", what happened to the trade?
+    # Build a lookup: symbol+fold → list of sell P&Ls
+    sell_pnl: dict[str, list[float]] = {}
+    for t in trades:
+        if t.get("side") == "sell" and "pnl_pct" in t:
+            key = f"{t['symbol']}_{t.get('fold', 0)}"
+            sell_pnl.setdefault(key, []).append(t["pnl_pct"])
+
+    # For each strategy's buy signal, find if the resulting trade was profitable
+    print(f"\n{'Strategy':<25} {'BuySignals':>10} {'Executed':>8} {'Profitable':>10} {'AvgPnL':>8}")
+    print("-" * 65)
+    for name in sorted(strat_stats):
+        buy_signals = 0
+        executed = 0
+        profitable = 0
+        pnl_sum = 0.0
+        for rec in signals:
+            for sig in rec.get("signals", []):
+                if sig.get("name") == name and sig.get("action") == "buy":
+                    buy_signals += 1
+                    if rec.get("final_action") == "buy":
+                        key = f"{rec['symbol']}_{rec.get('fold', 0)}"
+                        pnls = sell_pnl.get(key, [])
+                        if pnls:
+                            executed += 1
+                            avg_pnl = sum(pnls) / len(pnls)
+                            pnl_sum += avg_pnl
+                            if avg_pnl > 0:
+                                profitable += 1
+        avg = pnl_sum / executed if executed > 0 else 0
+        print(f"{name:<25} {buy_signals:>10} {executed:>8} {profitable:>10} {avg:>+7.3f}%")
+
+    # Disagreements: when strategies voted differently, which was right?
+    disagree_count = 0
+    for rec in signals:
+        sigs = rec.get("signals", [])
+        actions = set(s.get("action") for s in sigs)
+        if len(actions) > 1 and "hold" in actions:
+            actions.discard("hold")
+        if len(actions) > 1:
+            disagree_count += 1
+    total = len(signals)
+    print(f"\nDisagreements: {disagree_count}/{total} bars ({disagree_count/total*100:.1f}%) where strategies voted differently")
 
 
 def cmd_holdout(cfg: dict, candidate_id: int | None) -> None:
