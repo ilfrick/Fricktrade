@@ -198,6 +198,7 @@ risk:
     max_position_size_pct: 90.0
     max_crypto_exposure_pct: 50.0
     hard_stop_pct: 6.0       # raised from 4.0 — altcoins need room before reversion completes
+    atr_stop_mult: 2.5       # ATR multiplier for crypto stop-loss (was hardcoded)
     trailing_stop_pct: 4.5
     take_profit_pct: 5.0
     circuit_breaker_drawdown_pct: 8.0
@@ -374,13 +375,13 @@ strategy:
       min_return_pct: 0.15  # per-bar threshold scales automatically with window size
       trailing_stop_pct: 2.0
     crypto_mean_reversion:
-      bb_period: 100      # 100 bars × 1m = 100min (was 20 × 5m)
+      bb_period: 50       # sensitivity analysis: +1.0% avg return vs +0.1% at 100
       bb_std: 2.0
       rsi_period: 70      # 70 bars × 1m = 70min (was 14 × 5m)
       rsi_oversold: 30.0  # 35 catches normal pullbacks; 30 targets genuine oversold conditions
       drop_window_bars: 75  # 75 bars × 1m = 75min (was 15 × 5m)
       hard_stop_pct: 5.0       # raised from 3.0 — altcoins whipsaw through tight stops
-      crash_filter_pct: 0       # disabled — suppressed too many good entries in backtest
+      crash_filter_pct: 0        # disabled — hurt performance in Bonferroni testing
     gap_reversal:
       min_gap_pct: 2.0
       target_fill_pct: 50.0

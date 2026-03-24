@@ -54,8 +54,13 @@ _STRATEGY_KEYS = [
     "strategy.strategies",
     "data.interval",
     "risk.vol_targeting",
+    "risk.crypto.hard_stop_pct",
     "risk.crypto.trailing_stop_pct",
+    "risk.crypto.take_profit_pct",
     "risk.crypto.circuit_breaker_drawdown_pct",
+    "risk.hard_stop_pct",
+    "risk.take_profit_pct",
+    "risk.partial_take_profit_pct",
     "execution.position_exit.peak_detection",
     "order_book",
 ]

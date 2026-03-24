@@ -754,7 +754,8 @@ class TradingAgent:
                 _crypto_cfg_atr = (risk_cfg.get("crypto") or {}) if is_crypto else {}
                 _equity_cfg_atr = (risk_cfg.get("equity") or {}) if not is_crypto else {}
                 _hs = float(_crypto_cfg_atr.get("hard_stop_pct") or _equity_cfg_atr.get("hard_stop_pct") or risk_cfg.get("hard_stop_pct", 0) or 0)
-                atr_mult = 2.5 if is_crypto else 1.5
+                _default_atr = 2.5 if is_crypto else 1.5
+                atr_mult = float(_crypto_cfg_atr.get("atr_stop_mult") or _equity_cfg_atr.get("atr_stop_mult") or risk_cfg.get("atr_stop_mult", _default_atr) or _default_atr)
                 atr_stop_price = avg_entry - atr * atr_mult
                 if _hs > 0:
                     atr_stop_price = max(atr_stop_price, avg_entry * (1.0 - _hs / 100.0))
