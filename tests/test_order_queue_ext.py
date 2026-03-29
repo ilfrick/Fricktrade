@@ -36,7 +36,7 @@ class TestFIFOStability:
         # Enqueue two items — first may be popped by _start_next
         queue.enqueue("AAPL", "buy", 10, earliest_at=now)
         queue.enqueue("GOOG", "buy", 5, earliest_at=now)
-        # Collect seqs from both active and queue
+        # Collect seqs from both active and entry queue
         all_items = list(queue._queue)
         if queue._active is not None:
             all_items.append(queue._active)
@@ -132,3 +132,82 @@ class TestPositionCloseBypass:
                           is_position_close=False)
         queue._enqueue_retry(req)
         assert queue._retry_notional_used == 500.0
+
+    def test_position_close_retry_routes_to_exit_queue(self):
+        queue = OrderQueue(
+            _mock_broker(), "test",
+            retry_cfg={"enabled": True, "max_attempts": 3, "backoff_seconds": 0,
+                       "max_notional": 1000},
+        )
+        req = OrderRequest(symbol="AAPL", side="sell", qty=10, notional=500.0,
+                          is_position_close=True)
+        queue._enqueue_retry(req)
+        assert len(queue._exit_queue) == 1
+        assert len(queue._queue) == 0
+
+    def test_regular_retry_routes_to_entry_queue(self):
+        queue = OrderQueue(
+            _mock_broker(), "test",
+            retry_cfg={"enabled": True, "max_attempts": 3, "backoff_seconds": 0,
+                       "max_notional": 5000},
+        )
+        req = OrderRequest(symbol="AAPL", side="buy", qty=10, notional=500.0,
+                          is_position_close=False)
+        queue._enqueue_retry(req)
+        assert len(queue._queue) == 1
+        assert len(queue._exit_queue) == 0
+
+
+class TestDualLane:
+    """Exit orders run in a separate lane, never blocked by entry orders."""
+
+    def test_exit_bypasses_active_entry(self):
+        """An exit order executes immediately even when an entry is active."""
+        broker = MagicMock()
+        broker.place_order.side_effect = lambda sym, *a, **kw: f"id-{sym}"
+        queue = OrderQueue(broker, "test")
+
+        # Enqueue an entry — becomes active
+        entry_id = queue.enqueue("BTC/USD", "buy", 0.1)
+        assert entry_id == "id-BTC/USD"
+        assert queue._active is not None
+
+        # Enqueue an exit — should start immediately in exit lane
+        exit_id = queue.enqueue("ETH/USD", "sell", 1.0, is_position_close=True)
+        assert exit_id == "id-ETH/USD"
+        assert queue._active_exit is not None
+
+        # Both lanes active simultaneously
+        assert queue._active.symbol == "BTC/USD"
+        assert queue._active_exit.symbol == "ETH/USD"
+        assert broker.place_order.call_count == 2
+
+    def test_exit_completion_frees_exit_lane_only(self):
+        """Completing an exit doesn't affect the entry lane."""
+        broker = MagicMock()
+        broker.place_order.side_effect = lambda sym, *a, **kw: f"id-{sym}"
+        queue = OrderQueue(broker, "test", completion_grace_seconds=0)
+
+        queue.enqueue("BTC/USD", "buy", 0.1)
+        queue.enqueue("ETH/USD", "sell", 1.0, is_position_close=True)
+
+        # Exit fills (disappears from open_orders), entry still open
+        queue.update([{"order_id": "id-BTC/USD", "symbol": "BTC/USD", "side": "buy", "qty": 0.1}])
+        responses = queue.pop_responses()
+        assert any(r.status == "completed" and r.symbol == "ETH/USD" for r in responses)
+        assert queue._active_exit is None  # exit lane free
+        assert queue._active is not None   # entry lane still busy
+
+    def test_entry_queues_while_exit_runs(self):
+        """A second entry queues behind the first; exits are unaffected."""
+        broker = MagicMock()
+        broker.place_order.side_effect = lambda sym, *a, **kw: f"id-{sym}"
+        queue = OrderQueue(broker, "test")
+
+        queue.enqueue("BTC/USD", "buy", 0.1)
+        second = queue.enqueue("SOL/USD", "buy", 5.0)
+        assert second == "queued"  # blocked behind BTC entry
+
+        # Exit still goes through immediately
+        exit_id = queue.enqueue("ETH/USD", "sell", 1.0, is_position_close=True)
+        assert exit_id == "id-ETH/USD"

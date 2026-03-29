@@ -79,16 +79,23 @@ class OrderQueue:
         self._broker = broker
         self._broker_name = broker_name
         self._retry_cfg = retry_cfg or {}
+        # Entry lane
         self._queue: list[OrderRequest] = []  # heapq
         self._active: OrderRequest | None = None
         self._active_snapshot: dict | None = None
+        self._missing_since: datetime | None = None
+        # Exit lane: position-close orders run in parallel with entries
+        self._exit_queue: list[OrderRequest] = []  # heapq
+        self._active_exit: OrderRequest | None = None
+        self._active_exit_snapshot: dict | None = None
+        self._exit_missing_since: datetime | None = None
+
         self._cancel_requested: set[str] = set()
         self._responses: list[OrderResponse] = []
         self._retry_notional_used = 0.0
         self._retry_reset_date: date | None = None
         self._seq_counter = itertools.count()
         self._completion_grace_seconds = max(int(completion_grace_seconds), 0)
-        self._missing_since: datetime | None = None
         self._lock = threading.Lock()
 
     def enqueue(
@@ -119,12 +126,20 @@ class OrderQueue:
 
         with self._lock:
             request._seq = next(self._seq_counter)
-            heapq.heappush(self._queue, request)
-            if self._active is None:
-                self._start_next()
-                if self._active:
-                    result_order_id = self._active.order_id
-                    started_immediately = True
+            if is_position_close:
+                heapq.heappush(self._exit_queue, request)
+                if self._active_exit is None:
+                    self._start_next(exit_lane=True)
+                    if self._active_exit:
+                        result_order_id = self._active_exit.order_id
+                        started_immediately = True
+            else:
+                heapq.heappush(self._queue, request)
+                if self._active is None:
+                    self._start_next(exit_lane=False)
+                    if self._active:
+                        result_order_id = self._active.order_id
+                        started_immediately = True
 
         if not started_immediately:
             logging.info("Order queued: %s %s qty=%s type=%s", side, symbol, qty, order_type)
@@ -142,76 +157,99 @@ class OrderQueue:
         open_by_id = {str(o.get("order_id")): o for o in open_orders if o.get("order_id")}
         open_ids = set(open_by_id.keys())
         with self._lock:
-            if self._active and self._active.order_id:
-                active_id = self._active.order_id
-                if active_id in open_by_id:
-                    # Stuck-order timeout: if the order has been open longer than
-                    # max_order_age_seconds, cancel it and unblock the queue.
-                    # Default 0 = disabled.
-                    max_age = int(self._retry_cfg.get("max_order_age_seconds", 0))
-                    age = (now - self._active.created_at).total_seconds()
-                    timed_out = max_age > 0 and age > max_age
-                    if timed_out:
-                        try:
-                            self._broker.cancel_order(active_id)
-                        except Exception as _exc:
-                            logging.warning(
-                                "Stuck order cancel failed (%s %s id=%s age=%.0fs): %s",
-                                self._active.side, self._active.symbol, active_id, age, _exc,
-                            )
-                        logging.warning(
-                            "Stuck order timed out after %.0fs — cancelled and unblocked queue "
-                            "(%s %s qty=%s id=%s)",
-                            age, self._active.side, self._active.symbol,
-                            self._active.qty, active_id,
-                        )
-                        self._responses.append(OrderResponse(
-                            symbol=self._active.symbol,
-                            broker=self._broker_name,
-                            status="timed_out",
-                            order_id=active_id,
-                            side=self._active.side,
-                            qty=self._active.qty,
-                            reserved_notional=float(self._active.notional or 0.0),
-                        ))
-                        self._cancel_requested.discard(active_id)
-                        self._active = None
-                        self._active_snapshot = None
-                    else:
-                        self._missing_since = None
-                        snapshot = open_by_id[active_id]
-                        response = self._response_from_snapshot(snapshot, "open")
-                        if response and response != self._active_snapshot:
-                            self._active_snapshot = response
-                            self._responses.append(OrderResponse(**response))
-                elif active_id not in open_ids:
-                    if self._completion_grace_seconds > 0:
-                        if self._missing_since is None:
-                            self._missing_since = now
-                            return
-                        if (now - self._missing_since).total_seconds() < self._completion_grace_seconds:
-                            return
-                    self._missing_since = None
-                    status = "canceled" if self._active.order_id in self._cancel_requested else "completed"
-                    snapshot = self._active_snapshot or {}
-                    self._responses.append(
-                        OrderResponse(
-                            symbol=self._active.symbol,
-                            broker=self._broker_name,
-                            status=status,
-                            order_id=self._active.order_id,
-                            side=self._active.side,
-                            qty=self._active.qty,
-                            filled_qty=snapshot.get("filled_qty"),
-                            filled_avg_price=snapshot.get("filled_avg_price"),
-                            reserved_notional=float(self._active.notional or 0.0),
-                        )
-                    )
-                    self._cancel_requested.discard(self._active.order_id)
-                    self._active = None
-                    self._active_snapshot = None
+            # Update entry lane
+            self._active, self._active_snapshot, self._missing_since = (
+                self._update_lane(
+                    self._active, self._active_snapshot, self._missing_since,
+                    open_by_id, open_ids, now,
+                )
+            )
             if self._active is None and self._queue:
-                self._start_next()
+                self._start_next(exit_lane=False)
+            # Update exit lane
+            self._active_exit, self._active_exit_snapshot, self._exit_missing_since = (
+                self._update_lane(
+                    self._active_exit, self._active_exit_snapshot,
+                    self._exit_missing_since, open_by_id, open_ids, now,
+                )
+            )
+            if self._active_exit is None and self._exit_queue:
+                self._start_next(exit_lane=True)
+
+    def _update_lane(
+        self,
+        active: OrderRequest | None,
+        snapshot: dict | None,
+        missing_since: datetime | None,
+        open_by_id: dict[str, dict],
+        open_ids: set[str],
+        now: datetime,
+    ) -> tuple[OrderRequest | None, dict | None, datetime | None]:
+        """Check one lane's active order. Must be called with lock held.
+
+        Returns (active, snapshot, missing_since). active=None means the lane
+        is free and ready to start the next order.
+        """
+        if not active or not active.order_id:
+            return active, snapshot, missing_since
+
+        active_id = active.order_id
+        if active_id in open_by_id:
+            max_age = int(self._retry_cfg.get("max_order_age_seconds", 0))
+            age = (now - active.created_at).total_seconds()
+            if max_age > 0 and age > max_age:
+                try:
+                    self._broker.cancel_order(active_id)
+                except Exception as _exc:
+                    logging.warning(
+                        "Stuck order cancel failed (%s %s id=%s age=%.0fs): %s",
+                        active.side, active.symbol, active_id, age, _exc,
+                    )
+                logging.warning(
+                    "Stuck order timed out after %.0fs — cancelled and unblocked queue "
+                    "(%s %s qty=%s id=%s)",
+                    age, active.side, active.symbol, active.qty, active_id,
+                )
+                self._responses.append(OrderResponse(
+                    symbol=active.symbol,
+                    broker=self._broker_name,
+                    status="timed_out",
+                    order_id=active_id,
+                    side=active.side,
+                    qty=active.qty,
+                    reserved_notional=float(active.notional or 0.0),
+                ))
+                self._cancel_requested.discard(active_id)
+                return None, None, None
+            # Still open, not timed out
+            resp_data = self._response_from_snapshot(open_by_id[active_id], "open")
+            if resp_data and resp_data != snapshot:
+                self._responses.append(OrderResponse(**resp_data))
+                return active, resp_data, None
+            return active, snapshot, None
+
+        # Order disappeared from open_orders
+        if self._completion_grace_seconds > 0:
+            if missing_since is None:
+                return active, snapshot, now  # start grace period
+            if (now - missing_since).total_seconds() < self._completion_grace_seconds:
+                return active, snapshot, missing_since  # still in grace
+
+        status = "canceled" if active.order_id in self._cancel_requested else "completed"
+        snap = snapshot or {}
+        self._responses.append(OrderResponse(
+            symbol=active.symbol,
+            broker=self._broker_name,
+            status=status,
+            order_id=active.order_id,
+            side=active.side,
+            qty=active.qty,
+            filled_qty=snap.get("filled_qty"),
+            filled_avg_price=snap.get("filled_avg_price"),
+            reserved_notional=float(active.notional or 0.0),
+        ))
+        self._cancel_requested.discard(active.order_id)
+        return None, None, None
 
     def pop_responses(self) -> list[OrderResponse]:
         with self._lock:
@@ -219,17 +257,18 @@ class OrderQueue:
             self._responses = []
             return responses
 
-    def _start_next(self) -> None:
-        """Start processing the next order in queue. Must be called with lock held."""
-        if not self._queue:
+    def _start_next(self, exit_lane: bool = False) -> None:
+        """Start processing the next order from the given lane. Must be called with lock held."""
+        queue = self._exit_queue if exit_lane else self._queue
+        if not queue:
             return
         now = datetime.now(timezone.utc)
         # Peek at the top of the heap
-        request = self._queue[0]
+        request = queue[0]
         if request.earliest_at > now:
             return
         # Pop from heap
-        request = heapq.heappop(self._queue)
+        request = heapq.heappop(queue)
         try:
             order_id = self._broker.place_order(
                 request.symbol,
@@ -294,7 +333,10 @@ class OrderQueue:
             )
             return
         request.order_id = str(order_id)
-        self._active = request
+        if exit_lane:
+            self._active_exit = request
+        else:
+            self._active = request
         self._responses.append(
             OrderResponse(
                 symbol=request.symbol,
@@ -365,7 +407,8 @@ class OrderQueue:
             notional = float(request.notional or 0.0)
             if notional > 0:
                 self._retry_notional_used += notional
-        heapq.heappush(self._queue, request)
+        queue = self._exit_queue if request.is_position_close else self._queue
+        heapq.heappush(queue, request)
 
 
 def _reject_reason(code: str, exc: Exception) -> str:
