@@ -363,6 +363,7 @@ class TradingAgent:
         # Rebalance engine
         self._rebalance_engine = None
         self._signal_expected_returns: dict[str, float] = {}
+        self._last_indicators: dict[str, dict] = {}  # per-symbol indicator cache for entry ranking
         self._init_llm()
         self._init_quote_stream()
         self._init_rebalance_engine()
@@ -1209,6 +1210,7 @@ class TradingAgent:
                 if _ms_vols.size < _ms_closes.size:
                     _ms_vols = np.ones_like(_ms_closes)
                 market_state["indicators"] = _compute_ind(_ms_opens, _ms_highs, _ms_lows, _ms_closes, _ms_vols)
+                self._last_indicators[symbol] = market_state["indicators"]
             except Exception as exc:
                 logging.debug("Indicator injection failed for %s: %s", symbol, exc)
 
@@ -3277,9 +3279,11 @@ class TradingAgent:
                 )
 
         # Cluster 2: ALL new-entry candidates across ALL brokers
+        # Rank non-holders so best MR candidates get budget priority
         non_holder_futures = []
         for broker_override, bp, _, non_holders in batch_contexts:
-            non_holder_futures.extend(_submit_syms(non_holders, broker_override, bp))
+            ranked = self._rank_entry_candidates(non_holders)
+            non_holder_futures.extend(_submit_syms(ranked, broker_override, bp))
         if non_holder_futures:
             done, still_running = wait(non_holder_futures, timeout=120)
             if still_running:
@@ -3290,6 +3294,60 @@ class TradingAgent:
 
         # Rebalance pass after all signals settled
         self._maybe_rebalance(portfolio)
+
+    def _rank_entry_candidates(self, symbols: list[str]) -> list[str]:
+        """Rank non-holder symbols by MR opportunity score (best candidates first).
+
+        Uses cached indicators from previous cycle + live data streams.
+        Symbols with no cached data get a neutral score (processed last).
+
+        Score components (MR-optimized):
+        - Bollinger %B proximity to lower band (40%) — lower = more oversold
+        - MFI (money flow index) proximity to oversold (30%) — lower = more oversold
+        - Catalyst flag from news cache (15%)
+        - Funding extreme from live stream (15%)
+        """
+        ranking_cfg = self.cfg.get("strategy", {}).get("entry_ranking", {})
+        if not ranking_cfg.get("enabled", False):
+            return symbols
+
+        scores: list[tuple[float, str]] = []
+        for sym in symbols:
+            ind = self._last_indicators.get(sym) or {}
+            score = 0.0
+
+            # Bollinger %B: <0 means below lower band, 0 = at lower band
+            # Lower values = stronger MR opportunity
+            bb_pct_b = ind.get("bollinger_pct_b")
+            if bb_pct_b is not None:
+                bb_pct_b = float(bb_pct_b)
+                if bb_pct_b < 0.2:
+                    score += 0.4 * min(1.0, (0.2 - bb_pct_b) / 0.4)
+
+            # MFI (0-1 normalized): lower = more oversold
+            mfi_val = ind.get("mfi")
+            if mfi_val is not None:
+                mfi_val = float(mfi_val)
+                if mfi_val < 0.3:
+                    score += 0.3 * min(1.0, (0.3 - mfi_val) / 0.3)
+
+            # Catalyst flag from news cache
+            if self._news_cache.get(sym, False):
+                score += 0.15
+
+            # Funding extreme from live stream (negative = contrarian long signal)
+            if self._funding_poller is not None:
+                try:
+                    fe = self._funding_poller.get_funding_extreme(sym)
+                    if fe and float(fe) < 0:
+                        score += 0.15
+                except Exception:
+                    pass
+
+            scores.append((-score, sym))  # negative for ascending sort
+
+        scores.sort()
+        return [sym for _, sym in scores]
 
     def _maybe_rebalance(self, portfolio: dict) -> None:
         """Check whether portfolio has drifted from signal targets and enqueue rebalance trades."""

@@ -294,6 +294,8 @@ strategy:
     crypto_mean_reversion: 0.60   # primary: buy the dip (user's core intent)
     crypto_momentum: 0.40         # confirmation: momentum aligns with entry
   min_conviction: 0.25            # minimum weighted signal to act
+  entry_ranking:
+    enabled: true                   # rank non-holder symbols by MR opportunity score before processing
   signal_bias_guard:
     enabled: false
     threshold: 0.65

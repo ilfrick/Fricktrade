@@ -299,8 +299,12 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
     timeline = timeline_index.to_pydatetime()
     _bt_signal_counts: dict[str, int] = {}
     _bt_total_bars = 0
+    _rank_enabled = hasattr(agent, "_rank_entry_candidates")
     for ts_idx, ts in enumerate(timeline):
         _apply_news_cache(agent, news_cache, ts)
+
+        # Update all symbol states for this bar first (needed for ranking)
+        _bar_symbols = []
         for symbol, frame_data in prepared_frames.items():
             pos = frame_data.indexer[ts_idx]
             if pos < 0:
@@ -308,10 +312,25 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
             row = frame_data.values[pos]
             sym_state = state[symbol]
             sym_state.update_from_values(ts, row)
-            market_state = sym_state.market_state()
+            ms = sym_state.market_state()
+            if ms["last_price"] is None:
+                continue
+            broker.current_prices[symbol] = ms["last_price"]
+            _bar_symbols.append(symbol)
+
+        # Split into holders (exits first) then ranked non-holders (entries)
+        _portfolio = agent._get_portfolio_snapshot()
+        _positions = _portfolio.get("positions", {})
+        _holders = [s for s in _bar_symbols if s in _positions]
+        _non_holders = [s for s in _bar_symbols if s not in _positions]
+        if _rank_enabled:
+            _non_holders = agent._rank_entry_candidates(_non_holders)
+        _ordered = _holders + _non_holders
+
+        for symbol in _ordered:
+            market_state = state[symbol].market_state()
             if market_state["last_price"] is None:
                 continue
-            broker.current_prices[symbol] = market_state["last_price"]
             portfolio = agent._get_portfolio_snapshot()
             agent._enrich_market_state(market_state, portfolio, symbol)
             market_state["strategy_symbols"] = getattr(agent, "_symbols_by_strategy", {})
