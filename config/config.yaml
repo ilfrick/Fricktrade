@@ -843,8 +843,8 @@ healthwatch:
     - learner         # Always on — crypto data trains 24/7
     - grafana         # Always on — 24/7 monitoring
     - alertmanager    # Always on — 24/7 alerts
-    stop_services:
-    - ollama          # Shut down outside equity hours (saves GPU)
+    - ollama          # Always on — catalyst/sentiment NLP for crypto 24/7
+    stop_services:    # (none — crypto trades 24/7, all services needed)
 kill_switch:
   armed: false
   confirm_code: ''
