@@ -180,6 +180,16 @@ TAKE_PROFIT_EXITS = Counter(
     "Take-profit exit events",
     ["symbol", "reason"],
 )
+ENTRY_RANKING_SCORE = Gauge(
+    "entry_ranking_score",
+    "Entry candidate ranking score (higher = better opportunity)",
+    ["broker", "symbol"],
+)
+MARKET_SENTIMENT_SCORE = Gauge(
+    "market_sentiment_score",
+    "Aggregate market sentiment from Ollama (-1 bearish to +1 bullish)",
+    ["broker"],
+)
 
 
 def start_metrics_server(port: int):

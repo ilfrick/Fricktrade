@@ -106,7 +106,15 @@ class CryptoMomentumStrategy(Strategy):
                 rsi_mult = 0.5   # strongly overbought — halve confidence
             elif rsi > 72:
                 rsi_mult = 0.75  # moderately overbought — reduce confidence
-            confidence = min(base_conf * max(vol_boost, 0.5) * vwap_mult * rsi_mult, 1.0)
+            # Per-symbol LLM sentiment modifier (injected by trader.py via Ollama)
+            llm_sent = (market_state.get("llm_sentiment") or {})
+            sent_score = float(llm_sent.get("score", 0.0))
+            sent_conf = float(llm_sent.get("confidence", 0.0))
+            sent_mult = 1.0
+            if sent_conf >= 0.3:
+                # [-1,+1] score → [0.85, 1.15] multiplier
+                sent_mult = 1.0 + 0.15 * sent_score
+            confidence = min(base_conf * max(vol_boost, 0.5) * vwap_mult * rsi_mult * sent_mult, 1.0)
             return {
                 "action": "buy",
                 "confidence": float(confidence),

@@ -136,6 +136,19 @@ class CryptoMeanReversionStrategy(Strategy):
             if _social > 0.3:
                 confidence = min(confidence + 0.03, 1.0)
 
+            # Per-symbol LLM sentiment modifier (injected by trader.py via Ollama)
+            llm_sent = (market_state.get("llm_sentiment") or {})
+            sent_score = float(llm_sent.get("score", 0.0))
+            sent_conf = float(llm_sent.get("confidence", 0.0))
+            if sent_conf >= 0.3:
+                # For MR: contrarian — bearish sentiment *supports* the dip-buy thesis
+                # Positive score (bullish) is neutral for MR; negative (bearish) boosts
+                if sent_score < -0.3:
+                    confidence = min(confidence + 0.08, 1.0)
+                elif sent_score > 0.5:
+                    # Strong bullish during oversold? May not be a real dip — slight dampen
+                    confidence *= 0.95
+
             return {
                 "action": "buy",
                 "confidence": float(confidence),

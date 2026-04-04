@@ -69,6 +69,42 @@ Respond with this exact JSON structure:
 }}
 """
 
+CRYPTO_SENTIMENT_SYSTEM_PROMPT = """\
+You are a crypto news sentiment analyst for an automated trading system.
+You analyze news headlines to determine their likely impact on a cryptocurrency's
+price in the next 1-24 hours.
+
+RULES:
+- Score from -1.0 (extremely bearish) to +1.0 (extremely bullish)
+- 0.0 means neutral or irrelevant to price
+- Weight regulatory news heavily (exchange bans, SEC actions, country-level bans)
+- Weight protocol-level events (hacks, exploits, upgrades, partnerships)
+- Discount repetitive FUD / hype that is already priced in
+- Be skeptical of social media pump signals and promotional content
+
+Respond ONLY with valid JSON, no markdown fences, no commentary.
+"""
+
+CRYPTO_SENTIMENT_USER_TEMPLATE = """\
+Analyze the following news items for {symbol}.
+
+Current context:
+- Price: ${price:.2f} | Change: {change_pct:+.2f}%
+
+News items:
+{news_block}
+
+Respond with this exact JSON structure:
+{{
+  "symbol": "{symbol}",
+  "overall_sentiment": <float -1.0 to 1.0>,
+  "confidence": <float 0.0 to 1.0>,
+  "reasoning": "<one sentence>",
+  "recommended_bias": "<bullish|bearish|neutral>",
+  "risk_flag": "<none|hack_exploit|regulatory|high_volatility_event|low_confidence>"
+}}
+"""
+
 
 @dataclass
 class SentimentResult:
@@ -97,9 +133,11 @@ class NewsSentimentAnalyzer:
         backend: str = "gemini",
         cache_ttl_seconds: int = 900,
         min_confidence_to_inject: float = 0.3,
+        model: str | None = None,
     ):
         self.llm = llm_client
         self.backend = backend
+        self._model = model
         self._cache_ttl_seconds = cache_ttl_seconds
         self._min_confidence = min_confidence_to_inject
         # {cache_key: (SentimentResult, timestamp)}
@@ -157,26 +195,40 @@ class NewsSentimentAnalyzer:
             for i, item in enumerate(news_items[:10])
         )
 
-        user_prompt = SENTIMENT_USER_TEMPLATE.format(
-            symbol=symbol,
-            company_name=company_name or symbol,
-            price=price,
-            change_pct=change_pct,
-            sector=sector,
-            market_cap=market_cap,
-            vix=vix,
-            spy_change=spy_change,
-            news_block=news_block,
-        )
+        is_crypto = "/" in symbol
+        if is_crypto:
+            sys_prompt = CRYPTO_SENTIMENT_SYSTEM_PROMPT
+            user_prompt = CRYPTO_SENTIMENT_USER_TEMPLATE.format(
+                symbol=symbol,
+                price=price,
+                change_pct=change_pct,
+                news_block=news_block,
+            )
+        else:
+            sys_prompt = SENTIMENT_SYSTEM_PROMPT
+            user_prompt = SENTIMENT_USER_TEMPLATE.format(
+                symbol=symbol,
+                company_name=company_name or symbol,
+                price=price,
+                change_pct=change_pct,
+                sector=sector,
+                market_cap=market_cap,
+                vix=vix,
+                spy_change=spy_change,
+                news_block=news_block,
+            )
 
         try:
-            response = self.llm.complete(
+            kwargs = dict(
                 backend=self.backend,
-                system_prompt=SENTIMENT_SYSTEM_PROMPT,
+                system_prompt=sys_prompt,
                 user_prompt=user_prompt,
-                max_tokens=1024,
+                max_tokens=512 if is_crypto else 1024,
                 temperature=0.1,
             )
+            if self._model:
+                kwargs["model"] = self._model
+            response = self.llm.complete(**kwargs)
             data = response.parse_json()
 
             result = SentimentResult(

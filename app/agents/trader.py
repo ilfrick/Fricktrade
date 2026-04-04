@@ -50,6 +50,8 @@ from app.monitoring.metrics import (
     TRADES_BY_BROKER,
     PORTFOLIO_SCALE_FALLBACK,
     TAKE_PROFIT_EXITS,
+    ENTRY_RANKING_SCORE,
+    MARKET_SENTIMENT_SCORE,
 )
 from app.monitoring.audit import AuditLogger, ComplianceLogger
 from app.risk.manager import RiskManager
@@ -181,7 +183,7 @@ class TradingAgent:
         self._loop_heartbeat: float = 0.0  # updated each loop iteration; monitored by watchdog
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
-        self._news_executor = ThreadPoolExecutor(max_workers=1)
+        self._news_executor = ThreadPoolExecutor(max_workers=2)
         _executor_workers = int(cfg.get("execution", {}).get("symbol_executor_workers", 4))
         self._symbol_executor = ThreadPoolExecutor(max_workers=max(1, _executor_workers))
         self._news_future = None
@@ -402,6 +404,7 @@ class TradingAgent:
                     backend=backend,
                     cache_ttl_seconds=int(sent_cfg.get("cache_ttl_seconds", 900)),
                     min_confidence_to_inject=float(sent_cfg.get("min_confidence_to_inject", 0.3)),
+                    model=sent_cfg.get("model"),
                 )
             # Ollama aggregate sentiment (free, local, runs every 15 min in background)
             ollama_sent_cfg = llm_cfg.get("ollama_sentiment", {})
@@ -527,10 +530,10 @@ class TradingAgent:
         regime = market_state.get("regime_name", "")
         regime_mult = {"crisis": 0.6, "high_vol": 0.8, "low_vol_trending": 1.15}.get(regime, 1.0)
 
-        # LLM sentiment adjustment (applies to all)
-        llm_sent = market_state.get("llm_sentiment", {})
-        sent_score = float(llm_sent.get("score", 0.5) if isinstance(llm_sent, dict) else 0.5)
-        sent_mult = 0.85 + 0.3 * sent_score  # [0.85, 1.15] range
+        # LLM sentiment: strategies now read llm_sentiment directly for confidence
+        # boosting, so we no longer apply a blanket multiplier here to avoid
+        # double-application.  Keep sent_mult=1.0 so downstream math is unchanged.
+        sent_mult = 1.0
 
         # Alt-data: read flat keys written by _enrich_market_state (not nested under "alt_data")
         fear_greed = float(market_state.get("fear_greed_index", 50) or 50)
@@ -3308,10 +3311,21 @@ class TradingAgent:
         - MFI (money flow index) proximity to oversold (30%) — lower = more oversold
         - Catalyst flag from news cache (15%)
         - Funding extreme from live stream (15%)
+
+        Aggregate sentiment gate: when Ollama aggregate sentiment is strongly bearish
+        (score < -0.4 and confidence >= 0.5), all entry scores are penalized by 30%.
         """
         ranking_cfg = self.cfg.get("strategy", {}).get("entry_ranking", {})
         if not ranking_cfg.get("enabled", False):
             return symbols
+
+        # Aggregate sentiment penalty — market-wide, can't differentiate symbols
+        agg_sent_penalty = 1.0
+        if self._ollama_sentiment is not None:
+            agg = self._ollama_sentiment.get_last()
+            if agg.score < -0.4 and agg.confidence >= 0.5:
+                agg_sent_penalty = 0.7
+                logger.debug("Ranking: aggregate sentiment bearish (%.2f), penalizing scores 30%%", agg.score)
 
         scores: list[tuple[float, str]] = []
         for sym in symbols:
@@ -3346,10 +3360,23 @@ class TradingAgent:
                 except Exception:
                     pass
 
+            score *= agg_sent_penalty
             scores.append((-score, sym))  # negative for ascending sort
 
         scores.sort()
-        return [sym for _, sym in scores]
+        ranked = [sym for _, sym in scores]
+
+        # Emit Prometheus metrics for Grafana live ranking panel
+        for neg_score, sym in scores:
+            for bname in self._broker_states:
+                ENTRY_RANKING_SCORE.labels(broker=bname, symbol=sym).set(-neg_score)
+        # Emit aggregate sentiment score
+        if self._ollama_sentiment is not None:
+            agg = self._ollama_sentiment.get_last()
+            for bname in self._broker_states:
+                MARKET_SENTIMENT_SCORE.labels(broker=bname).set(agg.score)
+
+        return ranked
 
     def _maybe_rebalance(self, portfolio: dict) -> None:
         """Check whether portfolio has drifted from signal targets and enqueue rebalance trades."""

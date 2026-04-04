@@ -294,6 +294,7 @@ strategy:
     crypto_mean_reversion: 0.60   # primary: buy the dip (user's core intent)
     crypto_momentum: 0.40         # confirmation: momentum aligns with entry
   min_conviction: 0.25            # minimum weighted signal to act
+  single_sided_conviction_multiplier: 0.6  # reduce min_conviction when only one side signals (e.g. buy with no sell)
   entry_ranking:
     enabled: true                   # rank non-holder symbols by MR opportunity score before processing
   signal_bias_guard:
@@ -1035,13 +1036,12 @@ llm:
     refresh_hours: 4
     backend: gemini
 
-  # Sentiment analyzer — per-symbol news analysis
-  # Disabled: vote mode skips _enrich_signals entirely so scores never reach decisions.
-  # Re-enable with backend: gemini when switching to weighted/confidence combine mode.
-  # Local Ollama (llama3.1:8b, 4.4GB VRAM) generates at ~0.5 tok/s — full JSON
-  # response needs 200-500 tokens = 400-1000s per call, well beyond the 45s timeout.
+  # Per-symbol sentiment via local Ollama (llama3.2:3b, ~1.5s/call).
+  # Injected into market_state["llm_sentiment"] for strategies to read directly.
+  # Uses 3B model (not 8B) — fast enough for 33 symbols within a 5-min cycle.
   sentiment:
-    enabled: false
+    enabled: true
+    model: llama3.2:3b
     cache_ttl_seconds: 900
     max_news_items: 10
     min_confidence_to_inject: 0.3
