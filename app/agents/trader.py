@@ -1695,6 +1695,12 @@ class TradingAgent:
                     self._record_exit_failure(broker_name, symbol)
                     self._emit_decision_trace(trace, "skip", "close_failed", "sizing")
                     return None
+                # close_position is a direct broker call (not via order queue), so
+                # _flush_order_responses never sees it. Clear pending sell qty here.
+                if _exit_qty > 0:
+                    with self._pending_sell_qty_lock:
+                        _exit_ps_key = (broker_name, symbol)
+                        self._pending_sell_qty.pop(_exit_ps_key, None)
                 self._emit_decision_trace(trace, "exit", "strategy_exit", "signal")
                 return None
 
@@ -2377,15 +2383,11 @@ class TradingAgent:
                             "Stuck blacklist: %s/%s blacklisted for %dh after %d consecutive timeouts",
                             response.broker, response.symbol, blacklist_hours, _stuck_count,
                         )
-                # Release pending sell qty on terminal sell responses
-                # floors_to_zero: don't release — position can't be closed via place_order;
-                # keep pending_sell_qty set so the guard blocks future signal-path sell attempts
-                _floors_to_zero = (
-                    side == "sell"
-                    and status == "rejected"
-                    and getattr(response, "reason", "") == "floors_to_zero"
-                )
-                if side == "sell" and not _floors_to_zero and status in ("completed", "rejected", "canceled", "timed_out"):
+                # Release pending sell qty on ALL terminal sell responses.
+                # floors_to_zero dust is handled by the 8h exit_backoff_until guard
+                # (set below), not by keeping pending_sell_qty permanently set —
+                # a permanent block deadlocks ALL sells on the symbol forever.
+                if side == "sell" and status in ("completed", "rejected", "canceled", "timed_out"):
                     _ps_key = (response.broker, response.symbol)
                     # Use filled_qty for completed orders: a partial limit fill should only
                     # release the filled portion; the remainder stays reserved until the
