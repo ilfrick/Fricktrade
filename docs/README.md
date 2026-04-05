@@ -3,6 +3,8 @@
 
 # Fricktrade Documentation
 
+> **ARCHIVED -- Pre-v3.0 planning material.** These docs predate the strategic reset (Mar 2026). The system is now crypto-only with 2 active strategies in weighted mode. Equity trading, vote mode, 9-strategy config, meta-orchestrators, and most features described below are disabled or removed. **See `AGENTS.md` in the project root for the current authoritative operational document.**
+
 ```mermaid
 flowchart LR
     A[Start] --> B[Trading Agent Flow]

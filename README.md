@@ -3,7 +3,7 @@
 
 # Fricktrade v3.0
 
-Fricktrade is a personal algorithmic trading system for cryptocurrency perpetual futures. It runs two signal-generating strategies in weighted mode, combines their confidences against a conviction threshold, and routes orders through Alpaca (paper) and Binance (Spot demo) with layered risk controls, per-symbol LLM sentiment, and full observability via Grafana.
+Fricktrade is a personal algorithmic trading system for cryptocurrency. It runs two signal-generating strategies in weighted mode, combines their confidences against a conviction threshold, and routes orders through Alpaca (paper) and Binance (Spot demo) with layered risk controls, per-symbol LLM sentiment, and full observability via Grafana.
 
 **Current mode**: Paper trading — Alpaca (2 paper accounts, crypto-only) + Binance Spot demo.
 

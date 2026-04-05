@@ -1,7 +1,7 @@
 # Fricktrade — Project Context
 
 ## What This Is
-Fricktrade is a personal algorithmic trading system (~24,000+ lines Python) trading cryptocurrency via Alpaca (paper) and Binance (Spot demo). It uses two weighted strategies (crypto_mean_reversion + crypto_momentum), per-symbol LLM sentiment via Ollama, and Gemini for macro regime analysis and post-session review.
+Fricktrade is a personal algorithmic trading system (~24,000+ lines Python) trading cryptocurrency (Spot) via Alpaca paper and Binance Spot demo. It uses two weighted strategies (crypto_mean_reversion + crypto_momentum), per-symbol LLM sentiment via Ollama, and Gemini for macro regime analysis and post-session review.
 
 ## Architecture Overview
 - Core trading engine: `app/agents/trader.py` — order management, position tracking, two-phase dispatch

@@ -260,7 +260,11 @@ risk.crypto:
   circuit_breaker_drawdown_pct: 8.0
   max_daily_loss_pct: 5.0
   vol_targeting:
-    enabled: true
+    target_vol_pct: 4.0           # per-asset override (target only)
+
+risk:                              # global level
+  vol_targeting:
+    enabled: true                  # master switch — read from risk.vol_targeting, not risk.crypto
     target_vol_pct: 4.0
     min_scale: 0.3
     max_scale: 1.5
@@ -319,6 +323,18 @@ All services stay running 24/7 (crypto mode). `healthwatch.market_shutdown.mode:
 
 ```bash
 ./scripts/compose_up.sh   # auto-detects GPU, generates Grafana dashboards
+```
+
+### Stop the system
+
+```bash
+docker compose down        # stops all containers, preserves volumes
+docker compose down -v     # also removes volumes (data loss — use only for full reset)
+```
+
+To stop only the trader (positions stay open on broker side):
+```bash
+docker compose stop trader
 ```
 
 ### Check health

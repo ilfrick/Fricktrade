@@ -171,7 +171,7 @@ brokers:
         venues:
           Crypto: 95.0  # override global 50% venue cap — Binance is crypto-only
     fees:
-      commission_pct: 0.05  # 0.05% standard futures taker; 0.02% maker
+      commission_pct: 0.05  # 0.05% standard spot taker; 0.02% maker (futures: 0.05% taker, 0.02% maker)
       per_trade_fee: 0.0
       per_share_fee: 0.0
       min_fee: 0.0
@@ -1024,13 +1024,13 @@ llm:
 
   # Backend assignment per module
   backends:
-    sentiment: ollama        # Free local inference (llama3.1:8b)
+    sentiment: ollama        # Free local inference (llama3.2:3b)
     symbols_filter: gemini   # High volume, large context
     post_session: gemini     # Large trade logs
     meta_orchestrator: gemini # Complex reasoning
     risk_interpreter: gemini  # Safety-critical
 
-  # Macro regime analyzer (Claude) — fetches FRED data + calls LLM every 4h
+  # Macro regime analyzer (Gemini) — fetches FRED data + calls LLM every 4h
   macro_regime:
     enabled: true
     refresh_hours: 4
@@ -1072,7 +1072,7 @@ llm:
     max_trades_in_context: 100
     auto_apply_weights: false  # If true, apply weight changes without confirmation
 
-  # Meta-orchestrator (Claude) — weekly weight rebalancing
+  # Meta-orchestrator (Gemini) — weekly weight rebalancing
   meta_orchestrator:
     enabled: false
     run_day: sunday          # Day of week for weekly review
@@ -1080,7 +1080,7 @@ llm:
     max_weight_change: 0.15  # Max change per strategy per week
     min_sessions_required: 3 # Minimum sessions before adjusting
 
-  # Risk event interpreter (Claude) — replaces simple auto-rollback
+  # Risk event interpreter (Gemini) — replaces simple auto-rollback
   risk_interpreter:
     enabled: true
     min_severity: medium     # Interpret medium/high/critical alerts
