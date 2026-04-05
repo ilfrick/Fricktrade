@@ -1,38 +1,34 @@
 # Fricktrade — Project Context
 
 ## What This Is
-Fricktrade is a personal algorithmic trading system (~24,000+ lines Python) trading cryptocurrency perpetual futures (Binance/Bybit). It integrates reinforcement learning and dual-LLM reasoning (Claude for quality-critical tasks, Gemini for high-volume tasks).
+Fricktrade is a personal algorithmic trading system (~24,000+ lines Python) trading cryptocurrency via Alpaca (paper) and Binance (Spot demo). It uses two weighted strategies (crypto_mean_reversion + crypto_momentum), per-symbol LLM sentiment via Ollama, and Gemini for macro regime analysis and post-session review.
 
 ## Architecture Overview
-- Core trading engine: order management, position tracking, portfolio management
-- Strategy layer: multiple configurable trading strategies
-- Data pipeline: market data ingestion, storage, feature engineering
-- RL orchestrator: reinforcement learning buy/hold/sell decision engine
-- LLM integration: sentiment analysis, symbol filtering, post-session analysis, meta-orchestration, risk interpretation
-- Risk management: position sizing, drawdown controls, exposure limits
-- Infrastructure: Docker-native, structured logging, state persistence
+- Core trading engine: `app/agents/trader.py` — order management, position tracking, two-phase dispatch
+- Strategy layer: 2 active strategies in weighted combine mode (MR 60%, momentum 40%)
+- Data pipeline: Alpaca + Binance 1m bars, ~30 indicators, order book depth
+- LLM integration: per-symbol Ollama sentiment, aggregate sentiment, Gemini macro regime, post-session analyst
+- Risk management: trailing/hard/ATR stops, vol targeting, circuit breakers, Half-Kelly sizing
+- Infrastructure: Docker-native, Prometheus + Grafana, structured logging, state persistence
+
+## Authoritative Documentation
+**`AGENTS.md`** is the single authoritative operational document. It contains all current config values, strategy logic, risk parameters, LLM flow, Docker services, operational runbook, and common pitfalls. Refer to it for any operational question.
+
+Files in `docs/` predate the v3.0 strategic reset and are archived planning material.
 
 ## Known Issues
-- Phantom short-entry signals (P0 bug, may still be present)
-- Involuntary short position bug (P0)
-- Strategy weights being ignored in some execution paths
-- Concurrency/thread safety issues in shared state
-- Broad exception catching masking real errors
-- Alpha generation rated ~6.5-7/10 — infrastructure solid but edge unproven
+- Alpha generation unproven — infrastructure solid but edge not yet demonstrated in live trading
+- Binance demo dust positions (~30 sub-LOT_SIZE) cycle through circuit breaker → 8h backoff every restart (normal, demo API limitation)
+- `tests-when-closed` writes to same decision trace file as trader (filter by timestamp)
 
 ## Market Context
-- Primary market: crypto perpetual futures (Binance/Bybit)
-- Strategic rationale: structural inefficiencies favorable to retail algo trading (funding rates, liquidation cascades, 24/7 markets, high leverage available)
-- Secondary market: US equities (being phased out as primary focus)
-
-## Key Files to Know
-- Review the project structure with `find . -name "*.py" | head -50` and `cat` key entry points
-- Strategy files contain the core trading logic
-- Look for config files for exchange API setup and strategy parameters
+- Primary market: crypto (Alpaca paper + Binance Spot demo)
+- Equity trading disabled (`asset_filter: crypto_only`)
+- 24/7 operation
 
 ## Development Practices
 - Python 3.11+, type hints expected
 - Docker containers for deployment
-- Git for version control
-- No CI/CD pipeline currently — manual testing
+- Git for version control; push to both `origin` (housefz) and `github` remotes
+- No CI/CD pipeline — manual testing (193 tests, 16 skip without tensorflow/prometheus)
 - Single developer (Nicola)

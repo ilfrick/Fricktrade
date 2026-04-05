@@ -1,11 +1,33 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!-- Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick -->
 
-## Fricktrade Agent Guide
+## Fricktrade Operational Guide
 
-This repo contains a Python trading agent for 24/7 crypto (with dormant equity support), with broker adapters (Alpaca, Binance), risk controls, backtesting, data download, and metrics/monitoring. Current state: **v3.0, crypto-only mode, live on Alpaca paper + Binance Spot demo**.
+This is the **single authoritative document** for understanding and operating Fricktrade. Files in `docs/` predate the strategic reset (Mar 21) and should be treated as archived planning material.
 
-## Quick Orientation
+**System**: v3.0, crypto-only, paper trading. Alpaca paper (2 accounts) + Binance Spot demo.
+
+---
+
+## Current System State
+
+| Parameter | Value |
+|-----------|-------|
+| Active strategies | `crypto_momentum` (40%), `crypto_mean_reversion` (60%) |
+| Combine mode | `weighted` — weighted sum of buy confidences vs min_conviction |
+| min_conviction | 0.25 (effective 0.15 when single-sided via SSCM=0.6) |
+| Data interval | 1m bars |
+| Brokers | Alpaca paper (2 accounts, `crypto_only`), Binance Spot demo |
+| Trailing stop (crypto) | 4.5% global; 2.0% for momentum entries |
+| Vol targeting | Enabled, target 4%, scale [0.3, 1.5] |
+| Macro regime | Enabled; only "crisis" blocks entries |
+| Per-symbol sentiment | Enabled (Ollama llama3.2:3b, 900s cache) |
+| Aggregate sentiment | Enabled (Ollama, every 15 min) |
+| Disabled | Tactical/strategic meta-orchestrators, portfolio orchestrator, RL policy, guardrail, VaR, exposure_caps, signal_bias_guard, kill_switch, symbols_filter |
+
+---
+
+## Quick Orientation (File Map)
 
 - `app/main.py` — CLI entrypoint: `trade`, `backtest`, `download`, `api`, `train`, `online-train`, `evaluate`, `ingest`.
 - `app/agents/trader.py` — core `TradingAgent` class; orchestrates the full trading loop.
@@ -21,7 +43,9 @@ This repo contains a Python trading agent for 24/7 crypto (with dormant equity s
 - Risk: `app/risk/manager.py` (`RiskManager` with tz param), `app/risk/config.py`, `app/risk/haircut.py`.
 - Execution: `app/execution/executor.py`, `app/execution/order_queue.py`, `app/execution/algos.py`, `app/execution/smart_router.py`, `app/execution/tca.py`.
 - LLM: `app/llm/` package — see LLM section below.
-- Data: `app/data/` — Alpaca + Binance market data, news RSS, alt-data, AI filter, return ranker.
+- Data: `app/data/` — Alpaca + Binance market data, news RSS, alt-data, order book depth.
+  - `app/data/order_book.py` — Binance WebSocket depth stream for bid/ask imbalance
+  - `app/data/news_rss.py` — RSS from CoinDesk, CoinTelegraph, BitcoinMagazine, TheBlock, Reuters
 - Backtesting: `app/backtest/agent_engine.py` (real agent loop on CSVs), `app/backtest/engine.py` (legacy SMA).
 - Learning: `app/learning/` — PPO env, training, online updates, registry, drift monitor.
 - API: `app/api/server.py` (FastAPI) — `/health`, `/config`, `/config/update`, `/restart`, `/ui`.
@@ -29,176 +53,452 @@ This repo contains a Python trading agent for 24/7 crypto (with dormant equity s
 - Config: `config/config.yaml` (supports `${ENV_VAR}` interpolation).
 - Market-hours gating: `app/utils/market.py` — `is_market_open()` with `open_mode: any` returns True 24/7 when Crypto is in `trading_venues`. Use `is_venue_open(cfg,'NYSE')` for equity-only hours.
 
-## Current System State (v3.0)
+---
 
-### Active strategies (3 total, crypto-only, vote mode)
+## Active Strategies
 
-| Strategy | Asset Class | Notes |
-|----------|-------------|-------|
-| `crypto_momentum` | Crypto only | Multi-timeframe momentum |
-| `crypto_mean_reversion` | Crypto only | Bollinger + VWAP + RSI |
-| `trend_following` | Both (crypto-only in practice) | EMA crossover + Supertrend + VWAP + RSI + volume |
+### crypto_mean_reversion (primary, 60% weight)
 
-### Inactive strategies (disabled in Mar 21 strategic reset)
+**Buy when ALL three are true:**
+1. Price below lower Bollinger Band (`bb_period: 50`, `bb_std: 2.0`)
+2. RSI < 30.0 (`rsi_period: 70`)
+3. Drop of >1% occurred in < 75 bars (liquidation cascade signature)
 
-- `factor_model` — Equities only; Hurst-adaptive composite factor score
-- `pattern_trading` — Equities only; breakout + ATR stop + partial TP
-- `stat_arb_pairs` — Equities; disabled via `enabled: false`
-- `top_movers_rf` — RF nowcast + session low-zone entry
-- `gap_reversal` — Equities only; 9:35–10:30 ET gap fill
-- `earnings_drift` — Equities only; PEAD — requires Alpha Vantage key
-- `rl_policy` — PPO policy; disabled pending convergence work
-- `intraday_momentum`, `market_maker`, `rl_policy_fees`
+**Confidence:** Base 0.4 + depth-below-band * 0.6, boosted by:
+- `cascade_score > 0.3` → +0.15 (long liquidations confirm forced selling)
+- `funding_extreme > 0.5` → +0.10 (overleveraged longs unwinding)
+- `exchange_divergence > 0.05` → +0.05 (Coinbase premium)
+- `stablecoin_inflow > 0.3` → +0.05 (money arriving to buy)
+- `social_velocity > 0.3` → +0.03 (rising attention)
+- Bearish per-symbol sentiment (score < -0.3) → +0.08 (contrarian: supports dip-buy)
+- Strong bullish sentiment (score > 0.5) → ×0.95 (may not be a real dip)
 
-### Signal combine mode
+**Sell:** Price >= SMA with >0.5% profit AND entry was below SMA (won't sell positions opened by other strategies). Confidence scales with distance above SMA.
 
-`strategy.combine: vote`. All 3 enabled strategies run every cycle; each casts one unweighted vote (buy/sell/hold). `buy_vote_threshold: 1` (any single strategy can trigger entry), `exit_vote_threshold: 2`. Weights are completely ignored. Half-Kelly sizing with uncalibrated floor of 0.50. Threshold=1 validated via 90-day backtest: +2.7% vs -10.7% at threshold=2.
+**Crash filter:** Disabled (`crash_filter_pct: 0` — hurt Bonferroni performance).
 
-### Active LLM components
+**Hard stop:** 5.0% (per-strategy override).
 
-| Component | Cadence | Model |
-|-----------|---------|-------|
-| Post-Session Analyst | Daily at session end | Gemini 2.5 Flash |
-| Macro Regime Analyzer | Every 4h | Gemini 2.5 Flash |
-| Risk Interpreter | On risk events | Gemini 2.5 Flash |
-| Ollama Aggregate Sentiment | Every 15 min | llama3.2:3b (local) |
+### crypto_momentum (40% weight)
 
-### Disabled LLM components (Mar 21 strategic reset)
+**Buy when ALL positive:** Per-bar velocity across fast (25), medium (75), slow (300) windows all exceed per-bar threshold. Slow trend must also exceed 20% of per-bar threshold.
 
-- `TacticalMetaOrchestrator` — `enabled: false`; was injecting noise via oscillating parameters
-- `StrategicMetaOrchestrator` — `enabled: false`; disabled alongside tactical
-- `LLMPortfolioOrchestrator` — `llm_orchestrator.mode: vote`; class exists but is not instantiated
-- Per-symbol sentiment (`llm.sentiment.enabled: false`) — vote mode skips `_enrich_signals()` entirely
-- `symbols_filter` (`llm.symbols_filter.enabled: false`) — manual-only
+**Confidence modifiers:**
+- Volume: boost up to 1.5x (soft gate, not hard requirement — thin weekend volume won't block)
+- VWAP: overextended above → 0.7x; at VWAP → 1.1x; below in uptrend → 0.85x
+- RSI: >80 → 0.5x; >72 → 0.75x
+- Per-symbol sentiment: `(1.0 + 0.15 * score)` when confidence >= 0.3
 
-## Running (Docker-first)
+**Sell:** All velocities negative and below threshold. Long-only: signals position exit.
 
-```bash
-cp .env.example .env
-# Fill in ALPACA_API_KEY, ALPACA_API_SECRET, GOOGLE_GEMINI_API_KEY at minimum
-./scripts/compose_up.sh   # auto-detects GPU; generates per-account Grafana dashboards
+**Trailing stop:** 2.0% (per-strategy override — tighter than global 4.5%).
+
+### trend_following (INACTIVE)
+
+Has config parameters but is **not** in `strategy.names`. Not instantiated. Do not assume it runs.
+
+---
+
+## Signal Combine Logic (Weighted Mode)
+
+```
+1. Each enabled strategy calls generate_signal() → {action, confidence, name}
+2. _enrich_signals() applies context multipliers (regime, fear/greed, OI, vol)
+3. Buy signals: weighted sum = MR_conf × 0.60 + momentum_conf × 0.40
+4. If only one side signals (buy with no sell):
+   effective_threshold = min_conviction × single_sided_conviction_multiplier
+                       = 0.25 × 0.6 = 0.15
+5. If both sides signal:
+   effective_threshold = min_conviction = 0.25
+6. winning_score > effective_threshold → execute
+7. Half-Kelly position sizing with uncalibrated floor of 0.50
 ```
 
-Web UI: `http://localhost:18081/ui`
-Grafana: `http://localhost:3002`
-Health: `http://localhost:18081/health`
+**Entry ranking** (`entry_ranking.enabled: true`): Non-holder symbols ranked by opportunity score before processing. Components: Bollinger %B proximity (40%), MFI oversold (30%), catalyst flag (15%), funding extreme (15%). When aggregate Ollama sentiment is bearish (score < -0.4, conf >= 0.5), all scores penalized 30%.
 
-## Useful Commands
+**Exit logic** (in order of priority):
+1. Hard stop (6.0% crypto global, 5.0% MR override)
+2. ATR stop (2.5x ATR)
+3. Trailing stop (4.5% global, 2.0% momentum override)
+4. Take profit (5.0%)
+5. Alpha decay exit: if entry strategy now signals sell, exit (min hold 30 min)
+6. Regime hold: Hurst-scaled max hold (base 120 min, trending 240, MR 90)
+7. Circuit breaker: 8.0% per-symbol drawdown → force sell_to_close
 
-```bash
-# Live trade (default container command)
-docker compose run --rm trader python3 -m app.main trade --config /app/config/config.yaml
+**Vote thresholds** (`buy_vote_threshold`, `exit_vote_threshold`) exist in config but are **inactive** in weighted mode.
 
-# Backtest
-docker compose run --rm trader python3 -m app.main backtest --config /app/config/config.yaml
+---
 
-# Walk-forward backtest
-python3 scripts/benchmark_runner.py --config config/config.yaml --walk-forward
+## Risk Management
 
-# Download data
-docker compose run --rm trader python3 -m app.main download --config /app/config/config.yaml --symbols AAPL MSFT
+### Crypto stops (active values)
 
-# Train RL policy (offline)
-docker compose run --rm trader python3 -m app.main train --config /app/config/config.yaml
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `hard_stop_pct` | 6.0% | Global; MR overrides to 5.0% |
+| `atr_stop_mult` | 2.5 | ATR multiplier |
+| `trailing_stop_pct` | 4.5% | Global; momentum overrides to 2.0% |
+| `take_profit_pct` | 5.0% | |
+| `circuit_breaker_drawdown_pct` | 8.0% | Per-symbol; forces sell_to_close |
+| `max_daily_loss_pct` | 5.0% | Crypto-specific |
+| `max_crypto_exposure_pct` | 50.0% | |
 
-# Online training updates
-docker compose run --rm learner
+### Portfolio-level guards
 
-# Re-enable GPU after OOM
-./scripts/enable_gpu.sh
+| Guard | Value | Status |
+|-------|-------|--------|
+| `max_portfolio_leverage` | 3.0 | Active |
+| `max_positions` | 15 | Active |
+| `vol_targeting` | target 4%, scale [0.3, 1.5] | **Enabled** |
+| VaR | — | Disabled |
+| exposure_caps | — | Disabled |
+| kill_switch | — | Disabled |
+| signal_bias_guard | — | Disabled |
 
-# Ingest Alpaca multi-year bars
-docker compose run --rm trader python3 -m app.main ingest --config /app/config/config.yaml
+### Execution guards
+
+| Guard | Value |
+|-------|-------|
+| `min_hold_minutes` | 15 (both signal path and position-exit path) |
+| `stop_exit_reentry_cooldown` | 30 min |
+| `stuck_blacklist_after` | 3 consecutive timeouts |
+| `crypto_order_margin` | 0.97 (3% haircut on crypto buys) |
+| `min_notional` | $10 |
+| `insufficient_stablecoin_cooldown` | 5 min |
+
+### Exit backoff
+
+Exponential: 1/2/4/8/15 min cap. `floors_to_zero` → 8h backoff. Stale `_pending_sell_qty` entries expire after 5 min (prevents permanent deadlock from lost order responses).
+
+---
+
+## LLM Integration
+
+### Active components
+
+| Component | Backend | Cadence | What it does |
+|-----------|---------|---------|-------------|
+| Per-symbol sentiment | Ollama llama3.2:3b | Per symbol (900s TTL cache) | Injects `market_state["llm_sentiment"]` with score [-1,+1] and confidence. Crypto-specific prompt. Both strategies apply confidence-gated multipliers. |
+| Aggregate sentiment | Ollama llama3.2:3b | Every 15 min (background thread) | Market-wide score from recent headlines. Penalizes entry ranking when bearish. Visible in Grafana via `MARKET_SENTIMENT_SCORE`. |
+| Post-session analyst | Gemini 2.5 Flash | Daily at session end | Grades session A-F. Writes `data/reports/session/report_YYYY-MM-DD.json`. |
+| Macro regime | Gemini 2.5 Flash | 4h TTL | FRED (VIX/DGS10/DXY) + LLM → 5-regime. Only "crisis" blocks entries. |
+| Risk interpreter | Gemini 2.5 Flash | On DriftMonitor alert | Triages structural break vs noise; may set 1h pause. |
+
+### Disabled components
+
+| Component | Reason |
+|-----------|--------|
+| Tactical meta-orchestrator | Was injecting noise via oscillating parameters (Mar 21) |
+| Strategic meta-orchestrator | Disabled alongside tactical (Mar 21) |
+| Portfolio orchestrator | Not instantiated in weighted mode |
+| Symbols filter | Manual-only |
+
+### Per-symbol sentiment flow
+
+```
+RSS feeds (CoinDesk, CoinTelegraph, etc.) → _raw_news_cache
+    → NewsSentimentAnalyzer.analyze(symbol, articles)
+    → Ollama llama3.2:3b with crypto-specific prompt
+    → SentimentResult {score, confidence, bias, risk_flag}
+    → inject_into_market_state() → market_state["llm_sentiment"]
+    → crypto_momentum reads it: multiplier = 1.0 + 0.15 * score
+    → crypto_mean_reversion reads it: bearish boosts, bullish dampens
 ```
 
-## Configuration Notes
+Confidence gate: sentiment ignored when confidence < 0.3. Cache TTL: 900s. The old double-application in `_enrich_signals()` has been removed.
 
-- All config in `config/config.yaml`. `${ENV_VAR}` interpolation supported.
-- `strategy.combine: vote` — weights under `orchestrator.strategy_weights` are inactive.
-- `orchestrator.mode: select`, `top_k: 99` — effectively passes all strategies through; no RL orchestrator active.
-- `stat_arb_pairs.enabled: false` — disabled in long-only mode; produces unhedged directional bets.
-- `learning.guardrail.enabled: false` — was blocking all buys in sideways markets.
-- `llm_orchestrator.mode: vote` — portfolio orchestrator not instantiated; no per-cycle LLM trade decisions.
-- `quote_stream.enabled: false` — websockets library incompatible with alpaca-py `extra_headers`.
-- `brokers.binance.futures: false` — Spot mode only; demo endpoint.
-- `brokers.ibkr.enabled: false` — IBKR adapter present but inactive.
-- `trading_limits.crypto_order_margin: 0.97` — 3% haircut on crypto buys to absorb price drift.
-- `brokers.alpaca.accounts[*].asset_filter: crypto_only` — equity trading disabled (Mar 21 strategic reset)
-- Guard rails disabled (Mar 21): `var.enabled: false`, `vol_targeting.enabled: false`, `exposure_caps.enabled: false`, `signal_bias_guard.enabled: false`, `kill_switch.enabled: false`
-- `risk.max_portfolio_leverage: 3.0` (was 1.5); `risk.max_positions: 15` (was 30)
-- `data.dynamic_symbols.universe: alpaca_active_all` — equities + crypto from Alpaca; no hardcoded lists.
-- `data.dynamic_symbols.max_symbols: 150` — both accounts evaluate full 150-symbol universe; `buying_power_scaling: false`.
-- `risk.pdt.force_swing: true` — holds equity positions overnight on PDT-restricted accounts (< $2500).
-- `learning.device: auto` — uses CUDA if available, falls back to CPU.
+**News executor:** 2 workers (catalyst fetch + sentiment in parallel). Ollama cold-start is ~23s on first call.
 
-## LLM Integration (`app/llm/`)
+**Budget:** `llm.cost.daily_budget_usd: 5.00`. Resets midnight UTC. Ollama is free (local).
 
-All LLM modules use **Gemini 2.5 Flash** by default. Switch any module via its `backend:` config key. Claude backend (`claude-sonnet-4-6`) is available but not default.
+---
 
-| Module | Backend | When Active | Purpose |
-|--------|---------|-------------|---------|
-| `client.py` | Both | On demand | `LLMClient` — unified API, $5/day budget circuit breaker, retry/backoff. `complete(backend, system_prompt, user_prompt, model=)` → `LLMResponse`. |
-| `tactical_meta_orchestrator.py` | Gemini | **DISABLED** (was every 15 min) | Reads live metrics + macro regime + PostSession report. Proposes config changes within declared bounds. Disabled Mar 21 — was injecting noise. |
-| `meta_orchestrator.py` (StrategicOrchestrator) | Gemini | **DISABLED** (was weekly) | Reads 7-day PostSession history + tactical change log. Writes `strategic_baseline.json`. Disabled Mar 21 alongside tactical. |
-| `post_session.py` | Gemini | After market close | Grades session A–F; key findings with P&L estimates; per-strategy assessment. Writes `report_*.json` consumed by orchestrators. |
-| `macro_regime.py` | Gemini | 4h TTL | FRED (VIX/DGS10/DXY) + Gemini → 5-regime classification. Used by tactical orchestrator and strategy weight adjustment. |
-| `risk_interpreter.py` | Gemini | On `DriftMonitor` alert | Triages structural break vs noise; may set 1h trading pause or log recommended_action. |
-| `portfolio_orchestrator.py` | Gemini | **DISABLED** (`mode: vote`) | Per-cycle cross-symbol quality filter; not instantiated in vote mode. Class preserved for future re-enable. |
-| `sentiment.py` | Gemini | **DISABLED** | Per-symbol news sentiment; skipped in vote mode (`_enrich_signals()` not called). |
-| `ollama_sentiment.py` | Ollama (local) | Every 15 min | Aggregate market sentiment from recent headlines via llama3.2:3b. |
-| `symbols_filter.py` | Gemini | **DISABLED** | Pre-market symbol selection; manual-only. |
+## Configuration Reference
 
-**Two-tier orchestrator hierarchy:**
-- Strategic (weekly): sets weight baselines + per-strategy corridors → `strategic_baseline.json`
-- Tactical (15-min): adjusts within those corridors → `changes.jsonl` + `last_result.json`
-- When no strategic baseline exists, tactical self-imposes ±30% corridors from current config values
+### Combine mode
 
-**Budget:** All LLM costs tracked against `llm.cost.daily_budget_usd: 5.00`. Resets midnight UTC. Budget exceeded → all LLM calls blocked until reset.
+```yaml
+strategy:
+  combine: weighted          # "weighted" or "vote"
+  weights:
+    crypto_mean_reversion: 0.60
+    crypto_momentum: 0.40
+  min_conviction: 0.25       # minimum weighted score to trigger buy
+  single_sided_conviction_multiplier: 0.6  # reduces threshold when only one side signals
+  names:
+    - crypto_momentum
+    - crypto_mean_reversion
+```
 
-## Key Architecture Patterns
+### Strategy parameters
 
-### Pending Guards (thread-safe)
+```yaml
+strategy.params:
+  crypto_momentum:
+    fast_window: 25            # bars (1m)
+    medium_window: 75
+    slow_window: 300
+    trailing_stop_pct: 2.0
+  crypto_mean_reversion:
+    bb_period: 50              # Bonferroni-validated optimal
+    bb_std: 2.0
+    rsi_period: 70
+    rsi_oversold: 30.0
+    drop_window_bars: 75
+    hard_stop_pct: 5.0
+    crash_filter_pct: 0        # disabled — hurt Bonferroni
+```
+
+### Risk (crypto)
+
+```yaml
+risk.crypto:
+  hard_stop_pct: 6.0
+  atr_stop_mult: 2.5
+  trailing_stop_pct: 4.5
+  take_profit_pct: 5.0
+  circuit_breaker_drawdown_pct: 8.0
+  max_daily_loss_pct: 5.0
+  vol_targeting:
+    enabled: true
+    target_vol_pct: 4.0
+    min_scale: 0.3
+    max_scale: 1.5
+```
+
+### Execution
+
+```yaml
+execution:
+  stop_exit_reentry_cooldown_minutes: 30
+  stuck_blacklist_after: 3
+  limit_orders.enabled: true    # equities only; crypto always market orders
+```
+
+### Data
+
+```yaml
+data:
+  interval: 1m
+  dynamic_symbols:
+    max_symbols: 500
+    universe: alpaca_active_all
+```
+
+---
+
+## Docker Services
+
+| Service | Purpose | Port | Memory |
+|---------|---------|------|--------|
+| `trader` | Main trading loop | 8001 | 2G |
+| `api` | FastAPI config/health/web UI | 18081 | 512M |
+| `market-cache` | Bulk symbol data fetch + Redis | — | 4G |
+| `redis` | In-memory cache backend | 6379 | 1G |
+| `ollama` | Local LLM (llama3.2:3b) | 11434 | — |
+| `learner` | RL online training | — | 2G |
+| `prometheus` | Metrics scrape + alerting rules | 9090 | — |
+| `grafana` | Dashboards | 3002 | — |
+| `alertmanager` | Alert routing (email) | 9094 | — |
+| `healthwatch` | Service health monitor | 9105 | 512M |
+| `tests-when-closed` | pytest + backtest when market closed | — | 2G |
+| `daily-report` | Daily top-movers + email | — | 512M |
+| `health-reporter` | Health summary reports | — | 256M |
+| `data-pruner` | Prunes /data files >7 days | — | 128M |
+| `calendar-updater` | Holiday calendar maintenance | — | — |
+| `autoheal` | Auto-restarts unhealthy containers | — | — |
+| `docker-socket-proxy` | Docker socket proxy for autoheal/healthwatch | — | — |
+
+All services stay running 24/7 (crypto mode). `healthwatch.market_shutdown.mode: partial` with empty `stop_services` list.
+
+---
+
+## Operational Runbook
+
+### Start the system
+
+```bash
+./scripts/compose_up.sh   # auto-detects GPU, generates Grafana dashboards
+```
+
+### Check health
+
+| What | How |
+|------|-----|
+| API health | `curl http://localhost:18081/health` |
+| Prometheus metrics | `http://localhost:8001/metrics` |
+| Grafana | `http://localhost:3002` |
+| Container resources | `docker stats` |
+| Trader logs | `docker logs -f fricktrade-trader-1` |
+| Decision traces | `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl` |
+| Checkpoint | `data/checkpoints/trader.json` (updated every 60s) |
+
+### Trader healthcheck
+
+The trader container has a Docker healthcheck that verifies:
+1. Prometheus metrics endpoint responds on :8001
+2. Checkpoint file is less than 900s old
+
+If stale: trading loop is frozen. Check `docker logs trader` for the cause.
+
+### Common issues
+
+**1. No trades happening**
+
+Check decision traces for the most recent reasons:
+```bash
+docker exec fricktrade-trader-1 python3 -c "
+import json
+with open('/data/reports/decision_trace/$(date -u +%Y-%m-%d).jsonl', 'rb') as f:
+    f.seek(0, 2); f.seek(max(0, f.tell() - 500000)); f.readline()
+    reasons = {}
+    for line in f:
+        r = json.loads(line)
+        reasons[r.get('reason','')] = reasons.get(r.get('reason',''), 0) + 1
+    for k,v in sorted(reasons.items(), key=lambda x: -x[1]):
+        print(f'{v:6d} {k}')
+"
+```
+
+Common causes:
+- `strategies_hold` — market conditions don't meet strategy thresholds. Expected in calm markets.
+- `pending_sell_covers_position` — deadlocked. Restart trader to clear. If persistent, check broker connectivity.
+- `below_min_conviction` — signals too weak. Check if SSCM is set.
+
+**2. `pending_sell_covers_position` deadlock**
+
+Stale pending sells expire after 5 min automatically. If still stuck: restart the trader container. Root cause is usually broker API not responding (order response never arrives).
+
+**3. Binance dust cycling**
+
+~30 sub-LOT_SIZE positions in Binance demo. `floors_to_zero` warnings every cycle. Normal — 8h backoff suppresses them. Dust conversion fails on demo API (`APIError -2008`). Ignore.
+
+**4. Ollama not responding**
+
+```bash
+docker logs fricktrade-ollama-1 --since 5m
+docker exec fricktrade-ollama-1 curl -s http://localhost:11434/api/tags | python3 -m json.tool
+```
+
+Ollama starts AFTER trader is healthy. If trader was restarted, Ollama may not have started. Force: `docker restart fricktrade-ollama-1`.
+
+**5. market-cache using excessive RAM**
+
+Check `docker stats fricktrade-market-cache-1`. If >3.5G: restart the service. `MALLOC_TRIM_THRESHOLD_=65536` helps but can't recover badly fragmented heap.
+
+**6. Kill switch fired (strategy disabled)**
+
+If checkpoint shows `disabled_strategies: ["crypto_momentum"]`:
+```bash
+docker exec fricktrade-trader-1 python3 -c "
+import json
+with open('/data/checkpoints/trader.json') as f: cp = json.load(f)
+for bname, bs in cp.get('payload',{}).get('broker_states',{}).items():
+    ds = bs.get('disabled_strategies', [])
+    if ds: print(f'{bname}: {ds}')
+"
+```
+Fix: patch checkpoint and restart. Kill switch is disabled (`enabled: false`) so it shouldn't self-arm.
+
+**7. Rebuild and restart**
+
+```bash
+docker compose build trader && docker compose up -d --force-recreate trader
+# Also rebuild tests-when-closed (shares same codebase):
+docker compose build tests-when-closed && docker compose up -d --force-recreate tests-when-closed
+```
+
+Always push to both remotes:
+```bash
+git push origin v3.0 && git push github v3.0
+```
+
+---
+
+## Monitoring
+
+### Endpoints
+
+| Endpoint | URL |
+|----------|-----|
+| Trader Prometheus metrics | `http://localhost:8001/metrics` |
+| Healthwatch metrics | `http://localhost:9105/metrics` |
+| API health | `http://localhost:18081/health` |
+| Grafana | `http://localhost:3002` |
+| Prometheus UI | `http://localhost:9090` |
+
+### Key Prometheus metrics
+
+| Metric | Labels | What it measures |
+|--------|--------|-----------------|
+| `trades_total` | symbol, side | Total trades executed |
+| `pnl_percent` | — | Current P&L percent |
+| `drawdown_percent` | — | Current drawdown |
+| `entry_ranking_score` | broker, symbol | Per-symbol opportunity ranking (0-1) |
+| `market_sentiment_score` | broker | Aggregate Ollama sentiment (-1 to +1) |
+| `strategy_win_rate` | strategy | Rolling win rate |
+| `strategy_sharpe_ratio` | strategy, asset_class | Rolling 30-day Sharpe |
+| `strategy_profit_factor` | strategy, asset_class | Gross win / gross loss |
+| `decision_latency_seconds` | symbol | Time per decision |
+| `broker_request_latency_seconds` | broker, method | Broker API latency |
+| `orders_skipped_total` | symbol, side, reason | Orders blocked by safety checks |
+
+### Grafana dashboards
+
+Three account-specific dashboards (Alpaca Higher, Alpaca Realistic, Binance) generated from `_template_account.json.template`. Each includes:
+- Broker status, connectivity, API errors
+- Account equity, cash, buying power
+- Position quantities and values
+- Signal metrics (returns, volume, runup, drawdown)
+- **Entry ranking scores** (bar gauge — higher = better opportunity)
+- **Market sentiment** (gauge — -1 bearish to +1 bullish)
+
+Plus: `fricktrade.json` (overview), `fricktrade_performance.json`, `fricktrade_latency.json`, `fricktrade_alerts.json`.
+
+### Decision traces
+
+JSON Lines format: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`. Each line is a decision record with:
+- `symbol`, `ts`, `broker`, `action`, `decision`, `reason`, `stage`
+- `signals` — per-strategy signal array with action and confidence
+- `effective_weights`, `winning_score`
+- `portfolio` — cash, equity, exposure
+- `position_exit_reason` — for exits
+
+**Note:** `tests-when-closed` writes to the same trace file. Filter by timestamp to distinguish.
+
+---
+
+## Pending Guards (Thread-Safe)
 
 | Guard | Dict Key | TTL | Prevents |
 |-------|----------|-----|---------|
 | `_pending_buy_symbols` | `(broker, symbol)` | 900s | Re-buying same symbol while order in flight |
-| `_pending_sell_qty` | `(broker, symbol)` | Until fill/terminal | Duplicate sell order stacking |
-| `_pending_notional` | broker | Until fill/terminal | Leverage race during notional reserve → enqueue gap |
+| `_pending_sell_qty` | `(broker, symbol)` | Until fill/terminal; expires after 5 min if no response | Duplicate sell order stacking |
+| `_pending_notional` | broker | Until fill/terminal | Leverage race during notional reserve |
 | `_stuck_cooldown` | `(broker, symbol)` | 15 min | Re-entry after timed-out buy |
 | `_exit_backoff_until` | `(broker, symbol)` | 1/2/4/8/15 min cap | Repeated exit attempt failures |
 
 ### Two-Phase Dispatch
 
-`_run_symbol_batch()` splits symbols into holders and non-holders; holders processed first with `wait()` barrier. Guarantees exit orders complete before entry orders start.
+`_run_symbol_batch()` splits symbols into holders and non-holders; holders processed first with `wait()` barrier. Guarantees exit orders complete before entry orders start. Non-holders are ranked by entry_ranking before processing.
 
-### Crypto vs. Equity Branches
-
-- Crypto: `"/" in symbol`
-- Always market orders (no TWAP, no limit upgrade)
-- Always fractional
-- Stops from `risk.crypto.*`
-- `factor_model` excluded from crypto
-- Alt-data gates: Fear&Greed < 20 or OI change < -5% suppress longs
-
-### Dust Positions
-
-`qty < 1e-6` → all position-exit checks silently skipped (no close_position calls). Exit backoff set to 8h on `floors_to_zero` rejection. `_pending_sell_qty` not released on `floors_to_zero` → permanent sell block until restart.
+---
 
 ## Common Pitfalls
 
 - **Sell qty**: use `math.floor()`, never `round()` — float64 broker decimals can cause `round()` to exceed actual held qty
 - **`record_pnl()` vs `update_daily_loss()`**: `record_pnl()` accumulates deltas; `update_daily_loss()` sets absolute day P&L — wrong one causes -543% false loss
-- **`order_queue.enqueue()` sentinel**: returns `"queued"` (truthy) when order accepted but not started; previously returned `None` causing `order_failed` + skipped `_reserve_pending_buy` (POL/USD Mar 2 bug)
-- **`_check_position_exit` crypto stops**: reads from `risk.crypto.*` for `/` symbols; old code used flat values → premature crypto exits
-- **`is_market_open()` 24/7**: returns True always with Crypto venue in `trading_venues`; use `is_venue_open('NYSE')` for equity-only check
-- **Binance `asset_class`**: check with `"crypto" in asset_class`, not `== "crypto"` (`str(AssetClass.CRYPTO).lower()` = `"assetclass.crypto"`)
-- **`/USDT` symbols in Alpaca batches**: must be filtered at all data-path entry points; `build_symbols_by_broker()` applies the filter
-- **`_build_symbol_batches()` in parallel mode**: MUST intersect with provided `symbols` set or caller-side filters (e.g. crypto-only) are silently bypassed
-- **Meta-orchestrator kwarg names**: use `system_prompt=` and `user_prompt=` for `LLMClient.complete()`; wrong names silently skip the LLM call
-- **Pending sell stacking**: `_pending_sell_qty` guard must be applied whenever `_is_closing_position`, not only when `not _can_short_here`
-- **Binance demo timeouts**: use persistent `ThreadPoolExecutor` with `future.result(timeout=N)` for wall-clock deadlines; never use `with ThreadPoolExecutor` for timeout enforcement (`__exit__` calls `shutdown(wait=True)`)
-- **Deposit-aware P&L**: `BrokerState.day_deposits_baseline` captures today's deposits at session start; each cycle subtracts new deposits from apparent P&L so cash injections don't appear as profit
-- **`min_hold_minutes` in both paths**: must be checked both in `_check_position_exit` (ATR/stop/TP exits) AND in the signal path (`_is_closing_position` decision point)
+- **`order_queue.enqueue()` sentinel**: returns `"queued"` (truthy) when accepted but not started
+- **`_check_position_exit` crypto stops**: reads from `risk.crypto.*` for `/` symbols
+- **`is_market_open()` 24/7**: returns True always with Crypto venue; use `is_venue_open('NYSE')` for equity-only
+- **Binance `asset_class`**: check with `"crypto" in asset_class`, not `== "crypto"`
+- **`/USDT` symbols in Alpaca batches**: must be filtered at all data-path entry points
+- **Trailing stop override**: momentum returns `trailing_stop_pct: 2.0` in buy signal dict. Trader uses per-signal value if present, else falls back to config global 4.5%. So momentum entries have a 2.0% stop, not 4.5%.
+- **Per-symbol sentiment in strategies**: Both strategies read `market_state["llm_sentiment"]`. When debugging unexpected confidence values, check if Ollama returned a non-neutral score.
+- **Vol targeting is live**: `_size_order` applies vol_targeting scale. Positions in high-vol periods will be smaller. Scale range: [0.3, 1.5].
+- **`tests-when-closed` shares codebase**: Must be rebuilt when trader code changes. Writes to the same decision trace file.
+
+---
 
 ## Extending the Codebase
 
@@ -207,60 +507,59 @@ All LLM modules use **Gemini 2.5 Flash** by default. Switch any module via its `
 - New metrics: define in `app/monitoring/metrics.py`; record at call site.
 - New LLM modules: use `LLMClient` from `app/llm/client.py`; add to `_init_llm()` in trader.py; add config section under `llm:`.
 
-See `docs/DEVELOPMENT.md` for detailed how-to guides.
+---
 
 ## Testing
 
-182 tests (17 skip without tensorflow/prometheus). Run: `pytest tests/ -v`.
+193 tests (16 skip without tensorflow/prometheus). Run:
 
 ```bash
 docker compose run --rm trader pytest tests/ -v
+# Or locally (requires gymnasium for test_trader_sizing):
+python3 -m pytest tests/ --ignore=tests/test_trader_sizing.py -q
 ```
 
-Key test areas: risk manager, order queue, execution algos, strategy signals, broker routing, market hours, data quality, two-phase dispatch, pending notional guards.
+---
 
-## Monitoring
+## Backtest
 
-- Prometheus metrics: `http://localhost:8001/metrics`
-- Grafana: `http://localhost:3002`
-- API health: `http://localhost:18081/health`
-- Decision traces: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`
-- Post-session reports: `data/reports/session/report_YYYY-MM-DD.json`
-- Meta-orchestrator changes: `data/reports/meta_orch/changes.jsonl`
-- Checkpoints: `data/checkpoints/trader.json` (updated every 60s)
+```yaml
+backtest:
+  symbols: 20 crypto pairs (BTC, ETH, SOL, DOGE, ADA, ... all /USD)
+  date_range: 2025-12-21 to 2026-03-21
+  costs: commission 0.05%, slippage 3bps, spread 5bps
+  initial_cash: $10,000
+```
 
-## Documentation
+```bash
+# Download data first
+python3 scripts/download_crypto_backtest_data.py
+# Run backtest
+docker compose run --rm -T trader python3 -m app.main backtest
+# Walk-forward
+python3 scripts/benchmark_runner.py --config config/config.yaml --walk-forward
+```
 
-- `README.md` — project overview and quick start
-- `docs/ARCHITECTURE.md` — system design, data flow, threading model
-- `docs/DEPLOYMENT.md` — full deployment guide, all config keys, broker setup
-- `docs/STRATEGIES.md` — all 9 strategies: signals, parameters, limitations
-- `docs/DEVELOPMENT.md` — adding strategies/brokers, testing, common pitfalls
-- `docs/OPERATIONS.md` — daily monitoring, reading traces, common issues, manual overrides
-- `docs/STATUS.md` — current implementation status and roadmap
+Validated: MR bb_period=50 → +1.0% avg return, 96% win rate over 12 days (Bonferroni CI excludes zero).
+
+---
 
 ## History
 
-See `AGENTS.md` history section and git log for full commit-by-commit record. Major milestones (newest first):
+Major milestones (newest first):
 
-- **Strategic reset — crypto-only, 3 strategies (2026-03-21, commit b1bf267):** System was losing money consistently (-5.1% over 3 months). Root causes: guard rail paralysis, tactical orchestrator noise injection, broken capital deployment (Kelly 0.15 floor). Changes: disabled equity trading (`asset_filter: crypto_only`), reduced from 9 strategies to 3 (`crypto_momentum`, `crypto_mean_reversion`, `trend_following`), killed both meta-orchestrators, disabled VaR/vol_targeting/exposure_caps/signal_bias_guard/kill_switch, raised Kelly floor to 0.50, tuned trend_following breakout/exit thresholds. Also: Docker resource limits on all services, stop-exit re-entry cooldown (30 min), per-parameter tactical hysteresis (60 min), portfolio-aware strategy context injection, cross-symbol correlations.
+- **Per-symbol Ollama sentiment, SSCM=0.6, Grafana ranking (2026-04-05, commit 39c6f2d):** Per-symbol sentiment via Ollama llama3.2:3b with crypto-specific prompt. Both strategies read `llm_sentiment` for confidence modification. Aggregate sentiment gate in entry ranking. `single_sided_conviction_multiplier: 0.6` deployed (effective threshold 0.15 for single-sided signals). Entry ranking + market sentiment Grafana panels added to all account dashboards. News executor bumped to 2 workers.
 
-- **Round-7 safety and correctness fixes (2026-03-15, commit c4d74f4):** 14 fixes. `_pending_sell_qty` now released in enqueue() exception path (stuck-position safety). `EarningsDriftStrategy._last_buy` re-armed on restart from `opened_at`. EDGAR hot-path call removed (always returned 0). `twap_slices()` TypeError on fractional qty fixed. `position_state["last_market_state"]` now written per cycle (TMO was getting null indicators). `exit_vote_threshold: [1,3]` added to TMO bounds. MacroRegime FRED I/O moved outside `_refresh_lock`. SEC tickers cached 24h + User-Agent fixed. Yahoo/Google news fetches parallelised (removes 52s serial sleeps). `trend_following` crisis gate uses integer code 2 as primary. `_portfolio_for_broker()` returns safe empty dict on missing broker. CoinGlass upgraded to v3 API. `opportunity_cost_exit` uses current equity. `crypto_momentum` RSI `is not None` guard.
+- **Stale pending_sell_qty expiry (2026-04-05, commit ed2705c):** If order response never arrives (broker API down), `pending_sell_qty` stays set forever, blocking all sells. Added timestamp tracking + 5-min expiry sweep. Also: clean pop on zero (prevents residual float accumulation).
 
-- **Round-6 live-trading readiness fixes (2026-03-15, commit ae4cd0a):** 12 fixes across all layers. Circuit breaker now forces `sell_to_close` on held positions (was returning None — position kept losing). `_enrich_signals` reads flat alt-data keys correctly (was reading `market_state["alt_data"]` nested, injector writes flat). `pattern_trading` infers `took_partial` on restart to prevent duplicate partial exits. `_flush_order_responses` releases `pending_sell_qty` by `filled_qty` not requested qty. `stat_arb_pairs` checks if symbol is held before voting sell (eliminates phantom sell votes). `_ENTRY_ALLOWED_REGIMES` moved to module-level constant. `_config_strategy_weights` converted to `@property` (live view of cfg). RSI uses pre-computed `indicators["rsi"]` in `crypto_momentum` and `trend_following`. Fear/greed fetched once per cycle (60s TTL) not 150×. Single `_now` in `_check_position_exit`. Earnings calendar symbol limit configurable.
+- **Ollama keep_services fix (2026-04-04, commit 9bfbeb7):** Ollama was in `stop_services` list. In crypto-only mode, equity market is always "closed" → Ollama killed every healthwatch cycle. Moved to `keep_services`.
 
-- **Round-5 system review fixes (2026-03-15):** Added `risk_off` to `_ENTRY_ALLOWED_REGIMES` (system now trades in defensive-but-not-crisis conditions). MacroRegime name validated against known set (hallucinated names default to `range_bound`). `crypto_mean_reversion` sell gate: skip vote when `avg_entry >= sma` (position not opened by this strategy). `pattern_trading` returns hold for all crypto symbols (equity-only strategy). `pending_sell_qty` guard added to direct-`close_position` path. Pre-register `pending_sell_qty` inside the check-lock to eliminate TOCTOU window. `gross_exposure` decremented on position-close sells. Checkpoint patched to clear `crypto_momentum` from `disabled_strategies` on both Alpaca accounts (performance kill_switch had fired).
+- **pending_sell_qty deadlock fix (2026-04-04, commit ddb9757):** Two bugs caused all 33 symbols to be blocked for a week: (1) `close_position` never cleared `_pending_sell_qty` (only order queue did), (2) `floors_to_zero` kept it permanently set.
 
-- **Multi-source news; Ollama aggregate sentiment; two-tier orchestrator hierarchy; per-broker LLM awareness (2026-03-11):** `news_rss.py` adds 10 RSS sources (CoinDesk, Cointelegraph, Reuters Business, etc.); raw article count 27→46/cycle. Ollama aggregate sentiment (15-min background thread, llama3.2:3b). TacticalMetaOrchestrator and StrategicOrchestrator fully wired with correct LLM kwarg names. Portfolio orchestrator prompt and response format made per-broker-aware (`broker_decisions` dict). `_build_meta_orch_metrics()` includes `brokers` dict.
+- **Strategic reset — crypto-only, 3→2 strategies (2026-03-21, commit b1bf267):** System was losing money consistently. Disabled equity trading, reduced to 2 active strategies (MR + momentum), killed meta-orchestrators, disabled guard rails. Switched to weighted combine mode with min_conviction 0.25.
 
-- **Stale position exit strategies; min-hold in signal path; floors-to-zero handling; sell stacking fix (2026-03-09–10):** Alpha decay exit (entry strategy reversal), regime-conditional time exit (Hurst-scaled), opportunity cost exit (disabled). Min-hold guard added to signal path (not just position-exit path). `floors_to_zero` sets 8h exit backoff + keeps pending_sell permanently set. `_pending_sell_qty` guard fixed to always apply when `_is_closing_position`. `exit` pre-emption removed from `_combine_signals`. `factor_model` excluded from crypto.
+- **Round 5-7 safety fixes (2026-03-09–15):** 38 fixes across all layers. See git log for details.
 
-- **Crypto stops; deposit-aware P&L; Binance fixes; per-broker exposure cap (2026-03-07–13):** `_check_position_exit` reads from `risk.crypto.*` for crypto. `BrokerState.day_deposits_baseline` subtracts intraday deposits from day P&L. Binance: N+1 ticker → bulk fetch; persistent pool for timeout enforcement; `avg_entry: None` fallback to last price; per-broker `max_crypto_exposure_pct: 95`.
+- **Binance broker; crypto 24/7 (2026-03-01–06):** `BinanceBroker` (Spot + Futures demo). Fractional trading. Crypto always market orders. Per-symbol circuit breaker.
 
-- **LLM portfolio orchestrator; A/B shadow tracking; strategy win rates in prompt; price-move invalidation (2026-03-08):** `LLMPortfolioOrchestrator` wired (now disabled, `mode: vote`). Shadow combine records every cycle. Strategy win rates injected into LLM prompt. `_decision_prices` cache with 1% invalidation. `min_hold_minutes` guard added to `_check_position_exit`.
-
-- **Binance broker; crypto 24/7; Alpaca fix (2026-03-01–06):** `BinanceBroker` (Spot + Futures demo). `load_universe("alpaca_active_all")`. Fractional trading. `_HybridMarketDataProvider`. Crypto always market orders. `asset_class` enum fix. Stablecoin-base filter. Per-symbol circuit breaker. PDT force-swing. Stuck-order timeout.
-
-- **Strategy and execution overhaul (2026-02-16–28):** ~30-indicator injection. EarningsDriftStrategy (PEAD). MacroRegimeAnalyzer (FRED+LLM). AltData (Fear&Greed/CoinGlass/EDGAR). QuoteStream. `adaptive_slices()`. Half-Kelly sizing. ATR stops. Limit orders default. `SmartOrderRouter`. TCA feedback. Walk-forward backtesting. `RebalanceEngine`. `collect_crypto_training_data.py`.
-
-- **v3.0 foundation (2026-02-01–13):** Extracted modules (symbol_manager, performance, open_orders, account_metrics). Concurrency/safety fixes (19 issues). `datetime.utcnow()` fully migrated. PDT suppression. Two-phase dispatch. Pending notional race prevention. Dead code removal.
+- **v3.0 foundation (2026-02-01–13):** Extracted modules. 19 concurrency fixes. Two-phase dispatch. Pending notional race prevention.
