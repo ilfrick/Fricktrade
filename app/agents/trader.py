@@ -310,7 +310,9 @@ class TradingAgent:
         # Implemented as a property below; this placeholder keeps __init__ structure intact.
         # Pending sell qty tracking to prevent sell orders overshooting past zero
         self._pending_sell_qty: dict[tuple[str, str], float] = {}  # (broker, symbol) -> qty
+        self._pending_sell_qty_at: dict[tuple[str, str], float] = {}  # (broker, symbol) -> monotonic timestamp
         self._pending_sell_qty_lock = threading.Lock()
+        self._pending_sell_stale_seconds: float = 300.0  # 5 min — clear stale entries that never got a response
         if isinstance(self._orchestrator, RLStrategyOrchestrator):
             self._orchestrator.bootstrap(
                 self._strategy_names,
@@ -1684,6 +1686,7 @@ class TradingAgent:
                             return None
                         # Register before close_position call (roll back on failure)
                         self._pending_sell_qty[_exit_ps_key] = _already_pending + _exit_qty
+                        self._pending_sell_qty_at.setdefault(_exit_ps_key, time.monotonic())
                 try:
                     self.broker.close_position(symbol, broker=broker_name)
                 except Exception as _ce:
@@ -1692,9 +1695,14 @@ class TradingAgent:
                     if _exit_qty > 0:
                         with self._pending_sell_qty_lock:
                             _exit_ps_key = (broker_name, symbol)
-                            self._pending_sell_qty[_exit_ps_key] = max(
+                            new_val = max(
                                 0.0, self._pending_sell_qty.get(_exit_ps_key, 0.0) - _exit_qty
                             )
+                            if new_val <= 0:
+                                self._pending_sell_qty.pop(_exit_ps_key, None)
+                                self._pending_sell_qty_at.pop(_exit_ps_key, None)
+                            else:
+                                self._pending_sell_qty[_exit_ps_key] = new_val
                     self._record_exit_failure(broker_name, symbol)
                     self._emit_decision_trace(trace, "skip", "close_failed", "sizing")
                     return None
@@ -1704,6 +1712,7 @@ class TradingAgent:
                     with self._pending_sell_qty_lock:
                         _exit_ps_key = (broker_name, symbol)
                         self._pending_sell_qty.pop(_exit_ps_key, None)
+                        self._pending_sell_qty_at.pop(_exit_ps_key, None)
                 self._emit_decision_trace(trace, "exit", "strategy_exit", "signal")
                 return None
 
@@ -1995,6 +2004,7 @@ class TradingAgent:
                     # Pre-register inside the same lock to eliminate the TOCTOU window
                     # between the check above and the post-enqueue registration below.
                     self._pending_sell_qty[_pending_sell_key] = _pending_sells + qty
+                    self._pending_sell_qty_at.setdefault(_pending_sell_key, time.monotonic())
                     _pending_sell_key = None  # mark as already registered
                 order_notional = qty * last_price
 
@@ -2064,9 +2074,14 @@ class TradingAgent:
                 if _is_closing_position and action == "sell":
                     with self._pending_sell_qty_lock:
                         _ps_exc_key = (broker_name, symbol)
-                        self._pending_sell_qty[_ps_exc_key] = max(
+                        new_val = max(
                             0.0, self._pending_sell_qty.get(_ps_exc_key, 0.0) - qty
                         )
+                        if new_val <= 0:
+                            self._pending_sell_qty.pop(_ps_exc_key, None)
+                            self._pending_sell_qty_at.pop(_ps_exc_key, None)
+                        else:
+                            self._pending_sell_qty[_ps_exc_key] = new_val
                 self._record_skip(symbol, action, "order_failed", broker_name)
                 logging.warning("Order enqueue failed for %s %s: %s", action, symbol, exc)
                 self._emit_decision_trace(
@@ -2081,6 +2096,7 @@ class TradingAgent:
                     self._pending_sell_qty[_pending_sell_key] = (
                         self._pending_sell_qty.get(_pending_sell_key, 0.0) + qty
                     )
+                    self._pending_sell_qty_at.setdefault(_pending_sell_key, time.monotonic())
 
             # Update shared portfolio in-memory so subsequent threads see new exposure
             with self._lock:
@@ -2265,6 +2281,29 @@ class TradingAgent:
             return True
         return False
 
+    def _expire_stale_pending_sells(self) -> None:
+        """Clear pending_sell_qty entries older than _pending_sell_stale_seconds.
+
+        If an order response never arrives (broker API down, network partition),
+        pending_sell_qty stays set forever, blocking all future sells for that
+        symbol.  This sweep runs once per main-loop cycle and expires entries
+        that have been waiting too long — the order is either lost or will be
+        handled by the next flush.
+        """
+        now = time.monotonic()
+        with self._pending_sell_qty_lock:
+            stale_keys = [
+                k for k, ts in self._pending_sell_qty_at.items()
+                if now - ts >= self._pending_sell_stale_seconds
+            ]
+            for k in stale_keys:
+                qty = self._pending_sell_qty.pop(k, 0.0)
+                self._pending_sell_qty_at.pop(k, None)
+                logging.warning(
+                    "Expired stale pending_sell_qty %s/%.6f after %.0fs — unblocking sells",
+                    k, qty, self._pending_sell_stale_seconds,
+                )
+
     def _flush_order_responses(self) -> None:
         # Clear PDT blocks daily + decay slippage penalties
         today = datetime.now(timezone.utc).date()
@@ -2402,9 +2441,13 @@ class TradingAgent:
                     )
                     if _ps_resp_qty > 0 and _ps_key in self._pending_sell_qty:
                         with self._pending_sell_qty_lock:
-                            self._pending_sell_qty[_ps_key] = max(
+                            new_val = max(
                                 0.0, self._pending_sell_qty.get(_ps_key, 0.0) - _ps_resp_qty
                             )
+                            self._pending_sell_qty[_ps_key] = new_val
+                            if new_val <= 0:
+                                self._pending_sell_qty.pop(_ps_key, None)
+                                self._pending_sell_qty_at.pop(_ps_key, None)
                 # Track exit success/failure for backoff
                 if side == "sell":
                     if status == "completed":
@@ -3975,6 +4018,7 @@ class TradingAgent:
             symbols = self._run_cycle_maintenance(symbols, portfolio)
             self._update_open_order_queues()
             self._flush_order_responses()
+            self._expire_stale_pending_sells()
             if self._ops_state_blocks_run():
                 time.sleep(interval_seconds)
                 continue
