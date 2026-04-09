@@ -49,13 +49,13 @@ groups:
           summary: "Broker API error rate elevated"
           description: "Broker {{ $labels.broker }} has >20% error rate over 10m."
       - alert: BrokerApiNoSuccess
-        expr: time() - max_over_time(broker_last_success_timestamp_seconds[10m]) > 600
+        expr: time() - max_over_time(broker_last_success_timestamp_seconds{method!="place_order"}[10m]) > 600
         for: 5m
         labels:
           severity: critical
         annotations:
           summary: "No successful broker API calls"
-          description: "No successful broker calls observed in 10m."
+          description: "No successful broker calls observed in 10m ({{ $labels.broker }}/{{ $labels.method }})."
       - alert: ServiceDown
         expr: healthwatch_service_up == 0
         for: 2m
