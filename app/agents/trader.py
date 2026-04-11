@@ -2473,7 +2473,11 @@ class TradingAgent:
                                 "floors_to_zero dust %s/%s — exit suppressed for 8h",
                                 response.broker, response.symbol,
                             )
-                            # Attempt immediate dust conversion to BNB so the position doesn't linger
+                            # Attempt immediate dust conversion to BNB so the position doesn't linger.
+                            # Binance Spot Testnet/demo does not expose the /sapi/v1/asset/dust
+                            # endpoint and returns APIError(-2008) "Invalid Api-Key ID" for every
+                            # call. Skip the attempt on demo brokers — the 8h backoff above is
+                            # already enough to silence the position.
                             try:
                                 _dust_broker = self._broker_map.get(response.broker) if hasattr(self, "_broker_map") else None
                                 if _dust_broker is None and hasattr(self, "broker"):
@@ -2481,10 +2485,20 @@ class TradingAgent:
                                 if _dust_broker is not None:
                                     _base = response.symbol.split("/")[0] if "/" in response.symbol else response.symbol
                                     _inner = getattr(_dust_broker, "_brokers", {}).get(response.broker) or _dust_broker
-                                    _client = getattr(_inner, "client", None) or getattr(_dust_broker, "client", None)
-                                    if _client is not None and hasattr(_client, "transfer_dust"):
-                                        _client.transfer_dust(asset=[_base])
-                                        logging.info("Dust converted to BNB: %s/%s", response.broker, response.symbol)
+                                    _is_demo = bool(
+                                        "demo" in str(getattr(_inner, "_base_url", "")).lower()
+                                        or getattr(_inner, "_demo", False)
+                                    )
+                                    if _is_demo:
+                                        logging.debug(
+                                            "Dust conversion skipped on demo broker %s/%s",
+                                            response.broker, response.symbol,
+                                        )
+                                    else:
+                                        _client = getattr(_inner, "client", None) or getattr(_dust_broker, "client", None)
+                                        if _client is not None and hasattr(_client, "transfer_dust"):
+                                            _client.transfer_dust(asset=[_base])
+                                            logging.info("Dust converted to BNB: %s/%s", response.broker, response.symbol)
                             except Exception as _dust_exc:
                                 logging.warning("Dust conversion failed for %s/%s: %s", response.broker, response.symbol, _dust_exc)
                         else:
