@@ -563,6 +563,9 @@ class TradingAgent:
                     mult *= 1.1   # strong OI growth supports longs
                 elif oi_change < -5 and action == "buy":
                     mult *= 0.9
+                # Cap context cascade cut at 0.5 (defensive): context multipliers
+                # can never reduce a signal below 50% of its raw confidence.
+                mult = max(mult, 0.5)
             else:
                 # RSI extremes adjust equity signals
                 if action == "buy" and rsi > 75:
@@ -573,7 +576,15 @@ class TradingAgent:
                     mult *= 1.1
                 elif insider < -0.3 and action == "buy":
                     mult *= 0.85
-            signal["confidence"] = max(0.0, min(1.0, float(signal.get("confidence", 0.5)) * mult))
+            raw_conf = float(signal.get("confidence", 0.5))
+            dampened = raw_conf * mult
+            # Post-dampener hard floor: if the strategy declared a confidence_floor,
+            # the dampener cascade cannot push the signal below it. This preserves
+            # the "every eligible signal is at least this strong" semantics the
+            # floor was named for.
+            floor = float(signal.get("confidence_floor", 0.0) or 0.0)
+            final_conf = max(dampened, floor) if raw_conf > 0 and floor > 0 else dampened
+            signal["confidence"] = max(0.0, min(1.0, final_conf))
             signal["context_mult"] = round(mult, 3)
 
     def _record_skip(self, symbol: str, action: str, reason: str, broker_name: str | None = None) -> None:

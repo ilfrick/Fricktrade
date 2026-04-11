@@ -213,7 +213,7 @@ risk:
   max_position_size_pct: 90.0
   max_portfolio_leverage: 3.0
   max_short_exposure_pct: 30.0
-  max_positions: 15
+  max_positions: 100
   cooldown_seconds: 5
   hard_stop_pct: 0.8
   trailing_stop_pct: 5.0

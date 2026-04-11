@@ -157,6 +157,7 @@ class CryptoMeanReversionStrategy(Strategy):
                 "confidence": float(confidence),
                 "name": "crypto_mean_reversion",
                 "hard_stop_pct": self.params.hard_stop_pct,
+                "confidence_floor": self.params.confidence_floor,
             }
 
         return {"action": "hold", "confidence": 0.0, "name": "crypto_mean_reversion"}

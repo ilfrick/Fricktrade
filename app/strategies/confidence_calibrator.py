@@ -60,7 +60,10 @@ class ConfidenceCalibrator:
         raw = max(0.0, min(1.0, raw_confidence))
         buf = self._history.get(strategy)
         if buf is None or len(buf) < self._min_samples:
-            return raw * 0.75  # conservative before enough data
+            # No penalty when untrained. A pre-training cut (e.g. 0.75) creates
+            # a chicken-and-egg trap: untrained strategies lose trades due to
+            # the penalty and therefore never accumulate samples to get trained.
+            return raw
 
         # Compute win rate per bin
         bin_wins: list[int] = [0] * self._n_bins

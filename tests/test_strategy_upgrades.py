@@ -277,10 +277,16 @@ def test_stat_arb_short_data():
 
 
 def test_calibrator_cold_start():
-    """Before min_samples, calibrated confidence is conservative (raw * 0.75)."""
+    """Before min_samples, return raw confidence unchanged.
+
+    Historical note: an earlier version applied a 0.75 cold-start penalty, but
+    that created a chicken-and-egg trap (penalised strategies never trade → never
+    accumulate samples → penalty never lifts). Now untrained strategies pass
+    through at raw confidence.
+    """
     cal = ConfidenceCalibrator(min_samples=30)
     result = cal.calibrate("trend", 0.8)
-    assert abs(result - 0.6) < 1e-9  # 0.8 * 0.75
+    assert abs(result - 0.8) < 1e-9
 
 
 def test_calibrator_record_and_calibrate():

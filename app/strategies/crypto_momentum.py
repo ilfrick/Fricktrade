@@ -119,12 +119,16 @@ class CryptoMomentumStrategy(Strategy):
             if sent_conf >= 0.3:
                 # [-1,+1] score → [0.85, 1.15] multiplier
                 sent_mult = 1.0 + 0.15 * sent_score
-            confidence = min(base_conf * max(vol_boost, 0.5) * vwap_mult * rsi_mult * sent_mult, 1.0)
+            # Cap cascade cut at 0.5 (defensive): product of dampeners can never
+            # multiply base_conf by less than 0.5 inside the strategy.
+            damp = max(max(vol_boost, 0.5) * vwap_mult * rsi_mult * sent_mult, 0.5)
+            confidence = min(base_conf * damp, 1.0)
             return {
                 "action": "buy",
                 "confidence": float(confidence),
                 "name": "crypto_momentum",
                 "trailing_stop_pct": self.params.trailing_stop_pct,
+                "confidence_floor": self.params.confidence_floor,
             }
 
         if all_negative:
