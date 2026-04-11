@@ -20,6 +20,7 @@ class CryptoMeanReversionParams:
     hard_stop_pct: float = 3.0
     crash_filter_window: int = 100  # bars to look back for crash detection
     crash_filter_pct: float = 15.0  # suppress entries if drawdown from window high > this %
+    confidence_floor: float = 0.4
 
 
 class CryptoMeanReversionStrategy(Strategy):
@@ -46,6 +47,7 @@ class CryptoMeanReversionStrategy(Strategy):
             hard_stop_pct=float(cfg.get("hard_stop_pct", 3.0)),
             crash_filter_window=int(cfg.get("crash_filter_window", 100)),
             crash_filter_pct=float(cfg.get("crash_filter_pct", 15.0)),
+            confidence_floor=float(cfg.get("confidence_floor", 0.4)),
         )
 
     def generate_signal(self, market_state: dict) -> dict:
@@ -110,7 +112,8 @@ class CryptoMeanReversionStrategy(Strategy):
             # Confidence scales with distance below lower band
             band_range = max(upper_band - lower_band, 1e-8)
             depth = (lower_band - last) / band_range
-            confidence = min(0.4 + depth * 0.6, 1.0)
+            floor = self.params.confidence_floor
+            confidence = min(floor + depth * (1.0 - floor), 1.0)
 
             # Non-price signal boosters — reward entries backed by causal data
             indicators = market_state.get("indicators") or {}

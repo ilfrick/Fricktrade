@@ -377,6 +377,7 @@ strategy:
       volume_mult: 1.5    # used as confidence boost multiplier, not a hard gate
       min_return_pct: 0.15  # per-bar threshold scales automatically with window size
       trailing_stop_pct: 2.0
+      confidence_floor: 0.4   # baseline conf for signals that cleared the gate (3 positive velocities)
     crypto_mean_reversion:
       bb_period: 50       # sensitivity analysis: +1.0% avg return vs +0.1% at 100
       bb_std: 2.0
@@ -385,6 +386,7 @@ strategy:
       drop_window_bars: 75  # 75 bars × 1m = 75min (was 15 × 5m)
       hard_stop_pct: 5.0       # raised from 3.0 — altcoins whipsaw through tight stops
       crash_filter_pct: 0        # disabled — hurt performance in Bonferroni testing
+      confidence_floor: 0.4    # baseline conf for signals that cleared the gate (below BB + RSI oversold + fast drop)
     gap_reversal:
       min_gap_pct: 2.0
       target_fill_pct: 50.0
@@ -1032,7 +1034,7 @@ llm:
 
   # Macro regime analyzer (Gemini) — fetches FRED data + calls LLM every 4h
   macro_regime:
-    enabled: true
+    enabled: false
     refresh_hours: 4
     backend: gemini
 

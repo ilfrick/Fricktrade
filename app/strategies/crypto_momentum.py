@@ -18,6 +18,7 @@ class CryptoMomentumParams:
     volume_mult: float = 2.0
     min_return_pct: float = 0.3
     trailing_stop_pct: float = 2.0
+    confidence_floor: float = 0.4
 
 
 class CryptoMomentumStrategy(Strategy):
@@ -40,6 +41,7 @@ class CryptoMomentumStrategy(Strategy):
             volume_mult=float(cfg.get("volume_mult", 2.0)),
             min_return_pct=float(cfg.get("min_return_pct", 0.3)),
             trailing_stop_pct=float(cfg.get("trailing_stop_pct", 2.0)),
+            confidence_floor=float(cfg.get("confidence_floor", 0.4)),
         )
 
     def generate_signal(self, market_state: dict) -> dict:
@@ -84,7 +86,10 @@ class CryptoMomentumStrategy(Strategy):
 
         if all_positive:
             weighted_vel = 0.5 * vel_fast + 0.3 * vel_med + 0.2 * vel_slow
-            base_conf = min(weighted_vel / (per_bar_thr * 4.0), 1.0)
+            # Signals that passed the gate (all 3 velocities above threshold) earn a
+            # baseline confidence; the raw momentum magnitude scales into the remainder.
+            floor = self.params.confidence_floor
+            base_conf = floor + min(weighted_vel / (per_bar_thr * 4.0), 1.0) * (1.0 - floor)
             # VWAP filter (IMP-4): vwap_dev is normalized to [-1, 1] (raw_pct / 5.0)
             indicators = market_state.get("indicators") or {}
             vwap_dev = indicators.get("vwap_dev")
