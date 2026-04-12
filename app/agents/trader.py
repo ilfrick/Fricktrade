@@ -3393,7 +3393,7 @@ class TradingAgent:
             agg = self._ollama_sentiment.get_last()
             if agg.score < -0.4 and agg.confidence >= 0.5:
                 agg_sent_penalty = 0.7
-                logger.debug("Ranking: aggregate sentiment bearish (%.2f), penalizing scores 30%%", agg.score)
+                logging.debug("Ranking: aggregate sentiment bearish (%.2f), penalizing scores 30%%", agg.score)
 
         scores: list[tuple[float, str]] = []
         for sym in symbols:
@@ -3914,6 +3914,13 @@ class TradingAgent:
                         except Exception:
                             pass
                         self._ollama_sentiment_future = None
+                    # Keep Grafana sentiment gauge fresh on every reporting tick (15s).
+                    # Previously this was only updated inside _rank_entry_candidates()
+                    # which runs once per ~5-min cycle and could show stale 0.0 after
+                    # restarts until the first non-holder batch ran.
+                    _agg = self._ollama_sentiment.get_last()
+                    for _bname in self._broker_states:
+                        MARKET_SENTIMENT_SCORE.labels(broker=_bname).set(_agg.score)
                     # Schedule new analysis every 15 min if previous is not still running
                     _sent_interval = 15 * 60
                     if (self._ollama_sentiment_future is None and
