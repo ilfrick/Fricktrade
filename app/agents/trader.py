@@ -1797,6 +1797,12 @@ class TradingAgent:
             ) > 0
             # Min-hold guard on signal-path sells: same rule as _check_position_exit.
             # Prevents LLM/vote sell signals from exiting a position that was just opened.
+            # Skip sell on positions in exit backoff (e.g., prior floors_to_zero dust).
+            # Without this, strategy sell signals bypass the 8h backoff that the
+            # position-exit path honours at line ~1603, causing thousands of API errors.
+            if _is_closing_position and self._should_skip_exit(broker_name, symbol):
+                self._emit_decision_trace(trace, "skip", "exit_backoff_active", "risk")
+                return None
             if _is_closing_position:
                 _min_hold = float(self._strategy_params.get("min_hold_minutes", 0) or 0)
                 if _min_hold > 0:
