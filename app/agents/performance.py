@@ -345,7 +345,11 @@ class PerformanceTracker:
         return json.dumps(report)
 
     def get_neg_sharpe_weight_mult(self, strategy_name: str) -> float:
-        """Returns 0.5 weight multiplier when strategy has N consecutive negative-Sharpe reports."""
-        if self._neg_sharpe_count.get(strategy_name, 0) >= self._neg_sharpe_threshold:
-            return 0.5
+        """Returns weight multiplier based on negative-Sharpe streak.
+
+        DISABLED: the 0.5 penalty created an irrecoverable death spiral —
+        halved weight drops buy_score below SSCM threshold, blocking all
+        trades, so Sharpe never recovers.  Always return 1.0 now; the
+        warning log in generate_report() is retained for observability.
+        """
         return 1.0
