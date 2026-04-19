@@ -195,7 +195,7 @@ risk:
   max_daily_loss_pct: 3.0
   crypto:
     max_daily_loss_pct: 5.0
-    max_position_size_pct: 90.0
+    max_position_size_pct: 15.0
     max_crypto_exposure_pct: 50.0
     hard_stop_pct: 6.0       # raised from 4.0 — altcoins need room before reversion completes
     atr_stop_mult: 2.5       # ATR multiplier for crypto stop-loss (was hardcoded)
@@ -210,7 +210,7 @@ risk:
     take_profit_pct: 3.0
     partial_take_profit_pct: 1.5
     circuit_breaker_drawdown_pct: 10.0
-  max_position_size_pct: 90.0
+  max_position_size_pct: 15.0
   max_portfolio_leverage: 3.0
   max_short_exposure_pct: 30.0
   max_positions: 100
@@ -328,10 +328,10 @@ strategy:
       enabled: true            # exit when the entry strategy actively signals sell
       min_hold_minutes: 30      # don't check alpha decay before this time
     regime_hold_minutes:
-      enabled: true            # replace fixed position_horizon_minutes with Hurst-scaled hold
-      base_minutes: 480         # baseline; 120 was too short — momentum trades got time-exited at a loss
-      trending_multiplier: 2.0  # H > hurst_trending_threshold → hold up to 960 min
-      mean_reverting_multiplier: 0.5   # H < hurst_mr_threshold → hold 240 min
+      enabled: false           # disabled — arbitrary time-based exits override signal-based exits (trailing stop, peak detection, alpha decay); caused 23/26 exits in Apr 19 cascade
+      base_minutes: 480
+      trending_multiplier: 2.0
+      mean_reverting_multiplier: 0.5
       hurst_trending_threshold: 0.60
       hurst_mr_threshold: 0.45
     opportunity_cost_exit:
@@ -552,7 +552,7 @@ portfolio:
     method: ledoit_wolf
     window: 60
   constraints:
-    max_position_pct: 0.90
+    max_position_pct: 0.15
     min_position_pct: 0.01
     max_sector_pct: 0.40
   rebalance:
