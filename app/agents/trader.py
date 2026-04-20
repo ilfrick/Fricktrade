@@ -2046,6 +2046,17 @@ class TradingAgent:
                     self._record_skip(symbol, action, "pending_order", broker_name)
                     self._emit_decision_trace(trace, "skip", "pending_order", "risk")
                     return None
+                # Secondary dedup: if position_state shows this symbol was recently
+                # opened (< 900s), block re-buys.  This catches the case where
+                # _pending_buy_symbols gets released prematurely or Alpaca API lag
+                # causes the portfolio to not show the position yet.
+                _ps = broker_state.position_state.get(symbol)
+                if _ps and float(_ps.get("qty", 0) or 0) > 0:
+                    _opened = _ps.get("opened_at")
+                    if _opened and (datetime.now(timezone.utc) - _opened).total_seconds() < 900:
+                        self._record_skip(symbol, action, "recent_position", broker_name)
+                        self._emit_decision_trace(trace, "skip", "recent_position", "risk")
+                        return None
             # Atomic leverage check for buy orders (prevents ThreadPool race)
             if action == "buy" and not _is_closing_position:
                 if not self._check_and_reserve_notional(broker_name, order_notional, portfolio):
