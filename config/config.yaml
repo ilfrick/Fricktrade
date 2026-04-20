@@ -195,7 +195,7 @@ risk:
   max_daily_loss_pct: 3.0
   crypto:
     max_daily_loss_pct: 5.0
-    max_position_size_pct: 15.0
+    max_position_size_pct: 25.0
     max_crypto_exposure_pct: 50.0
     hard_stop_pct: 6.0       # raised from 4.0 — altcoins need room before reversion completes
     atr_stop_mult: 2.5       # ATR multiplier for crypto stop-loss (was hardcoded)
@@ -210,7 +210,7 @@ risk:
     take_profit_pct: 3.0
     partial_take_profit_pct: 1.5
     circuit_breaker_drawdown_pct: 10.0
-  max_position_size_pct: 15.0
+  max_position_size_pct: 25.0
   max_portfolio_leverage: 3.0
   max_short_exposure_pct: 30.0
   max_positions: 100
@@ -552,7 +552,7 @@ portfolio:
     method: ledoit_wolf
     window: 60
   constraints:
-    max_position_pct: 0.15
+    max_position_pct: 0.25
     min_position_pct: 0.01
     max_sector_pct: 0.40
   rebalance:

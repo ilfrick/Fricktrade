@@ -1592,8 +1592,15 @@ class TradingAgent:
                     except Exception:
                         pass  # dust conversion is best-effort; silently skip if unsupported
                 if _cqty >= 1e-6:  # skip dust positions — cannot be closed via API
+                    # Notional guard: even if qty > 1e-6, positions below min_notional
+                    # are untradeable dust (sell orders will floors_to_zero).  Skip exit
+                    # checks entirely to prevent trailing_stop spam.
+                    _lp_guard = market_state.get("last_price") or 0
+                    _min_notional_guard = float(self.cfg.get("trading_limits", {}).get("min_notional", 10.0))
+                    if _lp_guard > 0 and _cqty * float(_lp_guard) < _min_notional_guard:
+                        pass  # dust by notional — suppress all exit logic
                     # PDT-blocked symbols: suppress sell retries until next day
-                    if (broker_name, symbol) in self._pdt_blocked:
+                    elif (broker_name, symbol) in self._pdt_blocked:
                         _slog.event("debug", "pdt_blocked", symbol=symbol, broker=broker_name)
                     # PDT force-swing: hold overnight instead of triggering a day-trade violation
                     elif _pdt_swing:
@@ -1800,6 +1807,14 @@ class TradingAgent:
             # Skip sell on positions in exit backoff (e.g., prior floors_to_zero dust).
             # Without this, strategy sell signals bypass the 8h backoff that the
             # position-exit path honours at line ~1603, causing thousands of API errors.
+            # Notional guard for strategy-path sells: dust positions are untradeable
+            if _is_closing_position:
+                _lp_sell_guard = float(market_state.get("last_price") or 0)
+                _min_not_sell = float(self.cfg.get("trading_limits", {}).get("min_notional", 10.0))
+                _sell_qty = float(portfolio.get("positions", {}).get(symbol, {}).get("qty", 0) or 0)
+                if _lp_sell_guard > 0 and abs(_sell_qty) * _lp_sell_guard < _min_not_sell:
+                    self._emit_decision_trace(trace, "skip", "dust_notional", "risk")
+                    return None
             if _is_closing_position and self._should_skip_exit(broker_name, symbol):
                 self._emit_decision_trace(trace, "skip", "exit_backoff_active", "risk")
                 return None
@@ -3260,6 +3275,12 @@ class TradingAgent:
         if broker_override:
             batch_portfolio = self._portfolio_for_broker(portfolio, broker_override)
 
+        # Strip dust positions: positions whose notional < min_notional are untradeable
+        # (sell orders will be rejected as floors_to_zero).  Keeping them in the portfolio
+        # causes MR to signal "sell" which overrides momentum "buy", permanently blocking
+        # new entries.  On paper/demo accounts dust cannot be cleared via transfer_dust.
+        batch_portfolio = self._strip_dust_positions(batch_portfolio, broker_override)
+
         # Snapshot shared state under lock before dispatching to threads
         with self._lock:
             news_snap = dict(self._news_cache)
@@ -3329,6 +3350,7 @@ class TradingAgent:
         batch_contexts: list[tuple[str | None, dict, list[str], list[str]]] = []
         for _, broker_override, batch in symbol_batches:
             bp = self._portfolio_for_broker(portfolio, broker_override) if broker_override else portfolio
+            bp = self._strip_dust_positions(bp, broker_override)
             _pos = bp.get("positions", {})
             holders = [s for s in batch if s in _pos]
             non_holders = [s for s in batch if s not in _pos]
@@ -3509,6 +3531,33 @@ class TradingAgent:
                 "broker": broker_name,
             }
         return portfolio
+
+    def _strip_dust_positions(self, portfolio: dict, broker_name: str | None) -> dict:
+        """Remove positions whose notional value is below min_notional.
+
+        Dust positions (e.g. Binance demo sub-LOT_SIZE remnants) are untradeable
+        — sell orders are rejected as floors_to_zero.  Keeping them in the
+        portfolio causes MR to signal "sell" which overrides momentum "buy" and
+        triggers endless trailing_stop retries.  Stripping them makes the symbol
+        appear non-held so strategies can generate fresh buy signals.
+        """
+        positions = portfolio.get("positions")
+        if not positions:
+            return portfolio
+        _bs = self._broker_states.get(broker_name or self._broker_name)
+        _last_prices = _bs.last_prices if _bs else {}
+        _min_notional = float(self.cfg.get("trading_limits", {}).get("min_notional", 10.0))
+        cleaned = {}
+        for sym, pos in positions.items():
+            qty = abs(float(pos.get("qty", 0) or 0))
+            lp = float(_last_prices.get(sym, 0) or 0)
+            if lp <= 0 or qty * lp >= _min_notional:
+                cleaned[sym] = pos  # real position or no price — keep
+        if len(cleaned) == len(positions):
+            return portfolio  # nothing stripped
+        out = dict(portfolio)
+        out["positions"] = cleaned
+        return out
 
     def _maybe_fallback_broker(self, broker_name: str) -> str:
         if not self._routing_cfg.get("fallback_enabled", False):
