@@ -488,7 +488,8 @@ JSON Lines format: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`. Each li
 
 | Guard | Dict Key | TTL | Prevents |
 |-------|----------|-----|---------|
-| `_pending_buy_symbols` | `(broker, symbol)` | 900s | Re-buying same symbol while order in flight |
+| `_pending_buy_symbols` | `(broker, symbol)` | 900s | Re-buying same symbol while order in flight. Kept on ALL terminal statuses (completed/rejected/canceled); only released on `timed_out`. |
+| `recent_position` guard | `broker_state.position_state` | 900s from `opened_at` | Secondary dedup: blocks re-buys if position recently opened |
 | `_pending_sell_qty` | `(broker, symbol)` | Until fill/terminal; expires after 5 min if no response | Duplicate sell order stacking |
 | `_pending_notional` | broker | Until fill/terminal | Leverage race during notional reserve |
 | `_stuck_cooldown` | `(broker, symbol)` | 15 min | Re-entry after timed-out buy |
@@ -513,6 +514,8 @@ JSON Lines format: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`. Each li
 - **Per-symbol sentiment in strategies**: Both strategies read `market_state["llm_sentiment"]`. When debugging unexpected confidence values, check if Ollama returned a non-neutral score.
 - **Vol targeting is live**: `_size_order` applies vol_targeting scale. Positions in high-vol periods will be smaller. Scale range: [0.3, 1.5].
 - **`tests-when-closed` shares codebase**: Must be rebuilt when trader code changes. Writes to the same decision trace file.
+- **Dust position filter**: `_strip_dust_positions()` removes sub-min_notional positions from portfolio before batch dispatch. Two additional notional guards inside `_check_position_exit` and strategy-sell path catch any dust that leaks through (e.g. stale last_prices).
+- **Pending-buy dedup release**: Only `timed_out` releases `_pending_buy_symbols`. Releasing on `rejected` caused retry loops — 14 duplicate HYPE/USD buys in 17 min on Binance.
 
 ---
 
