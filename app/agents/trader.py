@@ -2397,13 +2397,13 @@ class TradingAgent:
                         notional = float(getattr(response, "reserved_notional", 0.0) or 0.0)
                     if notional > 0:
                         self._release_pending_notional(response.broker, notional)
-                    # On successful fill, keep the pending-buy entry alive so the 900s
-                    # cooldown prevents the strategy from immediately re-buying the same
-                    # symbol next cycle.  Without this, crypto market orders that fill
-                    # instantly clear the dedup flag, and persistent buy signals (e.g.
-                    # momentum on RENDER) cause hundreds of duplicate $100 buys.
-                    # Only release on failure so the system can retry or pick a new symbol.
-                    if status != "completed":
+                    # Keep the 900s pending-buy cooldown for ALL terminal statuses.
+                    # Releasing on "rejected" caused retry loops: order fails → dedup
+                    # released → next cycle retries same signal → same failure → loop
+                    # (HYPE/USD: 14 duplicate buys in 17 min on Binance).
+                    # Only release on "timed_out" where the order queue's own retry
+                    # budget was exhausted but the signal might succeed on a fresh cycle.
+                    if status == "timed_out":
                         self._release_pending_buy(response.broker, response.symbol)
                     if status == "completed":
                         # Successful fill resets the consecutive-stuck counter
