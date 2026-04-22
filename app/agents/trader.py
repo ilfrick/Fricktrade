@@ -2270,9 +2270,12 @@ class TradingAgent:
             return False
         if datetime.now(timezone.utc) < until:
             return True
-        # Backoff expired — clear it
+        # Backoff expired — clear the timer but keep fail_counts so the next
+        # failure escalates properly (1→2→4→8→15 min).  Clearing fail_counts
+        # here reset the counter to 0 every time, trapping the sell in an
+        # infinite attempt=1 / 1-min loop (SHIB/USD: fails every cycle for 2h+).
+        # fail_counts is only cleared by _clear_exit_backoff on successful exit.
         self._exit_backoff_until.pop(key, None)
-        self._exit_fail_counts.pop(key, None)
         return False
 
     def _record_exit_failure(self, broker: str, symbol: str) -> None:

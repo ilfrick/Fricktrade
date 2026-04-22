@@ -81,10 +81,40 @@ class BrokerRouter(Broker):
             "Position fetch failed for %s: %s",
             [],
         )
+        # Detect virtual accounts sharing the same underlying brokerage account
+        # (e.g. alpaca:Realistic and alpaca:Higher on the same API key).
+        # Positions are identical across shared accounts — assign each symbol
+        # to only the FIRST virtual account to prevent double-counting.
+        api_id_map: dict[str, str] = {}  # api_account_id → first broker name
+        shared_primary: dict[str, str] = {}  # broker name → primary broker for shared API
+        for name, broker in self._brokers.items():
+            aid = broker.api_account_id()
+            if aid in api_id_map:
+                shared_primary[name] = api_id_map[aid]
+            else:
+                api_id_map[aid] = name
+        # Track which (dedup_group, symbol) pairs we've already emitted.
+        # For any broker in a shared-API group, use the primary name as the
+        # dedup key.  First broker to process a symbol wins; duplicates are
+        # skipped regardless of whether they are the primary or secondary.
+        _dedup_group: dict[str, str] = {}  # broker name → dedup key (primary name or self)
+        for name in self._brokers:
+            if name in shared_primary:
+                _dedup_group[name] = shared_primary[name]
+            elif name in api_id_map.values():
+                _dedup_group[name] = name
+        _seen: set[tuple[str, str]] = set()
         for name, raw_positions in positions_map.items():
+            group = _dedup_group.get(name)
             for pos in raw_positions:
                 item = dict(pos)
                 item["broker"] = name
+                symbol = item.get("symbol", "")
+                if group is not None:
+                    _key = (group, symbol)
+                    if _key in _seen:
+                        continue
+                    _seen.add(_key)
                 positions.append(item)
         return positions
 

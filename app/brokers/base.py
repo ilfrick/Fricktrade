@@ -44,3 +44,12 @@ class Broker(ABC):
     def supports_short(self, symbol: str) -> bool:
         """Crypto cannot be shorted on Alpaca."""
         return self.get_asset_class(symbol) != "crypto"
+
+    def api_account_id(self) -> str:
+        """Opaque identifier for the underlying brokerage account.
+
+        Virtual accounts sharing the same API key/credentials MUST return
+        the same value so the router can detect shared positions and avoid
+        double-counting.  Default: unique per instance.
+        """
+        return str(id(self))
