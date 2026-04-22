@@ -516,8 +516,10 @@ JSON Lines format: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`. Each li
 - **`tests-when-closed` shares codebase**: Must be rebuilt when trader code changes. Writes to the same decision trace file.
 - **Dust position filter**: `_strip_dust_positions()` removes sub-min_notional positions from portfolio before batch dispatch. Two additional notional guards inside `_check_position_exit` and strategy-sell path catch any dust that leaks through (e.g. stale last_prices).
 - **Pending-buy dedup release**: Only `timed_out` releases `_pending_buy_symbols`. Releasing on `rejected` caused retry loops — 14 duplicate HYPE/USD buys in 17 min on Binance.
-- **Shared-API position dedup**: `alpaca:Realistic` and `alpaca:Higher` share the same API key. `BrokerRouter.get_positions()` deduplicates by `api_account_id()` — each position assigned to only the first virtual account. Without this, both try to sell the full qty and one always fails.
+- **Shared-account position dedup**: `BrokerRouter.get_positions()` deduplicates by `api_account_id()` — brokers sharing the same underlying account get split qty. Currently a no-op (Alpaca accounts have separate API keys and account numbers: PA3SW9ZCUYC5 vs PA38SSSDFBVE).
 - **Exit backoff escalation**: `_should_skip_exit()` must NOT reset `_exit_fail_counts` on backoff expiry. Only `_clear_exit_backoff()` (on successful exit) should clear it. Resetting on expiry trapped sells in an infinite attempt=1 / 1-min loop.
+- **Sell qty cross-check**: Before enqueuing a sell-to-close, qty is validated against `broker_state.position_state`. If portfolio says 34M but position_state says 15M, qty is capped. Guards against transient portfolio snapshot corruption (observed 2026-04-22T00:05: all brokers received Binance's portfolio data for one cycle).
+- **Portfolio cross-contamination diagnostic**: `_run_all_batches_clustered` logs a warning if two broker batches have identical cash values — signals a snapshot corruption event.
 
 ---
 

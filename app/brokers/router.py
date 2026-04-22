@@ -53,19 +53,37 @@ class BrokerRouter(Broker):
             "Account fetch failed for %s: %s",
             {},
         )
+        # Detect shared accounts: split equity/cash so each virtual account
+        # sees its proportional share and doesn't overcommit the shared pool.
+        _aid_groups: dict[str, list[str]] = {}
+        for name, broker in self._brokers.items():
+            aid = broker.api_account_id()
+            _aid_groups.setdefault(aid, []).append(name)
+        _share_divisor: dict[str, int] = {}
+        for names in _aid_groups.values():
+            if len(names) > 1:
+                for n in names:
+                    _share_divisor[n] = len(names)
+        # Track which shared accounts we've already counted toward the aggregate
+        _counted_aids: set[str] = set()
         for name, account in accounts.items():
             equity, cash, buying_power = extract_equity_cash(account)
-            total_equity += equity
-            total_cash += cash
-            total_buying_power += buying_power
             today_deposits = float(account.get("today_deposits", 0) or 0) if isinstance(account, dict) else 0.0
+            divisor = _share_divisor.get(name, 1)
             per_broker[name] = {
-                "equity": equity,
-                "cash": cash,
-                "buying_power": buying_power,
-                "today_deposits": today_deposits,
+                "equity": equity / divisor,
+                "cash": cash / divisor,
+                "buying_power": buying_power / divisor,
+                "today_deposits": today_deposits / divisor,
                 "raw": account,
             }
+            # Only count each physical account once toward the aggregate
+            aid = self._brokers[name].api_account_id() if name in self._brokers else name
+            if aid not in _counted_aids:
+                total_equity += equity
+                total_cash += cash
+                total_buying_power += buying_power
+                _counted_aids.add(aid)
         return {
             "equity": total_equity,
             "cash": total_cash,
@@ -82,40 +100,51 @@ class BrokerRouter(Broker):
             [],
         )
         # Detect virtual accounts sharing the same underlying brokerage account
-        # (e.g. alpaca:Realistic and alpaca:Higher on the same API key).
-        # Positions are identical across shared accounts — assign each symbol
-        # to only the FIRST virtual account to prevent double-counting.
-        api_id_map: dict[str, str] = {}  # api_account_id → first broker name
-        shared_primary: dict[str, str] = {}  # broker name → primary broker for shared API
+        # (e.g. alpaca:Realistic and alpaca:Higher with different API keys
+        # but the same Alpaca paper account_number).
+        # Positions are identical across shared accounts.  Split each
+        # position's qty equally so each virtual account manages its own
+        # fraction — prevents double-sells and double-counting in the
+        # aggregate portfolio.
+        _aid_groups: dict[str, list[str]] = {}  # api_account_id → [broker names]
         for name, broker in self._brokers.items():
             aid = broker.api_account_id()
-            if aid in api_id_map:
-                shared_primary[name] = api_id_map[aid]
-            else:
-                api_id_map[aid] = name
-        # Track which (dedup_group, symbol) pairs we've already emitted.
-        # For any broker in a shared-API group, use the primary name as the
-        # dedup key.  First broker to process a symbol wins; duplicates are
-        # skipped regardless of whether they are the primary or secondary.
-        _dedup_group: dict[str, str] = {}  # broker name → dedup key (primary name or self)
-        for name in self._brokers:
-            if name in shared_primary:
-                _dedup_group[name] = shared_primary[name]
-            elif name in api_id_map.values():
-                _dedup_group[name] = name
-        _seen: set[tuple[str, str]] = set()
+            _aid_groups.setdefault(aid, []).append(name)
+        _share_divisor: dict[str, int] = {}  # broker name → N (split qty by N)
+        for names in _aid_groups.values():
+            if len(names) > 1:
+                for n in names:
+                    _share_divisor[n] = len(names)
+        # For shared accounts: the first broker to report a symbol emits
+        # split positions for ALL siblings in the group.  Subsequent brokers
+        # reporting the same symbol are skipped (they'd be duplicates).
+        _emitted: set[tuple[str, str]] = set()  # (group_id, symbol)
         for name, raw_positions in positions_map.items():
-            group = _dedup_group.get(name)
+            divisor = _share_divisor.get(name)
             for pos in raw_positions:
-                item = dict(pos)
-                item["broker"] = name
-                symbol = item.get("symbol", "")
-                if group is not None:
-                    _key = (group, symbol)
-                    if _key in _seen:
+                symbol = pos.get("symbol", "")
+                if divisor is not None:
+                    aid = self._brokers[name].api_account_id()
+                    group_key = (aid, symbol)
+                    if group_key in _emitted:
                         continue
-                    _seen.add(_key)
-                positions.append(item)
+                    _emitted.add(group_key)
+                    # Emit one split-qty position per sibling account
+                    qty = float(pos.get("qty") or pos.get("position") or 0)
+                    mv = pos.get("market_value")
+                    split_qty = qty / divisor
+                    split_mv = float(mv) / divisor if mv is not None else None
+                    for sibling in _aid_groups[aid]:
+                        item = dict(pos)
+                        item["broker"] = sibling
+                        item["qty"] = split_qty
+                        if split_mv is not None:
+                            item["market_value"] = split_mv
+                        positions.append(item)
+                else:
+                    item = dict(pos)
+                    item["broker"] = name
+                    positions.append(item)
         return positions
 
     def get_open_orders(self) -> list[dict]:

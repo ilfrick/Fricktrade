@@ -1904,6 +1904,25 @@ class TradingAgent:
             if trace:
                 trace["qty"] = qty
 
+            # Cross-validate sell qty against broker_state.position_state.
+            # Guards against transient portfolio snapshot corruption where one
+            # broker's position leaks into another's portfolio dict (observed
+            # 2026-04-22T00:05: all brokers received Binance's 34M SHIB qty).
+            if action == "sell" and _is_closing_position and qty > 0:
+                _ps_check = broker_state.position_state.get(symbol)
+                _ps_qty = float(_ps_check.get("qty", 0) or 0) if _ps_check else 0.0
+                if _ps_qty > 0 and qty > _ps_qty * 1.01:
+                    logging.warning(
+                        "Sell qty cross-check FAILED for %s/%s: portfolio says %.2f but "
+                        "position_state says %.2f — capping to position_state",
+                        broker_name, symbol, qty, _ps_qty,
+                    )
+                    qty = _ps_qty
+                    market_state["qty"] = qty
+                    if trace:
+                        trace["qty"] = qty
+                        trace["sell_qty_capped"] = True
+
             now = datetime.now(timezone.utc)
             # --- Entry-only risk gates (skipped for position closes) ---
             if not risk_disabled and not _is_closing_position:
@@ -3362,9 +3381,20 @@ class TradingAgent:
 
         # Pre-compute per-broker portfolios and holder/non_holder splits
         batch_contexts: list[tuple[str | None, dict, list[str], list[str]]] = []
+        _seen_cash: dict[float, str] = {}  # cash → broker name (cross-check)
         for _, broker_override, batch in symbol_batches:
             bp = self._portfolio_for_broker(portfolio, broker_override) if broker_override else portfolio
             bp = self._strip_dust_positions(bp, broker_override)
+            # Diagnostic: detect portfolio cross-contamination
+            if broker_override:
+                bp_cash = float(bp.get("cash", 0) or 0)
+                if bp_cash > 0 and bp_cash in _seen_cash:
+                    logging.warning(
+                        "PORTFOLIO CROSS-CONTAMINATION: %s has same cash (%.2f) as %s "
+                        "— possible snapshot corruption",
+                        broker_override, bp_cash, _seen_cash[bp_cash],
+                    )
+                _seen_cash[bp_cash] = broker_override
             _pos = bp.get("positions", {})
             holders = [s for s in batch if s in _pos]
             non_holders = [s for s in batch if s not in _pos]

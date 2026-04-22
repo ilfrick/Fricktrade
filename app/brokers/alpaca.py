@@ -25,7 +25,7 @@ class AlpacaBroker(Broker):
         except TypeError:
             self.client = TradingClient(api_key, api_secret, paper=paper, url_override=base_url)
         self._name = name
-        self._api_account_id = api_key[:16] if api_key else str(id(self))
+        self._api_account_id: str | None = None  # lazily populated from account_number
         self._deposit_cache: tuple[float, float] | None = None  # (timestamp, amount)
 
     def is_connected(self) -> bool:
@@ -230,4 +230,11 @@ class AlpacaBroker(Broker):
         record_broker_call(self._name, "cancel_order", self.client.cancel_order_by_id, order_id)
 
     def api_account_id(self) -> str:
+        if self._api_account_id is None:
+            try:
+                acct = self.client.get_account()
+                data = acct.dict() if hasattr(acct, "dict") else dict(acct)
+                self._api_account_id = str(data.get("account_number") or data.get("id") or id(self))
+            except Exception:
+                self._api_account_id = str(id(self))
         return self._api_account_id
