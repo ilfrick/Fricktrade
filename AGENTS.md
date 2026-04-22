@@ -516,6 +516,8 @@ JSON Lines format: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`. Each li
 - **`tests-when-closed` shares codebase**: Must be rebuilt when trader code changes. Writes to the same decision trace file.
 - **Dust position filter**: `_strip_dust_positions()` removes sub-min_notional positions from portfolio before batch dispatch. Two additional notional guards inside `_check_position_exit` and strategy-sell path catch any dust that leaks through (e.g. stale last_prices).
 - **Pending-buy dedup release**: Only `timed_out` releases `_pending_buy_symbols`. Releasing on `rejected` caused retry loops — 14 duplicate HYPE/USD buys in 17 min on Binance.
+- **Shared-API position dedup**: `alpaca:Realistic` and `alpaca:Higher` share the same API key. `BrokerRouter.get_positions()` deduplicates by `api_account_id()` — each position assigned to only the first virtual account. Without this, both try to sell the full qty and one always fails.
+- **Exit backoff escalation**: `_should_skip_exit()` must NOT reset `_exit_fail_counts` on backoff expiry. Only `_clear_exit_backoff()` (on successful exit) should clear it. Resetting on expiry trapped sells in an infinite attempt=1 / 1-min loop.
 
 ---
 
