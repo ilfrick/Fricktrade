@@ -51,6 +51,9 @@ def _prescan_then_score(universe, api_key, api_secret, ai_cfg_payload, brokers_c
             relative_volume_min=rel_vol_min,
             premarket_gain_min_pct=0.0,
             min_shares_traded=min_shares,
+            max_spread_pct=float("inf"),
+            require_catalyst=False,
+            strict_spread=False,
         )
         scanned = scan_symbols(
             eq_uni,

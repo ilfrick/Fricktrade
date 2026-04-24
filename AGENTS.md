@@ -519,6 +519,7 @@ JSON Lines format: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`. Each li
 - **Shared-account position dedup**: `BrokerRouter.get_positions()` deduplicates by `api_account_id()` — brokers sharing the same underlying account get split qty. Currently a no-op (Alpaca accounts have separate API keys and account numbers: PA3SW9ZCUYC5 vs PA38SSSDFBVE).
 - **Exit backoff escalation**: `_should_skip_exit()` must NOT reset `_exit_fail_counts` on backoff expiry. Only `_clear_exit_backoff()` (on successful exit) should clear it. Resetting on expiry trapped sells in an infinite attempt=1 / 1-min loop.
 - **Sell qty cross-check**: Before enqueuing a sell-to-close, qty is validated against `broker_state.position_state`. If portfolio says 34M but position_state says 15M, qty is capped. Guards against transient portfolio snapshot corruption (observed 2026-04-22T00:05: all brokers received Binance's portfolio data for one cycle).
+- **Portfolio contamination auto-fix**: `_get_portfolio_snapshot()` cross-validates per-broker positions against `position_state`. If a broker's portfolio qty is >2x its position_state AND matches another broker's position_state (contamination fingerprint), qty is corrected before reaching the trading pipeline. Fixes exposure/sizing/risk — not just sells. (Observed: AAVE/USD on alpaca:Higher showed Binance's 1.16 instead of 0.39, 2026-04-23.)
 - **Portfolio cross-contamination diagnostic**: `_run_all_batches_clustered` logs a warning if two broker batches have identical cash values — signals a snapshot corruption event.
 
 ---

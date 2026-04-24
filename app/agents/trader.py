@@ -5005,6 +5005,58 @@ class TradingAgent:
                 if market_value < 0:
                     brokers[broker_name]["short_exposure"] += abs(market_value)
 
+        # Cross-validate per-broker positions against position_state.
+        # Detects transient portfolio contamination where one broker's position
+        # data leaks into another's (observed 2026-04-22 SHIB, 2026-04-23 AAVE).
+        # position_state is independently maintained by PerformanceTracker and
+        # serves as ground truth for per-broker holdings.
+        if len(brokers) > 1 and hasattr(self, "_broker_states"):
+            for bn, bdata in brokers.items():
+                bs = self._broker_states.get(bn)
+                if not bs or not bs.position_state:
+                    continue
+                bp_pos = bdata.get("positions", {})
+                for sym in list(bp_pos.keys()):
+                    bp_qty = float(bp_pos[sym].get("qty", 0) or 0)
+                    if bp_qty <= 0:
+                        continue
+                    ps_entry = bs.position_state.get(sym)
+                    if ps_entry is None:
+                        continue  # new position, no baseline yet
+                    ps_qty = float(ps_entry.get("qty", 0) or 0)
+                    if ps_qty <= 0:
+                        continue
+                    # If portfolio qty is >2x position_state AND matches another
+                    # broker's known position, it's cross-broker contamination.
+                    if bp_qty > ps_qty * 2.0:
+                        contamination_source = None
+                        for other_bn, other_bs in self._broker_states.items():
+                            if other_bn == bn:
+                                continue
+                            other_ps = other_bs.position_state.get(sym)
+                            if not other_ps:
+                                continue
+                            other_qty = float(other_ps.get("qty", 0) or 0)
+                            if other_qty > 0 and abs(bp_qty - other_qty) / other_qty < 0.05:
+                                contamination_source = other_bn
+                                break
+                        if contamination_source:
+                            logging.warning(
+                                "PORTFOLIO CONTAMINATION FIX: %s/%s shows %.6f "
+                                "(matches %s's %.6f) but position_state=%.6f — correcting",
+                                bn, sym, bp_qty, contamination_source, bp_qty, ps_qty,
+                            )
+                            old_bp_qty = bp_qty
+                            bp_pos[sym] = dict(bp_pos[sym])  # avoid mutating shared ref
+                            bp_pos[sym]["qty"] = ps_qty
+                            if bp_pos[sym].get("value") is not None:
+                                ratio = ps_qty / old_bp_qty if old_bp_qty > 0 else 0
+                                bp_pos[sym]["value"] = float(bp_pos[sym]["value"]) * ratio
+                            # Correct aggregate too
+                            if sym in positions:
+                                agg_qty = float(positions[sym].get("qty", 0) or 0)
+                                positions[sym]["qty"] = agg_qty - old_bp_qty + ps_qty
+
         return {
             "equity": equity_val,
             "cash": cash_val,
