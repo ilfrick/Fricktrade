@@ -4167,15 +4167,23 @@ class TradingAgent:
         # Pre-warm market data cache: fetch historical bars before the first
         # trading cycle so indicators have real data from cycle 1 (root-cause
         # fix for cold-restart sell storm — strategies no longer evaluate on
-        # empty/sparse bar history).
+        # empty/sparse bar history).  Runs with a 60s timeout to avoid blocking
+        # startup if a broker API is slow (Alpaca crypto bars can hang).
+        self._loop_heartbeat = time.monotonic()  # prevent watchdog false alarm during pre-warm
         try:
             _prewarm_symbols = self._symbol_mgr.resolve_active_symbols()
             if _prewarm_symbols and hasattr(market_data_provider, "prepare"):
-                logging.info("Pre-warming market data cache for %d symbols…", len(_prewarm_symbols))
-                market_data_provider.prepare(_prewarm_symbols)
-                logging.info("Market data pre-warm complete")
+                logging.info("Pre-warming market data cache for %d symbols", len(_prewarm_symbols))
+                _pw_executor = ThreadPoolExecutor(max_workers=1)
+                _pw_future = _pw_executor.submit(market_data_provider.prepare, _prewarm_symbols)
+                try:
+                    _pw_future.result(timeout=60)
+                    logging.info("Market data pre-warm complete")
+                except Exception as exc:
+                    logging.warning("Market data pre-warm timed out or failed: %s (will retry on first cycle)", exc)
+                _pw_executor.shutdown(wait=False)
         except Exception as exc:
-            logging.warning("Market data pre-warm failed (will retry on first cycle): %s", exc)
+            logging.warning("Market data pre-warm failed: %s", exc)
 
         _warmup_logged = False
         _warmup_ended_logged = False
