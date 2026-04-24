@@ -285,14 +285,13 @@ trading_limits:
   min_notional: 10.0         # minimum USD order value; Alpaca crypto minimum is $10
   crypto_order_margin: 0.97  # safety haircut on crypto buy notional to absorb price drift between sizing and market-order fill
 strategy:
-  name: crypto_momentum
+  name: crypto_mean_reversion
   names:
-  - crypto_momentum
   - crypto_mean_reversion
   combine: weighted
   weights:
-    crypto_mean_reversion: 0.60   # primary: buy the dip (user's core intent)
-    crypto_momentum: 0.40         # confirmation: momentum aligns with entry
+    crypto_mean_reversion: 1.0    # sole active strategy
+    # crypto_momentum: disabled 2026-04-24 — was causing AAVE/USD churn (MR vs momentum disagreement)
   min_conviction: 0.25            # minimum weighted signal to act
   single_sided_conviction_multiplier: 0.6  # reduce min_conviction when only one side signals (e.g. buy with no sell)
   entry_ranking:
@@ -965,6 +964,7 @@ execution:
   symbol_executor_workers: 4
   stuck_cooldown_minutes: 15
   insufficient_stablecoin_cooldown_minutes: 5  # cooldown after insufficient_stablecoin rejection to stop per-cycle retry loop
+  warmup_grace_minutes: 5  # suppress non-safety sells (alpha_decay, time_exit, strategy sells) after cold restart; stops still fire
   stop_exit_reentry_cooldown_minutes: 30  # cooldown after trailing_stop/hard_stop/atr_stop exit to prevent immediate re-buy churn
   stuck_blacklist_after: 3      # consecutive timed-out buys before blacklist (raised from 2; demo API unreliable)
   stuck_blacklist_hours: 2      # hours to blacklist a symbol after repeated stuck orders

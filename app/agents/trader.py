@@ -180,6 +180,9 @@ class TradingAgent:
             self._broker_states[name] = BrokerState(risk=RiskManager(broker_risk_cfg, tz=risk_tz))
         self._last_market_open = None
         self._started_at = datetime.now(timezone.utc)
+        self._warmup_grace_minutes = float(
+            cfg.get("execution", {}).get("warmup_grace_minutes", 5) or 5
+        )
         self._loop_heartbeat: float = 0.0  # updated each loop iteration; monitored by watchdog
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
@@ -725,6 +728,19 @@ class TradingAgent:
                 return "hold"
         return action
 
+    def _in_warmup_grace(self) -> bool:
+        """True during the post-startup warmup grace period.
+
+        During warmup, non-safety exits (alpha_decay, time_exit, peak_detection,
+        opportunity_cost) and strategy-driven sells are suppressed to prevent the
+        cold-restart sell storm where all positions trigger exits simultaneously.
+        Safety exits (hard_stop, atr_stop, trailing_stop, circuit_breaker) still fire.
+        """
+        if self._warmup_grace_minutes <= 0:
+            return False
+        elapsed = (datetime.now(timezone.utc) - self._started_at).total_seconds()
+        return elapsed < self._warmup_grace_minutes * 60
+
     def _check_position_exit(
         self,
         symbol: str,
@@ -811,6 +827,13 @@ class TradingAgent:
                 pos["took_partial"] = True
                 TAKE_PROFIT_EXITS.labels(symbol=symbol, reason="partial_take_profit").inc()
                 return True, "partial_take_profit"
+
+        # --- Warmup grace: suppress non-safety exits during cold-restart window ---
+        # Safety exits above (hard_stop, atr_stop, trailing_stop, take_profit) still fire.
+        # Non-safety exits below require indicator/strategy context that may be unreliable
+        # on cycle 1, and mass-firing them causes a sell storm.
+        if self._in_warmup_grace():
+            return False, ""
 
         # --- Signal-Driven Peak Detection Exit ---
         # Detects distribution tops: RSI overbought + price at/above upper Bollinger Band
@@ -1802,6 +1825,12 @@ class TradingAgent:
             _is_closing_position = action == "sell" and float(
                 portfolio.get("positions", {}).get(symbol, {}).get("qty", 0) or 0
             ) > 0
+            # Warmup grace: suppress strategy-driven sells during cold-restart window.
+            # Safety exits (stops) still fire via _check_position_exit above.
+            if _is_closing_position and self._in_warmup_grace():
+                self._record_skip(symbol, action, "warmup_grace", broker_name)
+                self._emit_decision_trace(trace, "skip", "warmup_grace", "risk")
+                return None
             # Min-hold guard on signal-path sells: same rule as _check_position_exit.
             # Prevents LLM/vote sell signals from exiting a position that was just opened.
             # Skip sell on positions in exit backoff (e.g., prior floors_to_zero dust).
@@ -4135,11 +4164,36 @@ class TradingAgent:
         watchdog_thread = threading.Thread(target=_watchdog, daemon=True, name="loop-watchdog")
         watchdog_thread.start()
 
+        # Pre-warm market data cache: fetch historical bars before the first
+        # trading cycle so indicators have real data from cycle 1 (root-cause
+        # fix for cold-restart sell storm — strategies no longer evaluate on
+        # empty/sparse bar history).
+        try:
+            _prewarm_symbols = self._symbol_mgr.resolve_active_symbols()
+            if _prewarm_symbols and hasattr(market_data_provider, "prepare"):
+                logging.info("Pre-warming market data cache for %d symbols…", len(_prewarm_symbols))
+                market_data_provider.prepare(_prewarm_symbols)
+                logging.info("Market data pre-warm complete")
+        except Exception as exc:
+            logging.warning("Market data pre-warm failed (will retry on first cycle): %s", exc)
+
+        _warmup_logged = False
+        _warmup_ended_logged = False
         while True:
             self._loop_heartbeat = time.monotonic()
             if should_restart(self._started_at):
                 logging.info("Restart requested; exiting trading loop.")
                 raise SystemExit(0)
+            if self._in_warmup_grace():
+                if not _warmup_logged:
+                    logging.info(
+                        "Warmup grace active: suppressing non-safety sells for %.0f min",
+                        self._warmup_grace_minutes,
+                    )
+                    _warmup_logged = True
+            elif _warmup_logged and not _warmup_ended_logged:
+                logging.info("Warmup grace period ended — all exit types now active")
+                _warmup_ended_logged = True
             portfolio = self._get_portfolio_snapshot()
             if portfolio is None:
                 self._log_broker_missing()

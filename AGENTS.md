@@ -521,6 +521,7 @@ JSON Lines format: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`. Each li
 - **Sell qty cross-check**: Before enqueuing a sell-to-close, qty is validated against `broker_state.position_state`. If portfolio says 34M but position_state says 15M, qty is capped. Guards against transient portfolio snapshot corruption (observed 2026-04-22T00:05: all brokers received Binance's portfolio data for one cycle).
 - **Portfolio contamination auto-fix**: `_get_portfolio_snapshot()` cross-validates per-broker positions against `position_state`. If a broker's portfolio qty is >2x its position_state AND matches another broker's position_state (contamination fingerprint), qty is corrected before reaching the trading pipeline. Fixes exposure/sizing/risk — not just sells. (Observed: AAVE/USD on alpaca:Higher showed Binance's 1.16 instead of 0.39, 2026-04-23.)
 - **Portfolio cross-contamination diagnostic**: `_run_all_batches_clustered` logs a warning if two broker batches have identical cash values — signals a snapshot corruption event.
+- **Cold-restart warmup grace** (`execution.warmup_grace_minutes: 5`): Suppresses non-safety sells (alpha_decay, time_exit, peak_detection, opportunity_cost, strategy-driven sells) for 5 min after cold start. Safety exits (hard_stop, atr_stop, trailing_stop, take_profit) still fire. Prevents the sell storm where all positions trigger exits simultaneously on cycle 1. Market data is also pre-warmed before the first loop iteration so indicators have full bar history from the start.
 
 ---
 
