@@ -25,9 +25,10 @@ services:
     depends_on:
       trader:
         condition: service_healthy
-    runtime: runc
     environment:
       - OLLAMA_KEEP_ALIVE=24h  # Keep model loaded in memory; don't unload after 5-min default
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
       - ./ollama:/root/.ollama
     ports:
@@ -41,13 +42,14 @@ services:
       start_period: 120s
 
   trader:
-    runtime: runc
     build:
       context: .
       dockerfile: docker/Dockerfile.gpu
     env_file:
       - .env
-    environment: []
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
     volumes:
       - ./config:/app/config
       - ./data:/data
@@ -66,6 +68,9 @@ services:
       resources:
         limits:
           memory: 2G
+        reservations:
+          devices:
+            - capabilities: ["gpu"]
     restart: unless-stopped
 
   market-cache:
