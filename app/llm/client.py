@@ -248,7 +248,7 @@ class OllamaBackend(LLMBackend):
     the same lesson learned with the Binance demo API deadlocks.
     """
 
-    _WALL_CLOCK_TIMEOUT = 45  # seconds; hard kill regardless of response streaming
+    _WALL_CLOCK_TIMEOUT = 150  # seconds; raised from 45 — CPU inference needs ~60-120s without GPU
 
     def __init__(self, model: Optional[str] = None):
         self.model = model or os.getenv("LLM_OLLAMA_MODEL", "llama3.1:8b")
@@ -287,7 +287,7 @@ class OllamaBackend(LLMBackend):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=120) as resp:
                 return json.loads(resp.read()), time.monotonic() - t0
 
         future = self._executor.submit(_call)
