@@ -7,23 +7,78 @@ This is the **single authoritative document** for understanding and operating Fr
 
 **System**: v3.0, crypto-only, paper trading. Alpaca paper (2 accounts) + Binance Spot demo.
 
+> ⚠️ **STATUS 2026-08-19: STOPPED, AND SHOULD STAY STOPPED.**
+> All containers have been down since 2026-05-16. A full audit (see
+> [Alpha Status](#alpha-status-2026-08-19)) found the active strategy has **no
+> out-of-sample edge** — its gross edge is smaller than its own transaction
+> costs. Do not restart for trading until a configuration passes
+> `scripts/alpha_validation.py holdout`. Restarting as-is resumes losing money.
+
 ---
 
 ## Current System State
 
 | Parameter | Value |
 |-----------|-------|
-| Active strategies | `crypto_momentum` (40%), `crypto_mean_reversion` (60%) |
+| Active strategies | `crypto_mean_reversion` **only** (weight 1.0) — `crypto_momentum` disabled 2026-04-24 after AAVE/USD churn |
 | Combine mode | `weighted` — weighted sum of buy confidences vs min_conviction |
 | min_conviction | 0.25 (effective 0.15 when single-sided via SSCM=0.6) |
 | Data interval | 1m bars |
 | Brokers | Alpaca paper (2 accounts, `crypto_only`), Binance Spot demo |
-| Trailing stop (crypto) | 4.5% global; 2.0% for momentum entries |
-| Vol targeting | Enabled, target 4%, scale [0.3, 1.5] |
-| Macro regime | Enabled; only "crisis" blocks entries |
+| Trailing stop (crypto) | 4.5% global; 2.0% for momentum entries (momentum inactive) |
+| Vol targeting | Enabled, target 4% **daily**, scale [0.3, 1.5] |
+| Macro regime | **Disabled** (`llm.macro_regime.enabled: false`) |
 | Per-symbol sentiment | Enabled (Ollama llama3.2:3b, 900s cache) |
 | Aggregate sentiment | Enabled (Ollama, every 15 min) |
-| Disabled | Tactical/strategic meta-orchestrators, portfolio orchestrator, RL policy, guardrail, VaR, exposure_caps, signal_bias_guard, kill_switch, symbols_filter |
+| Portfolio rebalance | **Disabled** 2026-08-19 — `_maybe_rebalance` called `check_rebalance()` with a mismatched signature; the TypeError was swallowed every cycle so it never did anything |
+| Disabled | Tactical/strategic meta-orchestrators, portfolio orchestrator, RL policy, guardrail, VaR, exposure_caps, signal_bias_guard, kill_switch, symbols_filter, rebalance |
+
+---
+
+## Alpha Status (2026-08-19)
+
+A full audit measured whether the system has any edge. It does not. Evidence,
+all reproducible via `scripts/alpha_validation.py` against `/data/*_USD_1m.csv`
+(20 symbols, 1m bars, 2025-12-22 → 2026-03-22):
+
+| Test | Result |
+|------|--------|
+| Signal predictive value | Live entry (RSI-70 < 30) is **anti-predictive**: −0.20% edge at 15m (t=−4.0) vs baseline. It buys assets that keep falling. |
+| Walk-forward, 6 folds | Mean net expectancy **−0.47%/trade**; only 2/6 folds positive. |
+| Train / hold-out | train −0.229%/trade, hold-out **−1.083%/trade**. |
+| Parameter grid (36 configs) | **0 of 36** had positive hold-out expectancy. Best train config (+0.241) went to −0.654 out-of-sample. |
+| Gross vs net | Best gross edge ≈ **+0.17%/trade**; round-trip cost ≈ **0.21%**. The edge is smaller than the friction. |
+
+**Why the system never made money — three compounding causes:**
+
+1. **It barely trades.** `rsi_period: 70` on 1m bars is so smoothed that RSI's 1st
+   percentile is ~37 across every symbol, so the `rsi_oversold: 30` gate sits
+   *below the 1st percentile* and fires on 0.049% of bars (1,264 of 2.59M). Live,
+   that is zero orders in 4 consecutive days.
+2. **The exit ladder is inverted.** Partial TP at +1% and the MR SMA-exit at +0.5%
+   cap winners at ~+0.55%, while losers run to the −5% stop. An 84% win rate still
+   nets −0.26%/trade. In a downtrend the SMA falls to meet the price, so the
+   "reversion" exit fires at its floor instead of on a real bounce.
+3. **Costs exceed the edge.** 0.05% commission + 3bps slippage + 2.5bps half-spread
+   per side ≈ 0.21% per round trip, against a gross edge of at most ~0.17%.
+
+**Ranked options, by expected value (none yet validated — validate before deploying):**
+
+1. **Cut transaction costs.** Crypto is hardcoded to market orders in
+   `trader.run_once` (the limit-order upgrade is skipped when `"/" in symbol`).
+   Binance maker fees are 0.02% vs 0.05% taker, and resting bids avoid crossing the
+   spread — plausibly ~0.15%/round-trip saved, which is the same order as the entire
+   deficit. Caveat: maker orders may not fill, and non-fills are adversely selected.
+2. **Trade less, at higher conviction.** Every sweep showed loosening entries
+   increases trade count and *increases* total loss.
+3. **Find a different alpha source.** No configuration of this dip-buy family
+   cleared costs in any window tested.
+4. **Do not allocate capital** to any configuration until
+   `scripts/alpha_validation.py holdout` reports a pass.
+
+The bear market matters for context but does not excuse the result: buy-and-hold
+across the 20 symbols averaged **−29%** over the same period, so cash beat both the
+strategy and the market. Being flat was better than trading.
 
 ---
 
@@ -221,14 +276,18 @@ Confidence gate: sentiment ignored when confidence < 0.3. Cache TTL: 900s. The o
 strategy:
   combine: weighted          # "weighted" or "vote"
   weights:
-    crypto_mean_reversion: 0.60
-    crypto_momentum: 0.40
+    crypto_mean_reversion: 1.0    # sole active strategy
+    # crypto_momentum: disabled 2026-04-24 (AAVE/USD churn)
   min_conviction: 0.25       # minimum weighted score to trigger buy
   single_sided_conviction_multiplier: 0.6  # reduces threshold when only one side signals
   names:
-    - crypto_momentum
     - crypto_mean_reversion
 ```
+
+Note on `crypto_momentum`: in weighted mode it was effectively dead even before
+being disabled — a 2026-03 backtest logged 137,508 momentum buy signals and **0**
+executions, because its typical confidence (~0.268) times its 0.40 weight (0.107)
+never cleared the 0.15 single-sided threshold. It contributed churn, not trades.
 
 ### Strategy parameters
 
@@ -546,6 +605,34 @@ python3 -m pytest tests/ --ignore=tests/test_trader_sizing.py -q
 
 ---
 
+## Alpha validation (run before any strategy change)
+
+`scripts/alpha_validation.py` answers whether a configuration has edge, in
+increasing order of strictness. It reports **net expectancy per trade** after
+realistic costs, because total return is dominated by sizing and market drift and
+hides whether each decision adds value.
+
+```bash
+# does the entry signal predict anything at all?
+docker compose run --rm -T trader python3 scripts/alpha_validation.py signal
+
+# sequential walk-forward — a real edge is positive in most folds, not on average
+docker compose run --rm -T trader python3 scripts/alpha_validation.py walk --folds 6
+
+# one-shot hold-out on the untouched last 25%
+docker compose run --rm -T trader python3 scripts/alpha_validation.py holdout
+
+# try a candidate configuration
+python3 scripts/alpha_validation.py all --data-dir ./data \
+    --rsi-period 30 --rsi-oversold 25 --hard-stop 3
+```
+
+Rules that keep this honest:
+- Select parameters on train/walk-forward only; touch the hold-out **once**.
+- An edge below the round-trip cost (~0.21%) is not tradeable no matter its t-stat.
+- t-stats printed are optimistic: signals overlap in time and crypto symbols are
+  highly correlated, so effective sample size is far below the raw signal count.
+
 ## Backtest
 
 ```yaml
@@ -572,6 +659,29 @@ Validated: MR bb_period=50 → +1.0% avg return, 96% win rate over 12 days (Bonf
 ## History
 
 Major milestones (newest first):
+
+- **Full audit + correctness fixes (2026-08-19):** Measured that the system has no
+  out-of-sample edge (see [Alpha Status](#alpha-status-2026-08-19)) and fixed seven
+  defects found while reading the full codebase:
+  1. `compute_all_indicators()` never emitted `rsi` or `atr`. The ATR stop was dead
+     code (it reads `indicators["atr"]`), and the peak-detection exit's RSI leg was
+     permanently neutral at 50 — so the "detect peak and sell" behaviour never worked.
+  2. ATR stop now scales per-bar ATR to a daily equivalent (`× sqrt(bars/day)`).
+     Unscaled, 2.5 × ATR(14 × 1m) is a ~0.25% stop that would exit on noise.
+  3. Vol targeting compared per-bar realized vol against a *daily* 4% target, so the
+     scale was pinned at `max_scale` 1.5 for every symbol — a permanent 1.5× position
+     multiplier that never shrank in volatility. Now daily-equivalent on both sides.
+  4. `_enrich_signals` treated `atr_pct` (a percent) as a fraction, pinning `vol_mult`
+     at its 0.7 floor for essentially all crypto. Now daily-equivalent.
+  5. `RiskManager.check_crypto_exposure` read `market_value`, but portfolio snapshots
+     store `value` — so existing positions counted as $0 and neither the crypto
+     exposure cap nor the per-position cap ever bound. Now accepts both keys.
+  6. `PerformanceTracker.record_trade` omitted `symbol`, so the per-asset-class
+     Sharpe/profit-factor metrics were always computed over empty lists.
+  7. `portfolio.rebalance` disabled — `_maybe_rebalance` called `check_rebalance()`
+     with a mismatched signature; the TypeError was swallowed every cycle.
+  Also added `scripts/alpha_validation.py` and `tests/test_alpha_fixes.py`, and
+  corrected two stale tests that asserted deliberately-removed behaviour.
 
 - **Per-symbol Ollama sentiment, SSCM=0.6, Grafana ranking (2026-04-05, commit 39c6f2d):** Per-symbol sentiment via Ollama llama3.2:3b with crypto-specific prompt. Both strategies read `llm_sentiment` for confidence modification. Aggregate sentiment gate in entry ranking. `single_sided_conviction_multiplier: 0.6` deployed (effective threshold 0.15 for single-sided signals). Entry ranking + market sentiment Grafana panels added to all account dashboards. News executor bumped to 2 workers.
 

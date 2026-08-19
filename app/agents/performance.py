@@ -77,7 +77,7 @@ class PerformanceTracker:
         pnl_pct: float,
         ts: datetime,
     ) -> None:
-        record = {"ts": ts, "pnl_pct": pnl_pct}
+        record = {"ts": ts, "pnl_pct": pnl_pct, "symbol": symbol}
         broker_state.symbol_trades.setdefault(symbol, []).append(record)
         if strategy and strategy in self._strategy_names:
             broker_state.strategy_trades.setdefault(strategy, []).append(record)

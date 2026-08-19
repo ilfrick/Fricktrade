@@ -206,18 +206,27 @@ class RiskManager:
         if equity <= 0:
             return False, None
         positions = portfolio.get("positions", {})
+
+        # Portfolio snapshots store position value under "value"; raw broker
+        # position dicts use "market_value". Accept both — reading only
+        # "market_value" made every existing position count as $0, so neither
+        # cap ever bound against held exposure.
+        def _pos_value(pos: dict) -> float:
+            raw = pos.get("value")
+            if raw is None:
+                raw = pos.get("market_value")
+            return abs(float(raw or 0.0))
+
         # Total crypto exposure across all positions
         crypto_exposure = sum(
-            abs(float(pos.get("market_value", 0.0) or 0.0))
-            for sym, pos in positions.items()
-            if "/" in sym
+            _pos_value(pos) for sym, pos in positions.items() if "/" in sym
         )
         order_notional = qty * last_price
         projected_crypto_pct = (crypto_exposure + order_notional) / equity * 100.0
         if projected_crypto_pct > max_crypto_pct:
             return True, f"crypto_exposure_cap ({projected_crypto_pct:.1f}% > {max_crypto_pct}%)"
         # Per-position size check
-        current_notional = abs(float(positions.get(symbol, {}).get("market_value", 0.0) or 0.0))
+        current_notional = _pos_value(positions.get(symbol, {}) or {})
         projected_position_pct = (current_notional + order_notional) / equity * 100.0
         if projected_position_pct > max_position_pct:
             return True, f"crypto_position_cap ({projected_position_pct:.1f}% > {max_position_pct}%)"

@@ -84,8 +84,11 @@ def test_backoff_expires():
     # Set backoff to the past
     agent._exit_backoff_until[("broker1", "AAPL")] = datetime.now(timezone.utc) - timedelta(seconds=1)
     assert agent._should_skip_exit("broker1", "AAPL") is False
-    # State should be cleaned up
-    assert ("broker1", "AAPL") not in agent._exit_fail_counts
+    # The expired timer is cleared, but fail_counts must SURVIVE expiry so the
+    # next failure escalates 1→2→4→8→15 min. Clearing it here trapped sells in
+    # an infinite attempt=1 / 1-min loop (SHIB/USD incident). Only a successful
+    # exit (_clear_exit_backoff) resets the counter.
+    assert agent._exit_fail_counts[("broker1", "AAPL")] == 1
     assert ("broker1", "AAPL") not in agent._exit_backoff_until
 
 

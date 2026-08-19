@@ -98,6 +98,26 @@ from app.strategies.confidence_calibrator import ConfidenceCalibrator
 _ENTRY_ALLOWED_REGIMES: frozenset[str] = frozenset({"risk_on", "risk_off", "rotation", "range_bound"})
 
 
+def _interval_minutes(interval: str) -> int:
+    text = str(interval or "1m").strip().lower()
+    try:
+        if text.endswith("m"):
+            return max(int(text[:-1] or "1"), 1)
+        if text.endswith("h"):
+            return max(int(text[:-1] or "1") * 60, 1)
+        if text.endswith("d"):
+            return 24 * 60
+    except ValueError:
+        pass
+    return 1
+
+
+def _bars_per_day(interval: str, is_crypto: bool) -> int:
+    """Bars per trading day at the given data interval (crypto 24h, equities 6.5h)."""
+    session_minutes = 1440 if is_crypto else 390
+    return max(int(session_minutes / _interval_minutes(interval)), 1)
+
+
 @dataclass
 class BrokerState:
     risk: RiskManager
@@ -548,9 +568,15 @@ class TradingAgent:
         # Indicators
         indicators = market_state.get("indicators", {}) or {}
         rsi = float(indicators.get("rsi", 50) or 50)
-        atr_pct = float(indicators.get("atr_pct", 0.01) or 0.01)
+        # atr_pct is a PERCENT at the data interval (per-bar); daily-ize it and
+        # convert to a fraction before applying the 2%-daily-vol penalty knee.
+        # The old code treated the per-bar percent as a fraction, which put every
+        # crypto symbol at the 0.7 floor permanently.
+        atr_pct = float(indicators.get("atr_pct", 0.0) or 0.0)
+        _interval = str(self.cfg.get("data", {}).get("interval", "1m"))
+        _atr_frac_daily = (atr_pct / 100.0) * math.sqrt(_bars_per_day(_interval, is_crypto))
         # High volatility penalty on confidence
-        vol_mult = max(0.7, 1.0 - max(0.0, atr_pct - 0.02) * 10)
+        vol_mult = max(0.7, 1.0 - max(0.0, _atr_frac_daily - 0.02) * 10)
 
         # Insider sentiment (equity only): _enrich_market_state writes flat key
         insider = float(market_state.get("insider_sentiment", 0.0) or 0.0) if not is_crypto else 0.0
@@ -779,17 +805,23 @@ class TradingAgent:
         is_crypto = "/" in symbol
 
         # ATR-based stop: supersedes hard_stop when ATR is available.
+        # indicators["atr"] is a per-bar ATR at the data interval (e.g. 1m); the
+        # atr_stop_mult is calibrated against DAILY ATR, so scale by sqrt(bars/day)
+        # first. Without this, 2.5 x ATR(14x1m) is a ~0.25%-wide stop that would
+        # stop out virtually every position on noise.
         # Floor: ATR stop must not be looser than the hard_stop floor to cap max loss.
         if market_state is not None:
             indicators = market_state.get("indicators") or {}
             atr = float(indicators.get("atr", 0.0) or 0.0)
             if atr > 0 and avg_entry > 0:
+                _interval = str(self.cfg.get("data", {}).get("interval", "1m"))
+                atr_daily = atr * math.sqrt(_bars_per_day(_interval, is_crypto))
                 _crypto_cfg_atr = (risk_cfg.get("crypto") or {}) if is_crypto else {}
                 _equity_cfg_atr = (risk_cfg.get("equity") or {}) if not is_crypto else {}
                 _hs = float(_crypto_cfg_atr.get("hard_stop_pct") or _equity_cfg_atr.get("hard_stop_pct") or risk_cfg.get("hard_stop_pct", 0) or 0)
                 _default_atr = 2.5 if is_crypto else 1.5
                 atr_mult = float(_crypto_cfg_atr.get("atr_stop_mult") or _equity_cfg_atr.get("atr_stop_mult") or risk_cfg.get("atr_stop_mult", _default_atr) or _default_atr)
-                atr_stop_price = avg_entry - atr * atr_mult
+                atr_stop_price = avg_entry - atr_daily * atr_mult
                 if _hs > 0:
                     atr_stop_price = max(atr_stop_price, avg_entry * (1.0 - _hs / 100.0))
                 if last_price <= atr_stop_price:
@@ -2895,11 +2927,21 @@ class TradingAgent:
         if not cfg.get("enabled", False):
             return 1.0
         prices = market_state.get("prices", []) or []
-        realized = realized_volatility_pct(prices)
-        if realized <= 0:
+        # target_vol_pct is a DAILY vol target, but the price series is per-bar
+        # (1m). Compare like with like: realized per-bar vol over the last
+        # session, scaled by sqrt(bars/day) to a daily-equivalent. The old code
+        # compared per-bar vol (~0.05-0.2%) directly against the 4% daily target,
+        # which pinned the scale at max_scale for every symbol, every cycle.
+        is_crypto = "/" in str(market_state.get("symbol", "") or "")
+        interval = str(self.cfg.get("data", {}).get("interval", "1m"))
+        bars_day = _bars_per_day(interval, is_crypto)
+        window = prices[-bars_day:] if len(prices) > bars_day else prices
+        per_bar = realized_volatility_pct(window)
+        if per_bar <= 0:
             return 1.0
+        realized_daily = per_bar * math.sqrt(bars_day)
         target = float(cfg.get("target_vol_pct", 2.0))
-        scale = target / realized
+        scale = target / realized_daily
         min_scale = float(cfg.get("min_scale", 0.5))
         max_scale = float(cfg.get("max_scale", 1.5))
         return max(min(scale, max_scale), min_scale)

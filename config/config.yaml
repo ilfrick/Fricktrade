@@ -555,7 +555,9 @@ portfolio:
     min_position_pct: 0.01
     max_sector_pct: 0.40
   rebalance:
-    enabled: true
+    enabled: false  # disabled 2026-08-19: trader._maybe_rebalance calls check_rebalance() with a
+                    # mismatched signature (TypeError swallowed every cycle) and the engine only
+                    # logs anyway — it never placed trades. Pure overhead until properly wired.
     drift_threshold_pct: 5.0
     min_trade_pct: 0.5
     min_interval_minutes: 60

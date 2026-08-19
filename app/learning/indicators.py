@@ -27,6 +27,24 @@ def atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 1
     return float(np.mean(tr[-period:]))
 
 
+def wilder_rsi(closes: np.ndarray, period: int = 14) -> float:
+    """Wilder-smoothed RSI (0-100). Matches Strategy._wilder_rsi."""
+    if closes.size < period + 1:
+        return 50.0
+    deltas = np.diff(closes.astype(float))
+    gains = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+    avg_gain = gains[:period].mean()
+    avg_loss = losses[:period].mean()
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return float(100.0 - (100.0 / (1.0 + rs)))
+
+
 def atr_percent(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> float:
     """ATR as percentage of price."""
     atr_val = atr(highs, lows, closes, period)
@@ -330,6 +348,10 @@ def compute_all_indicators(
     result = {}
 
     # Volatility indicators
+    # "atr" is the per-bar absolute ATR at the data interval (NOT daily);
+    # consumers that compare it against percent-of-entry stop distances must
+    # scale it to a daily-equivalent first (see trader._check_position_exit).
+    result["atr"] = atr(highs, lows, closes, period)
     result["atr_pct"] = atr_percent(highs, lows, closes, period)
     _bb_upper, _bb_mid, _bb_lower = bollinger_bands(closes, 20)
     result["bb_upper"] = _bb_upper
@@ -341,6 +363,7 @@ def compute_all_indicators(
     result["hurst"] = hurst_exponent(closes, 20)
 
     # Momentum indicators
+    result["rsi"] = wilder_rsi(closes, period)
     stoch_k, stoch_d = stochastic(highs, lows, closes, period)
     result["stoch_k"] = stoch_k / 100.0  # normalize to 0-1
     result["stoch_d"] = stoch_d / 100.0

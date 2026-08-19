@@ -72,9 +72,14 @@ class TestConfigStrategyWeights:
         assert action == "buy", f"Expected buy with config weights, got {action}"
 
     def test_without_config_weights_uses_uniform(self):
-        """Without config weights, uniform 1.0 should be used as-is."""
+        """Without config weights, uniform 1.0 should be used as-is.
+
+        _config_strategy_weights is now a read-only live view of cfg, so empty
+        weights are arranged via the config dict instead of attribute assignment.
+        """
         agent = _make_p0_agent(config_weights={})
-        agent._config_strategy_weights = {}
+        agent.cfg.setdefault("orchestrator", {}).pop("strategy_weights", None)
+        agent.cfg.setdefault("strategy", {})["weights"] = {}
         signals = [
             {"action": "sell", "name": "trend_following", "confidence": 1.0},
             {"action": "buy", "name": "factor_model", "confidence": 1.0},
