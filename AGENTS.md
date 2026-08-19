@@ -641,10 +641,15 @@ as its resting state and traded continuously on a configuration with no measured
 edge; cash outperformed every variant tested.
 
 ```bash
-# validate the current config and record the verdict the gate reads
-docker compose run --rm -T trader python3 scripts/alpha_validation.py holdout \
-    --data-dir /data/history_1h --pattern '*_USD_1h.csv' \
-    --config /app/config/config.yaml --record
+# from the host — data dir, pattern and config are all auto-detected
+python3 scripts/alpha_validation.py holdout --record
+
+# or pick a specific dataset (repo-relative paths work)
+python3 scripts/alpha_validation.py holdout --record \
+    --data-dir data/history_1h --pattern '*_USD_1h.csv'
+
+# inside the container it resolves /data automatically
+docker compose run --rm -T trader python3 scripts/alpha_validation.py holdout --record
 
 # inspect the current decision
 docker exec fricktrade-trader-1 python3 -c \
@@ -697,6 +702,19 @@ Rules that keep this honest:
 - An edge below the round-trip cost (~0.21%) is not tradeable no matter its t-stat.
 - t-stats printed are optimistic: signals overlap in time and crypto symbols are
   highly correlated, so effective sample size is far below the raw signal count.
+- Compare **median and 1%-trimmed** expectancy against the mean. A large gap means
+  a few untradeable prints are carrying the result (see the 2025-10-10 wick above).
+- Entry windows (`bb_period`, `rsi_period`, `drop_window`) are in **bars**, so their
+  meaning changes with the dataset interval; the header line prints the detected
+  bar size so you can sanity-check what you actually tested.
+
+Data discovery: with no `--data-dir`/`--pattern` the script searches `/data`, then
+`<repo>/data`, then `<repo>/data/history_1h`, and prints exactly which dataset it
+used. If nothing matches it lists every dataset it can see with the flags to select
+it. `--config` defaults to `<repo>/config/config.yaml`, so `--record` works with no
+extra arguments; if the configured record path is not writable (i.e. `/data` from
+the host) it falls back to `<repo>/data/reports/`, which is the same volume the
+container sees.
 
 ## Backtest
 

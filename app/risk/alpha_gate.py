@@ -126,7 +126,19 @@ def write_record(cfg: dict, *, passed: bool, metrics: dict, path: Path | None = 
     from datetime import datetime, timezone
 
     target = path or record_path(cfg)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # The configured path is the in-container mount (/data/...), which is not
+        # writable when running on the host. Fall back to the repo's own data
+        # directory, which is the same volume from the container's point of view.
+        repo_data = Path(__file__).resolve().parents[2] / "data" / "reports"
+        repo_data.mkdir(parents=True, exist_ok=True)
+        target = repo_data / target.name
+        logging.warning(
+            "Alpha gate: %s not writable from here; wrote record to %s instead "
+            "(same volume as /data inside the container).", path or record_path(cfg), target
+        )
     payload = {
         "fingerprint": config_fingerprint(cfg),
         "passed": bool(passed),

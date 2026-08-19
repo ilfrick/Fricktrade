@@ -285,6 +285,83 @@ def evaluate(frames: dict[str, pd.DataFrame], e: Entry, x: ExitLadder, costs: Co
 # Data
 # ---------------------------------------------------------------------------
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Where OHLCV CSVs may live. "/data" is the in-container mount; the repo copy is
+# what you get when running on the host. Searched in this order.
+_SEARCH_DIRS = [Path("/data"), REPO_ROOT / "data", REPO_ROOT / "data" / "history_1h"]
+_SEARCH_PATTERNS = ["*_USD_1m.csv", "*_USD_1h.csv", "*_USD_5m.csv", "*_USD_*.csv"]
+
+
+def discover_datasets() -> list[tuple[Path, str, int]]:
+    """Return (directory, pattern, symbol_count) for every dataset found."""
+    found: list[tuple[Path, str, int]] = []
+    seen: set[tuple[str, str]] = set()
+    for d in _SEARCH_DIRS:
+        try:
+            if not d.is_dir():
+                continue
+        except OSError:
+            continue                      # unreadable, e.g. /data on the host
+        for pat in _SEARCH_PATTERNS:
+            n = len(list(d.glob(pat)))
+            key = (str(d), pat)
+            if n and key not in seen:
+                seen.add(key)
+                found.append((d, pat, n))
+    return found
+
+
+def _no_data_message(pattern: str | None, candidates: list[tuple[Path, str, int]]) -> str:
+    lines = ["No market data found" + (f" matching {pattern!r}." if pattern else ".")]
+    if candidates:
+        lines.append("\nAvailable datasets:")
+        for d, pat, n in candidates:
+            lines.append(f"  --data-dir {d} --pattern '{pat}'   ({n} symbols)")
+    else:
+        lines.append("\nSearched: " + ", ".join(str(d) for d in _SEARCH_DIRS))
+        lines.append(
+            "\nDownload history first, e.g.:\n"
+            "  docker exec fricktrade-trader-1 python3 "
+            "/app/scripts/download_crypto_backtest_data.py \\\n"
+            "      --config /app/config/config.yaml --days 1100 --interval 1h "
+            "--out-dir /data/history_1h"
+        )
+    return "\n".join(lines)
+
+
+def resolve_dataset(data_dir: str | None, pattern: str | None) -> tuple[Path, str]:
+    """Pick a dataset, honouring anything the caller specified explicitly.
+
+    Defaults that only work inside the container are a trap — running this on the
+    host is the natural thing to do, so fall back to the repo's own data
+    directory instead of failing against an empty '/data'.
+    """
+    if data_dir:
+        d = Path(data_dir)
+        if not d.is_absolute() and not d.is_dir():
+            d = REPO_ROOT / data_dir          # allow repo-relative paths
+        if not d.is_dir():
+            raise SystemExit(f"--data-dir {data_dir!r} is not a directory (resolved to {d})")
+        pat = pattern or "*_USD_*.csv"
+        if not list(d.glob(pat)):
+            avail = sorted({q.name for q in d.glob('*.csv')})[:8]
+            hint = f" Files present include: {', '.join(avail)}" if avail else " Directory has no CSVs."
+            raise SystemExit(f"No CSVs matching {pat!r} in {d}.{hint}")
+        return d, pat
+
+    candidates = discover_datasets()
+    if pattern:
+        for d, pat, _ in candidates:
+            if pat == pattern:
+                return d, pattern
+        raise SystemExit(_no_data_message(pattern, candidates))
+    if not candidates:
+        raise SystemExit(_no_data_message(None, candidates))
+    d, pat, _ = candidates[0]
+    return d, pat
+
+
 def load_frames(data_dir: Path, pattern: str = "*_USD_1m.csv") -> dict[str, pd.DataFrame]:
     frames: dict[str, pd.DataFrame] = {}
     for p in sorted(data_dir.glob(pattern)):
@@ -419,8 +496,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=["signal", "walk", "holdout", "all"])
-    ap.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR))
-    ap.add_argument("--pattern", default="*_USD_1m.csv")
+    ap.add_argument("--data-dir",
+                    help="directory of OHLCV CSVs (default: auto-detect /data, "
+                         "then <repo>/data, then <repo>/data/history_1h)")
+    ap.add_argument("--pattern", help="glob for symbol CSVs, e.g. '*_USD_1h.csv'")
     ap.add_argument("--folds", type=int, default=6)
     ap.add_argument("--rsi-period", type=int, default=Entry.rsi_period)
     ap.add_argument("--rsi-oversold", type=float, default=Entry.rsi_oversold)
@@ -432,7 +511,9 @@ def main() -> None:
     ap.add_argument("--min-hold-minutes", type=int, default=ExitLadder.min_hold_minutes)
     ap.add_argument("--max-hold-hours", type=int, default=ExitLadder.max_hold_hours)
     ap.add_argument("--commission-pct", type=float, default=Costs.commission_pct)
-    ap.add_argument("--config", help="config.yaml — required with --record to fingerprint the run")
+    ap.add_argument("--config",
+                    help="config.yaml used to fingerprint the run "
+                         "(default: <repo>/config/config.yaml)")
     ap.add_argument("--record", action="store_true",
                     help="write the hold-out verdict for the trader's alpha gate")
     args = ap.parse_args()
@@ -446,7 +527,8 @@ def main() -> None:
                         max_hold_hours=args.max_hold_hours)
     costs = Costs(commission_pct=args.commission_pct)
 
-    frames = load_frames(Path(args.data_dir), args.pattern)
+    data_dir, pattern = resolve_dataset(args.data_dir, args.pattern)
+    frames = load_frames(data_dir, pattern)
 
     # Detect the bar interval and express every time-based parameter in bars.
     # Bar counts are meaningless without it: "50 bars" is 50 minutes on 1m data
@@ -454,6 +536,7 @@ def main() -> None:
     bar_minutes = detect_bar_minutes(next(iter(frames.values())))
     ladder = ladder.convert_to_bars(bar_minutes)
     unit = f"{bar_minutes:g}m" if bar_minutes < 60 else f"{bar_minutes/60:g}h"
+    print(f"data: {data_dir}/{pattern}")
     print(f"symbols={len(frames)}  bar={unit}  "
           f"entry=rsi{entry.rsi_period}<{entry.rsi_oversold:g} "
           f"bb{entry.bb_period}/{entry.bb_std:g}  stop={ladder.hard_stop:g}%  "
@@ -469,11 +552,14 @@ def main() -> None:
         cmd_walk(frames, entry, ladder, costs, args.folds)
     if args.command in ("holdout", "all"):
         cfg = None
-        if args.config:
+        cfg_path = args.config or str(REPO_ROOT / "config" / "config.yaml")
+        if Path(cfg_path).exists():
             import sys as _sys
-            _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            _sys.path.insert(0, str(REPO_ROOT))
             from app.utils.config import load_config
-            cfg = load_config(args.config)
+            cfg = load_config(cfg_path)
+        elif args.record:
+            print(f"--record: config not found at {cfg_path}; pass --config explicitly.")
         cmd_holdout(frames, entry, ladder, costs, cfg=cfg, record=args.record)
 
 
