@@ -54,6 +54,7 @@ from app.monitoring.metrics import (
     MARKET_SENTIMENT_SCORE,
 )
 from app.monitoring.audit import AuditLogger, ComplianceLogger
+from app.risk import alpha_gate
 from app.risk.manager import RiskManager
 from app.risk.haircut import apply_haircuts
 from app.strategies.intraday_momentum import IntradayMomentumStrategy
@@ -204,6 +205,7 @@ class TradingAgent:
             cfg.get("execution", {}).get("warmup_grace_minutes", 5) or 5
         )
         self._loop_heartbeat: float = 0.0  # updated each loop iteration; monitored by watchdog
+        self._alpha_gate_logged_at: dict[str, float] = {}
         self._news_cache: dict[str, bool] = {}
         self._news_cache_at: datetime | None = None
         self._news_executor = ThreadPoolExecutor(max_workers=2)
@@ -753,6 +755,20 @@ class TradingAgent:
             if guard_action in ("hold", "exit") or guard_action != action:
                 return "hold"
         return action
+
+    def _log_alpha_gate_block(self, reason: str) -> None:
+        """Log the entry block once per reason per hour — it fires on every symbol."""
+        now = time.monotonic()
+        last = self._alpha_gate_logged_at.get(reason, 0.0)
+        if now - last < 3600:
+            return
+        self._alpha_gate_logged_at[reason] = now
+        logging.warning(
+            "ALPHA GATE: new entries blocked (%s). Exits still allowed. "
+            "Run scripts/alpha_validation.py holdout to validate the current "
+            "configuration, or set strategy.alpha_gate.enabled: false to override.",
+            reason,
+        )
 
     def _in_warmup_grace(self) -> bool:
         """True during the post-startup warmup grace period.
@@ -1896,6 +1912,19 @@ class TradingAgent:
                 logging.info("Skipping %s for %s: account blocked", action, symbol)
                 self._emit_decision_trace(trace, "skip", "account_blocked", "account")
                 return None
+            # Alpha gate: refuse to OPEN positions on an unvalidated strategy
+            # configuration. Exits are deliberately never gated — an unvalidated
+            # system must still be able to close what it already holds.
+            if action == "buy" and not _is_closing_position:
+                _gate = alpha_gate.check_entries(self.cfg)
+                if _gate.blocked:
+                    self._record_skip(symbol, action, "alpha_gate", broker_name)
+                    self._log_alpha_gate_block(_gate.reason)
+                    self._emit_decision_trace(
+                        trace, "skip", "alpha_gate", "risk",
+                        {"alpha_gate_reason": _gate.reason},
+                    )
+                    return None
             if action == "buy":
                 _sc_until = self._stuck_cooldown.get((broker_name, symbol))
                 if _sc_until:

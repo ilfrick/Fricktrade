@@ -49,6 +49,31 @@ all reproducible via `scripts/alpha_validation.py` against `/data/*_USD_1m.csv`
 | Parameter grid (36 configs) | **0 of 36** had positive hold-out expectancy. Best train config (+0.241) went to −0.654 out-of-sample. |
 | Gross vs net | Best gross edge ≈ **+0.17%/trade**; round-trip cost ≈ **0.21%**. The edge is smaller than the friction. |
 
+### Confirmed across three years and both regimes (2026-08-19, second pass)
+
+The results above came from a single 3-month bear window, so the test was repeated
+on **3 years of hourly bars** (2023-08 → 2026-08, `/data/history_1h`) covering a
+full bull market (+53%, +61% half-years through 2024) and the 2025–26 bear
+(−24%, −42%, −27%). Verdict is unchanged — hold-out fails on every metric:
+mean **−1.75%**, median **−2.17%**, 1%-trimmed **−1.93%**, win rate 31.7%, and
+only 4 of 20 symbols profitable.
+
+Two traps this second pass exposed, both now guarded against in the harness:
+
+- **Bar-interval units.** The harness originally assumed 1m bars, so on hourly data
+  its "480m" horizon silently became 20 days and its 3-day max-hold became 180
+  days. That reported a bull market's beta as strategy edge (+34%/trade). Every
+  time parameter is now expressed in minutes/hours and converted using the
+  detected bar interval. This is the same per-bar-vs-per-day unit class of bug
+  that was fixed in `trader.py` — it is the most common way to get a confidently
+  wrong answer here.
+- **Liquidation-wick outliers.** A single hour — **2025-10-10 21:00**, the October
+  2025 liquidation cascade — printed +190% (DOT), +162% (ONDO), +150% (FIL)
+  one-hour rebounds. It alone produced an apparent edge: mean forward return
+  +9.68% versus a **median of +0.87%**. Those prints are not fillable in size. The
+  harness now reports median and 1%-trimmed expectancy alongside the mean, and
+  the hold-out gate requires **all three** to be positive.
+
 **Why the system never made money — three compounding causes:**
 
 1. **It barely trades.** `rsi_period: 70` on 1m bars is so smoothed that RSI's 1st
@@ -604,6 +629,46 @@ python3 -m pytest tests/ --ignore=tests/test_trader_sizing.py -q
 ```
 
 ---
+
+## Alpha gate — flat unless proven otherwise
+
+`strategy.alpha_gate.enabled: true` (default) blocks **new entries** unless the
+running configuration has a recorded hold-out pass. **Exits are never blocked** —
+an unvalidated system must still be able to close what it already holds.
+
+This inverts the previous default. The system used to treat "find a reason to buy"
+as its resting state and traded continuously on a configuration with no measured
+edge; cash outperformed every variant tested.
+
+```bash
+# validate the current config and record the verdict the gate reads
+docker compose run --rm -T trader python3 scripts/alpha_validation.py holdout \
+    --data-dir /data/history_1h --pattern '*_USD_1h.csv' \
+    --config /app/config/config.yaml --record
+
+# inspect the current decision
+docker exec fricktrade-trader-1 python3 -c \
+  "from app.utils.config import load_config; from app.risk import alpha_gate; \
+   print(alpha_gate.check_entries(load_config('/app/config/config.yaml')))"
+```
+
+Behaviour:
+
+| Situation | Entries |
+|-----------|---------|
+| No record file | blocked (`no_validation_record`) — fails closed |
+| Record says `passed: false` | blocked (`validation_failed`) |
+| Strategy/risk params changed since validation | blocked (`config_changed_since_validation`) |
+| Record passes and fingerprint matches | allowed (`validated`) |
+| `alpha_gate.enabled: false` | allowed (`gate_disabled`) — explicit opt-out |
+
+The fingerprint covers only parameters that change trading behaviour (strategy
+names/weights/params, stops, take-profits, vol targeting, data interval), so
+editing logging or credentials does not invalidate a pass, while changing a stop
+does. Passing requires mean, median **and** 1%-trimmed hold-out expectancy all
+positive — one metric alone is too easy to satisfy with a few untradeable wicks.
+
+**Current state: blocked** (`validation_failed`; hold-out −1.75%/trade).
 
 ## Alpha validation (run before any strategy change)
 

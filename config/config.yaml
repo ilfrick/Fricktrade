@@ -294,6 +294,14 @@ strategy:
     # crypto_momentum: disabled 2026-04-24 — was causing AAVE/USD churn (MR vs momentum disagreement)
   min_conviction: 0.25            # minimum weighted signal to act
   single_sided_conviction_multiplier: 0.6  # reduce min_conviction when only one side signals (e.g. buy with no sell)
+  alpha_gate:
+    # Flat unless proven otherwise: block NEW entries unless the running strategy
+    # config has a recorded hold-out pass. Exits are never blocked. Added
+    # 2026-08-19 after the audit found the system traded continuously on a
+    # configuration with no measured edge. Validate with:
+    #   python3 scripts/alpha_validation.py holdout --record
+    enabled: true
+    record_path: /data/reports/alpha_validation.json
   entry_ranking:
     enabled: true                   # rank non-holder symbols by MR opportunity score before processing
   signal_bias_guard:
