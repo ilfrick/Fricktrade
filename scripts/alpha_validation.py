@@ -42,11 +42,12 @@ import pandas as pd
 
 DEFAULT_DATA_DIR = Path("/data")
 
-# Forward-return horizons, in MINUTES. They are converted to bar counts using the
-# detected bar interval — never assume 1m bars. Treating these as raw bar offsets
-# silently turns "480 minutes" into 20 days on hourly data, which reports a bull
-# market's beta as though it were strategy edge.
-HORIZONS_MIN = [15, 30, 60, 120, 240, 480, 1440]
+# Forward-return horizons, expressed in BARS and labelled with the equivalent
+# wall-clock time once the interval is known. Defining them in minutes instead
+# fails at both ends: on 1m data everything is distinct but on daily data every
+# sub-day horizon collapses to a single bar and the table becomes seven identical
+# rows. Bars are the natural unit; the label carries the meaning.
+HORIZON_BARS = [1, 2, 4, 8, 24, 72, 120]
 
 
 # ---------------------------------------------------------------------------
@@ -389,39 +390,53 @@ def cmd_signal(frames: dict, e: Entry, costs: Costs, bar_minutes: float) -> None
     print("\n=== SIGNAL PREDICTIVE VALUE ===")
     print("Forward return after an entry signal vs. the unconditional baseline.")
     print("An edge below the round-trip cost is not tradeable, however strong the t-stat.\n")
-    # Horizons are in minutes and converted to bars using the detected interval.
-    steps = {h: max(int(round(h / bar_minutes)), 1) for h in HORIZONS_MIN}
-    cond = {h: [] for h in HORIZONS_MIN}
-    base = {h: [] for h in HORIZONS_MIN}
+    def _label(bars: int) -> str:
+        mins = bars * bar_minutes
+        if mins < 60:
+            return f"{mins:g}m"
+        if mins < 1440:
+            return f"{mins/60:g}h"
+        return f"{mins/1440:g}d"
+
+    cond: dict[int, list] = {k: [] for k in HORIZON_BARS}
+    base: dict[int, list] = {k: [] for k in HORIZON_BARS}
     for df in frames.values():
         arr = prepare(df, e)
         c, idx, n = arr["close"], arr["entries"], len(arr["close"])
-        for h in HORIZONS_MIN:
-            k = steps[h]
+        for k in HORIZON_BARS:
             if n <= k:
                 continue
             fwd = (c[k:] - c[:-k]) / c[:-k] * 100.0
-            base[h].append(fwd)
+            base[k].append(fwd)
             valid = idx[idx < n - k]
             if valid.size:
-                cond[h].append(fwd[valid])
+                cond[k].append(fwd[valid])
     print(f"{'horizon':>10} {'bars':>5} {'signals':>8} {'signal fwd%':>12} {'baseline%':>11} "
           f"{'edge%':>8} {'med edge%':>10} {'t':>6}  tradeable?")
     print("-" * 92)
-    for h in HORIZONS_MIN:
-        if not cond[h]:
+    for k in HORIZON_BARS:
+        if not cond[k]:
             continue
-        cv, bv = np.concatenate(cond[h]), np.concatenate(base[h])
+        cv, bv = np.concatenate(cond[k]), np.concatenate(base[k])
         edge = cv.mean() - bv.mean()
         med_edge = float(np.median(cv) - np.median(bv))
         t = edge / (cv.std(ddof=1) / np.sqrt(len(cv))) if len(cv) > 2 and cv.std() > 0 else 0.0
         mark = "yes" if edge > costs.round_trip_pct else "no"
-        label = f"{h}m" if h < 60 else f"{h/60:g}h"
-        print(f"{label:>10} {steps[h]:>5} {len(cv):>8} {cv.mean():>+12.4f} {bv.mean():>+11.4f} "
+        print(f"{_label(k):>10} {k:>5} {len(cv):>8} {cv.mean():>+12.4f} {bv.mean():>+11.4f} "
               f"{edge:>+8.4f} {med_edge:>+10.4f} {t:>6.2f}  {mark}")
     print(f"\nround-trip cost = {costs.round_trip_pct:.3f}%")
     print("NOTE: t-stats are inflated — signals overlap in time and crypto symbols are\n"
           "      highly correlated, so effective sample size is far below the raw count.")
+
+
+def walk_forward_nets(frames: dict, e: Entry, x: ExitLadder, costs: Costs,
+                      folds: int) -> list[float]:
+    """Per-fold net expectancy. Shared by the `walk` report and the gate."""
+    out: list[float] = []
+    for k in range(folds):
+        sub = slice_frames(frames, k / folds, (k + 1) / folds)
+        out.append(evaluate(sub, e, x, costs)["net_E"])
+    return out
 
 
 def cmd_walk(frames: dict, e: Entry, x: ExitLadder, costs: Costs, folds: int) -> None:
@@ -453,7 +468,8 @@ def cmd_walk(frames: dict, e: Entry, x: ExitLadder, costs: Costs, folds: int) ->
 
 
 def cmd_holdout(frames: dict, e: Entry, x: ExitLadder, costs: Costs,
-                cfg: dict | None = None, record: bool = False) -> None:
+                cfg: dict | None = None, record: bool = False,
+                wf_nets: list[float] | None = None) -> None:
     print("\n=== TRAIN / HOLD-OUT ===")
     train = slice_frames(frames, 0.0, 0.75)
     hold = slice_frames(frames, 0.75, 1.0)
@@ -471,23 +487,42 @@ def cmd_holdout(frames: dict, e: Entry, x: ExitLadder, costs: Costs,
     # Require mean, median AND 1%-trimmed mean to be positive. Demanding all
     # three is what stops a handful of untradeable liquidation wicks from
     # certifying a strategy that loses on typical trades.
-    passed = ho["net_E"] > 0 and ho["net_median"] > 0 and ho["trimmed_E"] > 0
-    if passed:
+    ho_ok = ho["net_E"] > 0 and ho["net_median"] > 0 and ho["trimmed_E"] > 0
+    if ho_ok:
         print("HOLD-OUT PASSES: mean, median and trimmed expectancy all positive.")
     else:
         print("HOLD-OUT FAILS on unseen data. Do not deploy.")
         print(f"  mean={ho['net_E']:+.3f}%  median={ho['net_median']:+.3f}%  "
               f"trimmed={ho['trimmed_E']:+.3f}%  (all three must be > 0)")
 
+    # A single hold-out window can simply be a favourable regime. Recording a
+    # pass therefore also requires walk-forward evidence: positive mean
+    # expectancy AND a majority of folds positive. Without this the gate would
+    # certify a config whose walk-forward is flat, which is exactly what the
+    # first equity run produced (+0.031%/trade mean, hold-out +0.533%).
+    wf_ok = True
+    if record and wf_nets:
+        wf_mean = float(np.mean(wf_nets))
+        wf_pos = sum(1 for v in wf_nets if v > 0)
+        wf_ok = wf_mean > 0 and wf_pos > len(wf_nets) / 2
+        print(f"\nWalk-forward: mean {wf_mean:+.3f}%/trade, {wf_pos}/{len(wf_nets)} folds positive"
+              f" — {'OK' if wf_ok else 'INSUFFICIENT'}")
+        if not wf_ok:
+            print("  A lucky hold-out window is not evidence. Both must hold.")
+    passed = ho_ok and wf_ok
+
     if record:
         if cfg is None:
             print("\n--record ignored: no --config supplied to fingerprint.")
             return
         from app.risk.alpha_gate import write_record
-        path = write_record(cfg, passed=passed, metrics={
-            k: ho[k] for k in ("trades", "net_E", "net_median", "trimmed_E",
-                               "gross_E", "win_rate", "sym_pos", "n_sym")
-        })
+        metrics = {k: ho[k] for k in ("trades", "net_E", "net_median", "trimmed_E",
+                                      "gross_E", "win_rate", "sym_pos", "n_sym")}
+        if wf_nets:
+            metrics["walk_forward_mean"] = float(np.mean(wf_nets))
+            metrics["walk_forward_folds_positive"] = sum(1 for v in wf_nets if v > 0)
+            metrics["walk_forward_folds"] = len(wf_nets)
+        path = write_record(cfg, passed=passed, metrics=metrics)
         print(f"\nVerdict recorded to {path} (passed={passed}).")
         print("The trader's alpha gate reads this file to decide whether to open positions.")
 
@@ -506,6 +541,19 @@ def main() -> None:
     ap.add_argument("--bb-period", type=int, default=Entry.bb_period)
     ap.add_argument("--bb-std", type=float, default=Entry.bb_std)
     ap.add_argument("--trend-filter-bars", type=int, default=Entry.trend_filter_bars)
+    ap.add_argument("--drop-window", type=int, default=Entry.drop_window,
+                    help="bars over which the 'fast drop' is measured")
+    ap.add_argument("--drop-pct", type=float, default=Entry.drop_pct,
+                    help="minimum %% drop over drop-window to qualify as a dip")
+    ap.add_argument("--slippage-bps", type=float, default=Costs.slippage_bps)
+    ap.add_argument("--spread-bps", type=float, default=Costs.spread_bps)
+    ap.add_argument("--partial-tp", type=float, default=ExitLadder.partial_tp,
+                    help="partial take-profit %% (0 disables)")
+    ap.add_argument("--take-profit", type=float, default=ExitLadder.take_profit)
+    ap.add_argument("--trailing", type=float, default=ExitLadder.trailing)
+    ap.add_argument("--sma-exit-min-profit", type=float,
+                    default=ExitLadder.sma_exit_min_profit,
+                    help="min %% profit for the mean-reversion SMA exit (negative disables)")
     ap.add_argument("--hard-stop", type=float, default=ExitLadder.hard_stop)
     ap.add_argument("--time-exit-minutes", type=int, default=ExitLadder.time_exit_minutes)
     ap.add_argument("--min-hold-minutes", type=int, default=ExitLadder.min_hold_minutes)
@@ -520,12 +568,19 @@ def main() -> None:
 
     entry = Entry(bb_period=args.bb_period, bb_std=args.bb_std,
                   rsi_period=args.rsi_period, rsi_oversold=args.rsi_oversold,
+                  drop_window=args.drop_window, drop_pct=args.drop_pct,
                   trend_filter_bars=args.trend_filter_bars)
     ladder = ExitLadder(hard_stop=args.hard_stop,
+                        trailing=args.trailing,
+                        take_profit=args.take_profit,
+                        partial_tp=args.partial_tp,
+                        sma_exit_min_profit=args.sma_exit_min_profit,
                         time_exit_minutes=args.time_exit_minutes,
                         min_hold_minutes=args.min_hold_minutes,
                         max_hold_hours=args.max_hold_hours)
-    costs = Costs(commission_pct=args.commission_pct)
+    costs = Costs(commission_pct=args.commission_pct,
+                  slippage_bps=args.slippage_bps,
+                  spread_bps=args.spread_bps)
 
     data_dir, pattern = resolve_dataset(args.data_dir, args.pattern)
     frames = load_frames(data_dir, pattern)
@@ -560,7 +615,10 @@ def main() -> None:
             cfg = load_config(cfg_path)
         elif args.record:
             print(f"--record: config not found at {cfg_path}; pass --config explicitly.")
-        cmd_holdout(frames, entry, ladder, costs, cfg=cfg, record=args.record)
+        wf = (walk_forward_nets(frames, entry, ladder, costs, args.folds)
+              if args.record else None)
+        cmd_holdout(frames, entry, ladder, costs, cfg=cfg, record=args.record,
+                    wf_nets=wf)
 
 
 if __name__ == "__main__":
