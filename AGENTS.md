@@ -7,12 +7,25 @@ This is the **single authoritative document** for understanding and operating Fr
 
 **System**: v3.0, crypto-only, paper trading. Alpaca paper (2 accounts) + Binance Spot demo.
 
-> ⚠️ **STATUS 2026-08-19: STOPPED, AND SHOULD STAY STOPPED.**
-> All containers have been down since 2026-05-16. A full audit (see
-> [Alpha Status](#alpha-status-2026-08-19)) found the active strategy has **no
-> out-of-sample edge** — its gross edge is smaller than its own transaction
-> costs. Do not restart for trading until a configuration passes
-> `scripts/alpha_validation.py holdout`. Restarting as-is resumes losing money.
+> ## 🛑 STATUS 2026-08-20: SHUT DOWN. TRADING RETIRED.
+>
+> The full stack was stopped with `docker compose down` on 2026-08-20. This was a
+> **deliberate decision, not an outage** — see [Why trading was retired](#why-trading-was-retired-2026-08-20).
+>
+> Three independent research avenues were measured and all failed:
+> price-direction alpha, cross-sectional momentum/reversal, and funding-rate carry.
+> Across 3 years and both market regimes the strategy has no out-of-sample edge,
+> and its gross edge is smaller than its own transaction costs.
+>
+> The repository is retained as **engineering infrastructure and a research
+> platform**, not as a live trading system. If you restart it, the
+> [alpha gate](#alpha-gate--flat-unless-proven-otherwise) will refuse to open
+> positions until a configuration passes `scripts/alpha_validation.py holdout`.
+> That default is intentional. Do not disable it to "just see what happens".
+>
+> Paper accounts as left: Alpaca Realistic $246.34 (−1.5% lifetime),
+> Alpaca Higher $2,514.96 (−3.3%), both effectively all-cash plus ~30 untradeable
+> dust positions. Nothing was ever funded with real money.
 
 ---
 
@@ -86,6 +99,32 @@ Two traps this second pass exposed, both now guarded against in the harness:
    "reversion" exit fires at its floor instead of on a real bounce.
 3. **Costs exceed the edge.** 0.05% commission + 3bps slippage + 2.5bps half-spread
    per side ≈ 0.21% per round trip, against a gross edge of at most ~0.17%.
+
+### Funding-rate carry — measured, and also too small (2026-08-20)
+
+Carry was the last avenue with a credible prior: it is delta-neutral (long spot,
+short perp), so it sidesteps the long-only-in-a-bear-market problem that dominated
+every directional test, and the return is structural rather than predictive.
+Measured from Binance perp funding history, last 2 years:
+
+| Symbol | mean / 8h | annualised | % periods positive |
+|--------|-----------|-----------|--------------------|
+| BTCUSDT | 0.0045% | **5.1%** | 81.8% |
+| ETHUSDT | 0.0044% | 5.0% | 80.2% |
+| SOLUSDT | 0.0011% | 1.2% | 60.8% |
+| XRPUSDT | 0.0030% | 3.4% | 67.3% |
+| DOGEUSDT | 0.0045% | 5.0% | 73.4% |
+| **average** | 0.0035% | **3.9% gross** | — |
+
+That 3.9% is *before* fees on two legs, spot/perp spread, and margin drag —
+realistically 2–3% net. On this account size (~$2,850) that is roughly $70–85 a
+year in exchange for liquidation risk and a two-legged position manager running
+continuously. Short-term government paper pays more with none of the operational
+risk. **Rejected on size, not on validity** — the effect is real and would be worth
+revisiting at a materially larger account, or if funding spikes (it exceeded 30%
+annualised during the 2024 bull run).
+
+Reproduce: `fapi.binance.com/fapi/v1/fundingRate` is public, no auth required.
 
 **Ranked options, by expected value (none yet validated — validate before deploying):**
 
@@ -405,9 +444,22 @@ All services stay running 24/7 (crypto mode). `healthwatch.market_shutdown.mode:
 
 ### Start the system
 
+The stack is currently **shut down by choice** ([why](#why-trading-was-retired-2026-08-20)).
+Starting it does not resume trading: the alpha gate blocks new entries until a
+configuration passes the hold-out. It is safe to bring up for research or to look
+at dashboards.
+
 ```bash
 ./scripts/compose_up.sh   # auto-detects GPU, generates Grafana dashboards
+
+# research only, without the trading loop:
+docker compose up -d prometheus grafana
 ```
+
+Note: `compose_up.sh` regenerates `grafana/provisioning/dashboards/account_*.json`
+from `.env`. Those files are gitignored but force-added, so a regeneration can show
+up as tracked modifications or deletions — check `git status` before committing
+after running it.
 
 ### Stop the system
 
@@ -630,6 +682,62 @@ python3 -m pytest tests/ --ignore=tests/test_trader_sizing.py -q
 
 ---
 
+## Why trading was retired (2026-08-20)
+
+A decision record, so this does not get silently re-litigated.
+
+**The decision:** stop live trading. Keep the repository as engineering
+infrastructure and a research platform. Do not fund it with real money.
+
+**Why.** Three independent avenues were measured, and all three failed:
+
+1. **Price-direction alpha** (the shipped strategy). Across 3 years and both
+   regimes: hold-out mean −1.75%/trade, median −2.17%, trimmed −1.93%, win rate
+   31.7%, 4/20 symbols profitable. 0 of 36 parameter configurations were positive
+   out-of-sample.
+2. **Cross-sectional selection.** Momentum and reversal at 24/72/168h, and
+   trend-following above a moving average, all lost −59% to −98% on train while
+   cash returned 0% and buy-and-hold lost −28%. Concentration made it worse.
+   Symbol *selection* adds nothing.
+3. **Funding-rate carry.** Real, but 3.9% gross / 2–3% net — below the threshold
+   that justifies liquidation risk at this account size (see above).
+
+Meanwhile every trade pays ~0.21% round-trip against a gross edge that never
+reliably exceeded it, and per-trade expectancy correlates with market direction at
+only −0.07 — so this was never a market-timing problem that a regime filter could
+fix. The individual decisions carry no information.
+
+**What made this hard to see for so long.** The system looked like it was working.
+An 84% win rate is extremely persuasive, and it was real — it just came with
+average wins of +0.55% against average losses of −4.5%, which is negative
+expectancy. Win rate was the illusion; expectancy was the truth. Compounding that,
+several instruments were broken in ways that hid the problem: the ATR stop was dead
+code, the peak-detection exit never ran, vol targeting was pinned at 1.5×, and the
+risk caps never bound. The dashboards were green because they measured activity,
+not edge.
+
+**Two methodological traps found while doing this work** (both now guarded in the
+harness, both worth remembering for any future attempt):
+
+- *Unit errors between per-bar and per-day quantities.* This produced a fake
+  +34%/trade result and, separately, four of the seven production bugs. Any time a
+  parameter is expressed in "bars", confirm what a bar actually is.
+- *Rare untradeable prints dominating a mean.* One hour — the 2025-10-10
+  liquidation cascade — moved mean forward return to +9.68% against a median of
+  +0.87%. Always read the median and trimmed mean next to the mean.
+
+**What would reopen the question.** A hypothesis that passes
+`scripts/alpha_validation.py holdout` on multi-regime data — mean, median and
+trimmed expectancy all positive out-of-sample. Nothing less. If you are tempted to
+relax that bar, re-read the row above about candidate #10, which passed a
+Bonferroni test and still lost money live.
+
+**Where an edge would more plausibly live**, if resumed: not in 1-minute bars on
+the 20 most liquid pairs, which is the most heavily arbitraged data available.
+More likely in structurally awkward places — newly-listed or illiquid pairs, or
+market making where you earn the spread instead of predicting direction. Both are
+different systems, not parameter changes.
+
 ## Alpha gate — flat unless proven otherwise
 
 `strategy.alpha_gate.enabled: true` (default) blocks **new entries** unless the
@@ -742,6 +850,19 @@ Validated: MR bb_period=50 → +1.0% avg return, 96% win rate over 12 days (Bonf
 ## History
 
 Major milestones (newest first):
+
+- **Trading retired; stack shut down (2026-08-20):** `docker compose down`. Funding-rate
+  carry measured at 3.9% gross / 2-3% net — the last credible avenue, rejected on size
+  rather than validity. Combined with the failed price-direction and cross-sectional
+  tests, the decision was taken to stop live trading and keep the repo as engineering
+  infrastructure. Full reasoning in [Why trading was retired](#why-trading-was-retired-2026-08-20).
+
+- **Alpha gate + multi-regime validation (2026-08-19):** Added
+  `strategy.alpha_gate` (`app/risk/alpha_gate.py`) — new entries require a recorded
+  hold-out pass matching the running config's fingerprint; exits are never blocked.
+  Validation extended to 3 years of hourly bars covering bull and bear; verdict
+  unchanged. Fixed two ways the harness itself could lie: bar-interval unit errors
+  and liquidation-wick outliers dominating the mean.
 
 - **Full audit + correctness fixes (2026-08-19):** Measured that the system has no
   out-of-sample edge (see [Alpha Status](#alpha-status-2026-08-19)) and fixed seven
