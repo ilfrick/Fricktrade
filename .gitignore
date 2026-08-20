@@ -22,3 +22,6 @@ scripts/.fuse_hidden*
 *.html
 *_session.txt
 .nextcloudsync.log
+
+# Claude Code runtime artifacts
+.claude/scheduled_tasks.lock
