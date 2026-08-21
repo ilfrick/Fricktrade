@@ -17,10 +17,12 @@ This is the **single authoritative document** for understanding and operating Fr
 > Across 3 years and both market regimes the strategy has no out-of-sample edge,
 > and its gross edge is smaller than its own transaction costs.
 >
-> **US equities are the exception and remain open** — a 1-day short-term reversal
-> effect clears its costs there (costs are 0.06% vs crypto's 0.21%). It is promising
-> but unproven, principally because of survivorship bias. See
-> [Equities: the one avenue that did NOT fail](#equities-the-one-avenue-that-did-not-fail-2026-08-20).
+> **Equities were tested too and also fail** on a properly sized universe. A 1-day
+> reversal signal is genuinely present (t=4.55) and equity costs are 3.5x lower than
+> crypto's, but realised expectancy is ~0 after stops and costs — hold-out −0.012%.
+> An earlier 122-symbol test that looked promising turned out to be small-sample
+> noise, not survivorship bias. See
+> [Equities: measured properly](#equities-measured-properly-the-edge-did-not-replicate-2026-08-20).
 >
 > The repository is retained as **engineering infrastructure and a research
 > platform**, not as a live trading system. If you restart it, the
@@ -687,74 +689,66 @@ python3 -m pytest tests/ --ignore=tests/test_trader_sizing.py -q
 
 ---
 
-## Equities: the one avenue that did NOT fail (2026-08-20)
+## Equities: measured properly, the edge did not replicate (2026-08-20)
 
-After crypto was retired, the same discipline was pointed at US equities. This is
-the only result so far that clears its own costs. It is **promising, not proven** —
-read the caveats before acting on it.
+**This section corrects an earlier conclusion in this same document.** An initial
+122-symbol test looked promising (+0.213%/trade walk-forward, +0.577% hold-out).
+On a larger, survivorship-free universe it did not hold up. Recorded in full
+because the way it failed is more instructive than the result.
 
-**Dataset:** `data/equity_1d/` — 122 symbols, daily bars, 2016-08 → 2026-08, built by
-`scripts/download_equity_history.py`. The universe is a **random sample of 400** from
-Alpaca's 11,614 active tradable US equities, filtered to those with ≥500 bars and
-≥$5M median daily dollar volume. Deliberately not a hand-picked mega-cap list,
-which would add selection bias on top of survivorship.
+### What was tested
 
-**Why equities change the arithmetic.** Round-trip cost is **0.06%** (commission-free,
-~2bps slippage + 2bps spread) versus **0.21%** in crypto. The crypto strategy died in
-that gap — gross edge ~0.17% against 0.21% costs. Equities move the bar by roughly
-3.5x, so a signal too weak to survive crypto fees can clear it here.
+A 1-day short-term reversal: buy an oversold dip (RSI14 < 30, below the lower
+20-day Bollinger band, ≥3% drop in 5 days), hold one day, 8% disaster stop, no
+other exits. Daily bars, 2016-08 → 2026-08. Equity round-trip cost is **0.06%**
+(commission-free, ~2bps slippage + 2bps spread) versus **0.21%** in crypto.
 
-**The effect: 1-day short-term reversal.** Forward returns after an oversold dip
-(RSI14 < 30, below the lower 20-day Bollinger band, ≥3% drop in 5 days):
+### Two datasets, two answers
 
-| horizon | edge vs baseline | median edge | t |
-|---------|-----------------|-------------|---|
-| **1 day** | **+0.36%** | +0.21% | 4.50 |
-| 2 days | −0.03% | +0.11% | −0.30 |
-| 8 days | −0.32% | +0.42% | −1.72 |
+| dataset | symbols | walk-forward | hold-out |
+|---------|---------|--------------|----------|
+| `data/equity_1d/` (first pass, 400 sampled) | 122 | +0.213% | **+0.577%** |
+| `data/equity_1d_sf/` (1,500 sampled, incl. delisted) | 283 | +0.088% | **−0.012%** |
 
-The edge is concentrated in the first day and gone by day two — which dictates the
-exit. Holding ~1 day is also PDT-safe: an overnight hold is not a day trade, so this
-works below the $25k threshold.
+The larger sample is the one to believe: 1,145 hold-out trades versus 546, drawn
+from a wider draw of the same pool. **The first result was small-sample noise.**
 
-**Validation of a 1-day hold** (entry above, exit after one bar, 8% disaster stop,
-no partial/trailing/SMA exits):
+### Survivorship bias turned out NOT to be the culprit
 
-| | trades | net E% | median% | trimmed% | WR% | symbols + |
-|---|--------|--------|---------|----------|-----|-----------|
-| walk-forward (6 folds) | 2,415 | **+0.213** | — | — | — | 4/6 folds positive |
-| train | 1,914 | +0.193 | +0.198 | −0.070 | 52.9 | 69/122 |
-| hold-out | 546 | **+0.577** | +0.143 | +0.397 | 52.2 | 68/122 |
+This was the risk flagged as most serious, so it was measured directly rather than
+assumed. Alpaca serves full daily history for delisted names — verified against
+SIVB (ends 2023-03-09, the SVB collapse), FRC (ends 2023-04-28 at $3.51), XLNX,
+ATVI, CXO — so `--include-delisted` builds a genuinely survivorship-free universe.
+Of 283 symbols, 29 (10.2%) delisted during the sample.
 
-For contrast, the original 30-day-hold exit ladder produced a walk-forward mean of
-just +0.031% — the same entries, harvesting the wrong part of the curve.
+Controlled comparison **within the same download**:
 
-**Caveats, in order of how much they should worry you:**
+| universe | trades | net E% | median% | WR% |
+|----------|--------|--------|---------|-----|
+| survivors only (biased) | 4,749 | +0.097 | +0.079 | 51.1 |
+| delisted only | 270 | +0.024 | +0.134 | 50.7 |
+| all (survivorship-free) | 5,019 | +0.093 | +0.080 | 51.1 |
 
-1. **Survivorship bias — the serious one.** The universe contains only currently
-   listed companies. Dip-buying is the strategy most flattered by this: every
-   drawdown in the sample was, by construction, survived. Names that fell and never
-   recovered are absent. A survivorship-free dataset (e.g. CRSP) is required before
-   this can be trusted.
-2. **Effective sample is ~1,123, not 3,543.** Signals cluster: 3,543 signals fall on
-   1,123 distinct days (3.2/day), and the ten largest days — COVID March 2020 and
-   April 2025 — are 15.8% of all signals. On a market-wide selloff dozens of names
-   fire together and share one outcome. That deflates t≈4.5 to roughly t≈2.5, and it
-   means real portfolio risk is far more concentrated than the trade count suggests.
-3. **The whole 10-year sample is a bull market** (train +104%, hold-out +58%). It
-   does hold up when split by regime — expectancy is *better* with the index below
-   its 200-day MA (+0.279%/trade) than above (−0.171%) — but the corrections in this
-   sample all recovered.
-4. **Two of six folds are negative**, including 2023-04 → 2024-12 at −0.544%/trade.
+Survivorship inflates expectancy by **+0.004pp/trade** — negligible. The reason is
+the liquidity filter: requiring ≥$5M median daily dollar volume keeps established
+companies, whose delistings are mostly acquisitions (often at a premium) rather
+than bankruptcies. Delisted names underperformed only slightly and are 5% of trades.
 
-**Not recorded as a gate pass, deliberately.** The alpha gate fingerprints
-`config.yaml`, which still holds the crypto configuration. Recording this run would
-certify parameters the system is not actually running. To pursue equities properly:
-port the config, re-run `holdout --record`, and let the fingerprint match.
+So the prior worry was wrong, and worth recording as such: the danger was not
+survivorship, it was **sample size**.
 
-**If pursued, in order:** get survivorship-free data; size positions for the
-clustering (a market-wide selloff means many correlated positions at once, not
-independent bets); then paper-trade it through the gate before any capital.
+### Where that leaves equities
+
+The 1-day signal itself is real — +0.29% edge at one day (t=4.55 on 7,321 signals),
+decaying to nothing by day two. But converting it into trades with a stop and
+realistic costs yields ~0: walk-forward +0.088% against 0.06% costs, and the
+1%-trimmed expectancy is **negative in 4 of 6 folds**, meaning the positive mean
+rides on a few large winners. Hold-out is −0.012%. **The gate correctly refuses it.**
+
+Equities remain a better environment than crypto — costs are 3.5x lower and the
+signal is genuinely present — but this implementation does not clear the bar. Any
+future attempt should start from a universe of several hundred names, not one
+hundred, because that is what separated the two answers above.
 
 ## Why trading was retired (2026-08-20)
 

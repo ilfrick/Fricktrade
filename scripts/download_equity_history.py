@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import os
 import random
 import sys
@@ -68,22 +69,55 @@ def _credentials() -> tuple[str, str]:
     return key, sec
 
 
-def build_universe(key: str, secret: str, max_symbols: int, seed: int) -> list[str]:
-    """Random sample of active, tradable US equities — not a curated winners list."""
-    from alpaca.trading.client import TradingClient
+_CLEAN_TICKER = re.compile(r"^[A-Z]{1,5}$")
+
+
+def _usable_ticker(sym: str) -> bool:
+    """Reject malformed and non-US-listing tickers.
+
+    The inactive list contains artefacts the data API rejects outright
+    ('097ESC024', 'CALL_DELISTED') plus foreign ordinaries and ADRs traded OTC,
+    which are not the universe under study.
+    """
     from app.data.scanner import _is_excluded_symbol
+    if not sym or not _CLEAN_TICKER.match(sym):
+        return False
+    if len(sym) == 5 and sym.endswith("F"):     # foreign ordinary, OTC
+        return False
+    return not _is_excluded_symbol(sym)
+
+
+def build_universe(key: str, secret: str, max_symbols: int, seed: int,
+                   include_delisted: bool = False) -> list[str]:
+    """Random sample of US equities — not a curated winners list.
+
+    With include_delisted, the sample is drawn from active AND inactive assets.
+    Alpaca serves full daily history for delisted names (verified: SIVB ends
+    2023-03-09, FRC ends 2023-04-28 at $3.51), so including them removes the
+    survivorship bias that otherwise flatters any dip-buying strategy.
+    """
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import GetAssetsRequest
+    from alpaca.trading.enums import AssetClass, AssetStatus
 
     client = TradingClient(key, secret, raw_data=True)
-    assets = client.get_all_assets()
-    symbols = [
-        a["symbol"] for a in assets
-        if a.get("status") == "active"
-        and a.get("tradable") is True
-        and (a.get("class") or a.get("asset_class")) == "us_equity"
-        and a.get("symbol")
-        and not _is_excluded_symbol(a["symbol"])
-    ]
-    log.info("Alpaca active tradable US equities: %d", len(symbols))
+    statuses = [AssetStatus.ACTIVE]
+    if include_delisted:
+        statuses.append(AssetStatus.INACTIVE)
+
+    symbols: list[str] = []
+    counts: dict[str, int] = {}
+    for st in statuses:
+        assets = client.get_all_assets(
+            GetAssetsRequest(status=st, asset_class=AssetClass.US_EQUITY)
+        )
+        got = [a["symbol"] for a in assets
+               if a.get("symbol") and _usable_ticker(a["symbol"])]
+        counts[st.value] = len(got)
+        symbols.extend(got)
+    log.info("Universe pool: %s (total %d)",
+             ", ".join(f"{k}={v}" for k, v in counts.items()), len(symbols))
+    symbols = sorted(set(symbols))
     rng = random.Random(seed)
     rng.shuffle(symbols)
     return sorted(symbols[:max_symbols])
@@ -107,7 +141,14 @@ def download(symbols: list[str], years: int, key: str, secret: str,
                                    start=start, end=end, adjustment="all")
             df = client.get_stock_bars(req).df
         except Exception as exc:
-            log.warning("Batch %d-%d failed: %s", i, i + len(batch), exc)
+            # A single unusable ticker 400s the whole batch, so fall back to
+            # halving it rather than discarding 100 good symbols.
+            log.warning("Batch %d-%d failed (%s); retrying in halves", i, i + len(batch), exc)
+            df = None
+            if len(batch) > 1:
+                mid = len(batch) // 2
+                for half in (batch[:mid], batch[mid:]):
+                    frames.update(download(half, years, key, secret, out_dir, chunk=len(half)))
             continue
         if df is None or df.empty:
             continue
@@ -139,6 +180,8 @@ def main() -> None:
                     help="median daily $ volume required to keep a symbol")
     ap.add_argument("--min-bars", type=int, default=500)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--include-delisted", action="store_true",
+                    help="sample from inactive/delisted assets too — removes survivorship bias")
     ap.add_argument("--out-dir", default=str(Path(__file__).resolve().parent.parent
                                              / "data" / "equity_1d"))
     args = ap.parse_args()
@@ -147,7 +190,8 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    universe = build_universe(key, secret, args.max_symbols, args.seed)
+    universe = build_universe(key, secret, args.max_symbols, args.seed,
+                              include_delisted=args.include_delisted)
     log.info("Sampled %d symbols; downloading %d years of daily bars", len(universe), args.years)
     frames = download(universe, args.years, key, secret, out_dir)
 
@@ -168,8 +212,12 @@ def main() -> None:
     if kept:
         any_df = next(iter(frames.values()))
         log.info("Range: %s → %s", any_df["Datetime"].min().date(), any_df["Datetime"].max().date())
-    log.warning("SURVIVORSHIP BIAS: universe contains only currently-listed names. "
-                "A positive result here is optimistic; a negative result is trustworthy.")
+    if args.include_delisted:
+        log.info("Universe INCLUDES delisted names — survivorship bias removed.")
+    else:
+        log.warning("SURVIVORSHIP BIAS: universe contains only currently-listed names. "
+                    "A positive result here is optimistic; a negative result is "
+                    "trustworthy. Re-run with --include-delisted to remove it.")
 
 
 if __name__ == "__main__":
