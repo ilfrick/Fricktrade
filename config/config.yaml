@@ -308,7 +308,7 @@ strategy:
     # config has a recorded hold-out pass. Exits are never blocked. Added
     # 2026-08-19 after the audit found the system traded continuously on a
     # configuration with no measured edge. Validate with:
-    #   python3 scripts/alpha_validation.py holdout --record
+    #   python3 scripts/alpha_gate_run.py --record
     enabled: true
     record_path: /data/reports/alpha_validation.json
   entry_ranking:
@@ -610,6 +610,7 @@ backtest:
     - OP/USD
     - SUI/USD
   commission_pct: 0.05              # Binance spot taker fee (0.05%, not 0.10%)
+  maker_commission_pct: 0.02        # Binance spot maker fee; SimBroker applies only to maker fills
   slippage_bps: 3                   # reduced: major crypto pairs have tight books
   spread_bps: 5                     # reduced: BTC/ETH spread typically < 5bps
   use_gpu: true

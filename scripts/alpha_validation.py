@@ -159,6 +159,8 @@ def prepare(df: pd.DataFrame, e: Entry) -> dict:
         ok = ok & (close > long_sma) & long_sma.notna()
     return {
         "close": close.to_numpy(),
+        "open": df["Open"].astype(float).to_numpy() if "Open" in df else close.to_numpy(),
+        "high": df["High"].astype(float).to_numpy(),
         "low": df["Low"].astype(float).to_numpy(),
         "sma": sma.to_numpy(),
         "upper": upper.to_numpy(),
@@ -172,7 +174,10 @@ def prepare(df: pd.DataFrame, e: Entry) -> dict:
 # ---------------------------------------------------------------------------
 
 def simulate(arr: dict, x: ExitLadder, costs: Costs) -> list[dict]:
-    c, lo, sma, upper, rsi = arr["close"], arr["low"], arr["sma"], arr["upper"], arr["rsi"]
+    c, op, hi, lo, sma, upper, rsi = (
+        arr["close"], arr["open"], arr["high"], arr["low"],
+        arr["sma"], arr["upper"], arr["rsi"]
+    )
     n = len(c)
     max_hold_bars = x.max_hold_bars
     bump = costs.side_bump
@@ -181,20 +186,21 @@ def simulate(arr: dict, x: ExitLadder, costs: Costs) -> list[dict]:
     cursor = 0
 
     for i in arr["entries"]:
-        if i < cursor:
+        entry_bar = i + 1
+        if entry_bar >= n or entry_bar < cursor:
             continue                      # already in a position
-        entry_px = c[i] * (1.0 + bump)
-        peak = c[i]
+        entry_px = op[entry_bar] * (1.0 + bump)
+        peak = hi[entry_bar]
         took_partial = False
         realized = 0.0
         remaining = 1.0
         reason = "max_hold"
-        j_end = min(i + max_hold_bars, n - 1)
-        j = i + 1
+        j_end = min(entry_bar + max_hold_bars, n - 1)
+        j = entry_bar + 1
 
         while j <= j_end:
             px = c[j]
-            peak = max(peak, px)
+            peak = max(peak, hi[j])
             if j - i >= x.min_hold_bars:
                 pnl = (px - entry_px) / entry_px * 100.0
                 stop_px = entry_px * (1.0 - x.hard_stop / 100.0)
@@ -239,7 +245,7 @@ def simulate(arr: dict, x: ExitLadder, costs: Costs) -> list[dict]:
         trades.append({
             "gross_pct": realized * 100.0,
             "net_pct": realized * 100.0 - legs * comm * 100.0,
-            "bars": int(min(j, n - 1) - i),
+                    "bars": int(min(j, n - 1) - entry_bar),
             "reason": reason,
         })
         cursor = min(j, n - 1) + 1
@@ -258,7 +264,11 @@ def evaluate(frames: dict[str, pd.DataFrame], e: Entry, x: ExitLadder, costs: Co
                 "gross_E": 0.0, "win_rate": 0.0, "avg_win": 0.0, "avg_loss": 0.0,
                 "sym_pos": 0, "n_sym": len(frames)}
     net = np.array([t["net_pct"] for t in all_t])
-    gross = np.array([t["gross_pct"] for t in all_t])
+    # Gross expectancy means zero commissions, spread, and slippage. Previously
+    # the "gross" number still included the configured execution bump.
+    gross_trades = [trade for sym, df in frames.items()
+                    for trade in simulate(prepare(df, e), x, Costs(0.0, 0.0, 0.0))]
+    gross = np.array([t["net_pct"] for t in gross_trades], dtype=float)
     w, l = net[net > 0], net[net <= 0]
 
     # Robustness: crypto return distributions are dominated by rare liquidation
@@ -366,9 +376,11 @@ def resolve_dataset(data_dir: str | None, pattern: str | None) -> tuple[Path, st
 def load_frames(data_dir: Path, pattern: str = "*_USD_1m.csv") -> dict[str, pd.DataFrame]:
     frames: dict[str, pd.DataFrame] = {}
     for p in sorted(data_dir.glob(pattern)):
-        frames[p.stem] = pd.read_csv(
-            p, usecols=["Datetime", "High", "Low", "Close"], parse_dates=["Datetime"]
-        )
+        available = set(pd.read_csv(p, nrows=0).columns)
+        columns = ["Datetime", "High", "Low", "Close"]
+        if "Open" in available:
+            columns.append("Open")
+        frames[p.stem] = pd.read_csv(p, usecols=columns, parse_dates=["Datetime"])
     if not frames:
         raise SystemExit(f"No CSVs matching {pattern} in {data_dir}")
     return frames
@@ -470,7 +482,7 @@ def cmd_walk(frames: dict, e: Entry, x: ExitLadder, costs: Costs, folds: int) ->
 def cmd_holdout(frames: dict, e: Entry, x: ExitLadder, costs: Costs,
                 cfg: dict | None = None, record: bool = False,
                 wf_nets: list[float] | None = None) -> None:
-    print("\n=== TRAIN / HOLD-OUT ===")
+    print("\n=== TRAIN / HOLD-OUT (SCREENING ONLY — NOT THE ALPHA GATE) ===")
     train = slice_frames(frames, 0.0, 0.75)
     hold = slice_frames(frames, 0.75, 1.0)
     print(f"{'split':<10} {'trades':>7} {'gross E%':>9} {'net E%':>8} {'median%':>8} "
@@ -563,8 +575,13 @@ def main() -> None:
                     help="config.yaml used to fingerprint the run "
                          "(default: <repo>/config/config.yaml)")
     ap.add_argument("--record", action="store_true",
-                    help="write the hold-out verdict for the trader's alpha gate")
+                    help="RETIRED: use scripts/alpha_gate_run.py --record")
     args = ap.parse_args()
+    if args.record:
+        ap.error(
+            "alpha_validation.py is screening-only and cannot write alpha-gate records. "
+            "Use scripts/alpha_gate_run.py --record (production TradingAgent engine)."
+        )
 
     entry = Entry(bb_period=args.bb_period, bb_std=args.bb_std,
                   rsi_period=args.rsi_period, rsi_oversold=args.rsi_oversold,
@@ -592,6 +609,7 @@ def main() -> None:
     ladder = ladder.convert_to_bars(bar_minutes)
     unit = f"{bar_minutes:g}m" if bar_minutes < 60 else f"{bar_minutes/60:g}h"
     print(f"data: {data_dir}/{pattern}")
+    print("engine=fast_screen (screening only; never authoritative for the alpha gate)")
     print(f"symbols={len(frames)}  bar={unit}  "
           f"entry=rsi{entry.rsi_period}<{entry.rsi_oversold:g} "
           f"bb{entry.bb_period}/{entry.bb_std:g}  stop={ladder.hard_stop:g}%  "

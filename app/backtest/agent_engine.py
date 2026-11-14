@@ -45,19 +45,47 @@ class _FrameData:
     indexer: list[int]
 
 
+@dataclass(frozen=True)
+class FeeModel:
+    taker_pct: float = 0.05
+    maker_pct: float = 0.02
+
+    def fee(self, notional: float, maker: bool = False) -> float:
+        return notional * (self.maker_pct if maker else self.taker_pct) / 100.0
+
+
+@dataclass(frozen=True)
+class FillModel:
+    slippage_bps: float = 0.0
+    spread_bps: float = 0.0
+
+    def market_price(self, price: float, side: str) -> float:
+        return _apply_slippage(price, side, self.slippage_bps, self.spread_bps)
+
+
 class SimBroker:
-    def __init__(self, initial_cash: float, commission_pct: float, slippage_bps: float = 0.0, spread_bps: float = 0.0):
+    def __init__(self, initial_cash: float, commission_pct: float,
+                 slippage_bps: float = 0.0, spread_bps: float = 0.0, *,
+                 fee_model: FeeModel | None = None, fill_model: FillModel | None = None):
         self.cash = float(initial_cash)
-        self.commission_pct = float(commission_pct)
-        self.slippage_bps = float(slippage_bps)
-        self.spread_bps = float(spread_bps)
+        self.fee_model = fee_model or FeeModel(taker_pct=float(commission_pct))
+        self.fill_model = fill_model or FillModel(float(slippage_bps), float(spread_bps))
+        self.commission_pct = self.fee_model.taker_pct
+        self.slippage_bps = self.fill_model.slippage_bps
+        self.spread_bps = self.fill_model.spread_bps
         self.positions: dict[str, float] = {}
         self.avg_entry_prices: dict[str, float] = {}
         self.current_prices: dict[str, float] = {}
+        self.current_time: datetime | None = None
+        self.entry_times: dict[str, str] = {}
         self._order_id = 0
         self.trades = 0
         self.trade_log: list[dict] = []  # detailed per-trade records
         self.signal_log: list[dict] = []  # per-bar strategy signals
+        self.open_orders: dict[str, dict] = {}
+        self._pending_requests: dict[str, dict] = {}
+        self._reserved_cash = 0.0
+        self._reserved_sell_qty: dict[str, float] = {}
 
     def get_account(self) -> dict:
         equity = self.cash + sum(self.positions.get(sym, 0.0) * self.current_prices.get(sym, 0.0) for sym in self.positions)
@@ -81,18 +109,98 @@ class SimBroker:
         return results
 
     def get_open_orders(self) -> list[dict]:
-        return []
+        return [dict(order) for order in self.open_orders.values()]
 
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         price = self.current_prices.get(symbol)
         if price is None:
             raise ValueError(f"Missing price for {symbol}")
-        exec_price = _apply_slippage(price, side, self.slippage_bps, self.spread_bps)
+        side = side.lower()
+        qty = float(qty)
+        if side not in {"buy", "sell"} or qty <= 0:
+            raise ValueError("order side must be buy/sell and qty must be positive")
+        order_type = str(order_type).lower()
+        if order_type == "limit":
+            limit_price = kwargs.get("limit_price")
+            if limit_price is None or float(limit_price) <= 0:
+                raise ValueError("limit order requires a positive limit_price")
+            limit_price = float(limit_price)
+            if not self._limit_marketable(side, price, limit_price):
+                self._validate_balance(symbol, side, qty, limit_price, True)
+                self._order_id += 1
+                oid = f"sim-{self._order_id}"
+                self.open_orders[oid] = {
+                    "order_id": oid, "symbol": symbol, "side": side,
+                    "qty": qty, "filled_qty": 0.0, "status": "open",
+                    "limit_price": limit_price, "type": "limit",
+                }
+                self._pending_requests[oid] = {
+                    "symbol": symbol, "side": side, "qty": qty, "limit_price": limit_price,
+                }
+                if side == "buy":
+                    self._reserved_cash += qty * limit_price + self.fee_model.fee(qty * limit_price, True)
+                else:
+                    self._reserved_sell_qty[symbol] = self._reserved_sell_qty.get(symbol, 0.0) + qty
+                return oid
+            # A marketable limit takes liquidity; only a resting order crossed by a
+            # later bar is maker. Clamp adverse market impact at the limit bound.
+            market_fill = self.fill_model.market_price(price, side)
+            exec_price = min(market_fill, limit_price) if side == "buy" else max(market_fill, limit_price)
+            maker = False
+        elif order_type == "market":
+            exec_price, maker = self.fill_model.market_price(price, side), False
+        else:
+            raise ValueError(f"unsupported order_type: {order_type}")
+        self._validate_balance(symbol, side, qty, exec_price, maker)
+        return self._execute(symbol, side, qty, exec_price, maker)
+
+    @staticmethod
+    def _limit_marketable(side: str, market: float, limit: float) -> bool:
+        return market <= limit if side == "buy" else market >= limit
+
+    def _validate_balance(self, symbol: str, side: str, qty: float,
+                          price: float, maker: bool) -> None:
+        position = self.positions.get(symbol, 0.0)
+        reserved_sell = self._reserved_sell_qty.get(symbol, 0.0)
+        if side == "sell" and qty > position - reserved_sell + 1e-12:
+            raise ValueError(f"uncovered short rejected for {symbol}: {qty} > {position}")
+        notional = qty * price
+        fee = self.fee_model.fee(notional, maker)
+        available = self.cash - self._reserved_cash
+        if side == "buy" and notional + fee > available + 1e-9:
+            raise ValueError(f"insufficient cash: need {notional + fee:.8f}, have {available:.8f}")
+
+    def process_pending_orders(self) -> None:
+        """Fill queued limit orders only after a later observed price crosses."""
+        for oid, request in list(self._pending_requests.items()):
+            market = self.current_prices.get(request["symbol"])
+            if market is None or not self._limit_marketable(
+                request["side"], market, request["limit_price"]
+            ):
+                continue
+            self._release_reservation(request)
+            try:
+                self._validate_balance(request["symbol"], request["side"], request["qty"],
+                                       request["limit_price"], True)
+                self._execute(request["symbol"], request["side"], request["qty"],
+                              request["limit_price"], True)
+            except ValueError:
+                self.open_orders.pop(oid, None)
+                self._pending_requests.pop(oid, None)
+                continue
+            self.open_orders.pop(oid, None)
+            self._pending_requests.pop(oid, None)
+
+    def _execute(self, symbol: str, side: str, qty: float,
+                 exec_price: float, maker: bool) -> str:
         cost = qty * exec_price
-        commission = cost * (self.commission_pct / 100.0)
+        commission = self.fee_model.fee(cost, maker)
         # Capture avg_entry BEFORE position update (needed for sell P&L calc)
         _pre_avg_entry = self.avg_entry_prices.get(symbol, 0.0)
-        if side.lower() == "buy":
+        _entry_time = self.entry_times.get(symbol) or (
+            self.current_time.isoformat() if self.current_time else ""
+        )
+        if side == "buy":
             self.cash -= cost + commission
             prev_qty = self.positions.get(symbol, 0.0)
             prev_avg = _pre_avg_entry
@@ -100,6 +208,7 @@ class SimBroker:
             if new_qty > 0:
                 self.avg_entry_prices[symbol] = (prev_avg * prev_qty + exec_price * qty) / new_qty
             self.positions[symbol] = new_qty
+            self.entry_times.setdefault(symbol, self.current_time.isoformat() if self.current_time else "")
         else:
             self.cash += cost - commission
             self.positions[symbol] = self.positions.get(symbol, 0.0) - qty
@@ -108,23 +217,45 @@ class SimBroker:
             if remaining <= 0 or (remaining * exec_price < 1.0):
                 self.positions.pop(symbol, None)
                 self.avg_entry_prices.pop(symbol, None)
+                self.entry_times.pop(symbol, None)
         self._order_id += 1
         self.trades += 1
         trade_rec = {
             "id": self._order_id,
             "symbol": symbol,
-            "side": side.lower(),
+            "side": side,
             "qty": qty,
             "price": exec_price,
             "commission": commission,
             "notional": cost,
+            "maker": maker,
+            "fee_rate_pct": self.fee_model.maker_pct if maker else self.fee_model.taker_pct,
+            "entry_time": _entry_time,
+            "timestamp": self.current_time.isoformat() if self.current_time else "",
         }
-        if side.lower() == "sell":
+        if side == "sell":
             avg_entry = _pre_avg_entry if _pre_avg_entry > 0 else exec_price
             trade_rec["avg_entry"] = avg_entry
             trade_rec["pnl_pct"] = (exec_price - avg_entry) / avg_entry * 100.0 if avg_entry > 0 else 0.0
         self.trade_log.append(trade_rec)
         return f"sim-{self._order_id}"
+
+    def cancel_order(self, order_id: str, **kwargs) -> None:
+        request = self._pending_requests.pop(str(order_id), None)
+        if request:
+            self._release_reservation(request)
+        self.open_orders.pop(str(order_id), None)
+
+    def _release_reservation(self, request: dict) -> None:
+        symbol, side, qty = request["symbol"], request["side"], request["qty"]
+        if side == "buy":
+            cost = qty * request["limit_price"]
+            self._reserved_cash = max(0.0, self._reserved_cash - cost
+                                      - self.fee_model.fee(cost, True))
+        else:
+            self._reserved_sell_qty[symbol] = max(
+                0.0, self._reserved_sell_qty.get(symbol, 0.0) - qty
+            )
 
     def close_position(self, symbol: str, **kwargs) -> None:
         qty = self.positions.get(symbol, 0.0)
@@ -144,6 +275,10 @@ class SimBrokerRouter:
     @property
     def brokers(self) -> dict[str, SimBroker]:
         return dict(self._brokers)
+
+    @property
+    def trades(self) -> int:
+        return sum(broker.trades for broker in self._brokers.values())
 
     def get_account(self) -> dict:
         total_equity = 0.0
@@ -168,7 +303,9 @@ class SimBrokerRouter:
         return results
 
     def get_open_orders(self) -> list[dict]:
-        return []
+        return [dict(order, broker=name)
+                for name, broker in self._brokers.items()
+                for order in broker.get_open_orders()]
 
     def place_order(self, symbol: str, side: str, qty: float, order_type: str, **kwargs) -> str:
         broker_name = kwargs.get("broker") or self._resolve_broker(symbol, kwargs.get("strategy"))
@@ -301,6 +438,11 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
     _bt_total_bars = 0
     _rank_enabled = hasattr(agent, "_rank_entry_candidates")
     for ts_idx, ts in enumerate(timeline):
+        if hasattr(broker, "current_time"):
+            broker.current_time = ts
+        elif hasattr(broker, "_brokers"):
+            for sub in broker._brokers.values():
+                sub.current_time = ts
         _apply_news_cache(agent, news_cache, ts)
 
         # Update all symbol states for this bar first (needed for ranking)
@@ -315,8 +457,14 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
             ms = sym_state.market_state()
             if ms["last_price"] is None:
                 continue
-            broker.current_prices[symbol] = ms["last_price"]
+            if hasattr(broker, "_brokers"):
+                for sub_broker in broker._brokers.values():
+                    sub_broker.current_prices[symbol] = ms["last_price"]
+            else:
+                broker.current_prices[symbol] = ms["last_price"]
             _bar_symbols.append(symbol)
+
+        _sync_sim_open_orders(agent, broker)
 
         # Split into holders (exits first) then ranked non-holders (entries)
         _portfolio = agent._get_portfolio_snapshot()
@@ -346,7 +494,8 @@ def _run_agent_backtest_single(cfg: dict, symbols: list[str], start: datetime, e
             _bt_total_bars += 1
         if ts_idx > 0 and ts_idx % 2000 == 0:
             logging.info("Backtest progress: bar %d/%d, trades=%d", ts_idx, len(timeline), broker.trades)
-        # Drain order queue: SimBroker completes instantly but queue processes one per update()
+        # Drain order queue: SimBroker fills market orders instantly; limits stay open.
+        _sync_sim_open_orders(agent, broker)
         _drain_order_queues(agent)
         agent._flush_order_responses()
         # Update position_state so stops/trailing stops can fire next bar
@@ -433,6 +582,19 @@ def _drain_order_queues(agent: TradingAgent, max_rounds: int = 100) -> None:
         agent._update_open_order_queues()
 
 
+def _sync_sim_open_orders(agent: TradingAgent, broker) -> None:
+    """Advance SimBroker limits and expose their state to the production queue."""
+    brokers = list(broker._brokers.values()) if hasattr(broker, "_brokers") else [broker]
+    for sim in brokers:
+        process = getattr(sim, "process_pending_orders", None)
+        if callable(process):
+            process()
+    try:
+        agent._open_order_mgr.cache = broker.get_open_orders()
+    except Exception:
+        logging.exception("Could not sync simulated open orders")
+
+
 def _load_backtest_news(backtest_cfg: dict) -> dict[str, set[str]]:
     source = str(backtest_cfg.get("news_source", "none")).lower()
     if source != "local":
@@ -489,6 +651,13 @@ def _build_sim_broker(cfg: dict, backtest_cfg: dict):
     brokers_cfg = cfg.get("brokers", {})
     slippage_bps = float(backtest_cfg.get("slippage_bps", 0.0) or 0.0)
     spread_bps = float(backtest_cfg.get("spread_bps", 0.0) or 0.0)
+    fee_model = FeeModel(
+        taker_pct=float(backtest_cfg.get("commission_pct", 0.0) or 0.0),
+        maker_pct=float(backtest_cfg.get(
+            "maker_commission_pct", backtest_cfg.get("commission_pct", 0.0)
+        ) or 0.0),
+    )
+    fill_model = FillModel(slippage_bps, spread_bps)
     enabled = []
     if brokers_cfg.get("alpaca", {}).get("enabled", True):
         enabled.append("alpaca")
@@ -497,11 +666,13 @@ def _build_sim_broker(cfg: dict, backtest_cfg: dict):
     if exec_cfg.get("enabled", False) and len(enabled) > 1:
         per_cash = float(backtest_cfg["initial_cash"]) / len(enabled)
         brokers = {
-            name: SimBroker(per_cash, backtest_cfg["commission_pct"], slippage_bps, spread_bps)
+            name: SimBroker(per_cash, backtest_cfg["commission_pct"], slippage_bps,
+                            spread_bps, fee_model=fee_model, fill_model=fill_model)
             for name in enabled
         }
         return SimBrokerRouter(brokers, exec_cfg.get("routing", {}))
-    return SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"], slippage_bps, spread_bps)
+    return SimBroker(backtest_cfg["initial_cash"], backtest_cfg["commission_pct"],
+                     slippage_bps, spread_bps, fee_model=fee_model, fill_model=fill_model)
 
 
 def _apply_slippage(price: float, side: str, slippage_bps: float, spread_bps: float) -> float:
@@ -596,8 +767,8 @@ def _prepare_backtest_frames(
         if subset.empty:
             continue
         subsets[symbol] = subset
-        timeline = subset.index if timeline is None else timeline.union(subset.index)
-    if not subsets:
+        timeline = subset.index if timeline is None else timeline.intersection(subset.index)
+    if not subsets or timeline is None or len(timeline) == 0:
         return pd.DatetimeIndex([]), {}
     timeline = timeline.sort_values()
     prepared: dict[str, _FrameData] = {}

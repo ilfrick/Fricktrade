@@ -27,7 +27,7 @@ This is the **single authoritative document** for understanding and operating Fr
 > The repository is retained as **engineering infrastructure and a research
 > platform**, not as a live trading system. If you restart it, the
 > [alpha gate](#alpha-gate--flat-unless-proven-otherwise) will refuse to open
-> positions until a configuration passes `scripts/alpha_validation.py holdout`.
+> positions until a configuration passes `scripts/alpha_gate_run.py --record`.
 > That default is intentional. Do not disable it to "just see what happens".
 >
 > Paper accounts as left: Alpaca Realistic $246.34 (−1.5% lifetime),
@@ -905,15 +905,18 @@ as its resting state and traded continuously on a configuration with no measured
 edge; cash outperformed every variant tested.
 
 ```bash
-# from the host — data dir, pattern and config are all auto-detected
-python3 scripts/alpha_validation.py holdout --record
+# authoritative: TradingAgent + SimBroker, fixed calendar cut, purge/embargo,
+# >=100 completed holdout trades and block-bootstrap CIs; appends a trial
+# --record requires a clean, committed worktree
+python3 scripts/alpha_gate_run.py --data-dir data/history_1h --record
 
-# or pick a specific dataset (repo-relative paths work)
-python3 scripts/alpha_validation.py holdout --record \
+# same command inside the container
+docker compose run --rm -T trader python3 scripts/alpha_gate_run.py \
+    --data-dir /data/history_1h --record
+
+# fast, non-authoritative screening only (cannot write a gate record)
+python3 scripts/alpha_validation.py holdout \
     --data-dir data/history_1h --pattern '*_USD_1h.csv'
-
-# inside the container it resolves /data automatically
-docker compose run --rm -T trader python3 scripts/alpha_validation.py holdout --record
 
 # inspect the current decision
 docker exec fricktrade-trader-1 python3 -c \
@@ -941,8 +944,9 @@ positive — one metric alone is too easy to satisfy with a few untradeable wick
 
 ## Alpha validation (run before any strategy change)
 
-`scripts/alpha_validation.py` answers whether a configuration has edge, in
-increasing order of strictness. It reports **net expectancy per trade** after
+`scripts/alpha_validation.py` is a fast **screening-only reimplementation**; it cannot
+write a record. The authoritative gate is `scripts/alpha_gate_run.py`, which uses
+`TradingAgent` and `SimBroker`. Screening reports **net expectancy per trade** after
 realistic costs, because total return is dominated by sizing and market drift and
 hides whether each decision adds value.
 
@@ -963,6 +967,8 @@ python3 scripts/alpha_validation.py all --data-dir ./data \
 
 Rules that keep this honest:
 - Select parameters on train/walk-forward only; touch the hold-out **once**.
+- A passing gate record must come from `alpha_gate_run.py`; `alpha_validation.py --record`
+  is deliberately rejected.
 - An edge below the round-trip cost (~0.21%) is not tradeable no matter its t-stat.
 - t-stats printed are optimistic: signals overlap in time and crypto symbols are
   highly correlated, so effective sample size is far below the raw signal count.

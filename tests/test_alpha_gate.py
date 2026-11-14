@@ -40,7 +40,9 @@ def _write(cfg, passed=True, fingerprint=None):
     path.write_text(json.dumps({
         "fingerprint": fingerprint or alpha_gate.config_fingerprint(cfg),
         "passed": passed,
-        "metrics": {},
+        "metrics": {"trades": 100, "bootstrap_ci_95": {"mean_low": 0.1, "trimmed_low": 0.1}},
+        "engine": "agent_engine",
+        "provenance": {"dataset_id": None},
     }))
 
 
@@ -105,7 +107,10 @@ class TestGate:
 
     def test_write_record_roundtrip(self, tmp_path):
         cfg = _cfg(tmp_path)
-        alpha_gate.write_record(cfg, passed=True, metrics={"net_E": 0.5})
+        alpha_gate.write_record(cfg, passed=True, metrics={
+            "net_E": 0.5, "trades": 100,
+            "bootstrap_ci_95": {"mean_low": 0.1, "trimmed_low": 0.1},
+        })
         d = alpha_gate.check_entries(cfg)
         assert not d.blocked
         rec = alpha_gate.load_record(cfg)

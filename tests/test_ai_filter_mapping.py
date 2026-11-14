@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 pytest.importorskip("gymnasium")
+pytest.importorskip("tensorflow")
 
 from app.data import ai_filter
 
