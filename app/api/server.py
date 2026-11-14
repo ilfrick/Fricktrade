@@ -1130,6 +1130,20 @@ def _render_ui() -> str:
     select:focus { outline: 2px solid #38bdf8; outline-offset: 1px; }
     option { background-color: #111827; color: #f8fafc; }
     option:checked { background-color: #1d4ed8; color: #ffffff; }
+    .dropdown-control { position: relative; width: 100%; min-width: 0; margin-bottom: 8px; }
+    select.dropdown-source { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: 0 !important; opacity: 0 !important; pointer-events: none !important; clip-path: inset(50%) !important; }
+    .dropdown-trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid #475569; border-radius: 6px; background: #0b1220; color: #f8fafc; text-align: left; cursor: pointer; }
+    .dropdown-trigger:hover, .dropdown-trigger[aria-expanded="true"] { border-color: #38bdf8; }
+    .dropdown-trigger:focus-visible, .dropdown-option:focus-visible, .dropdown-search:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
+    .dropdown-trigger-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dropdown-trigger-arrow { flex: none; color: #7dd3fc; }
+    .dropdown-menu { position: fixed; z-index: 10000; display: flex; flex-direction: column; min-width: 240px; max-width: calc(100vw - 16px); padding: 6px; border: 1px solid #475569; border-radius: 8px; background: #0b1220; box-shadow: 0 16px 40px #000b; }
+    .dropdown-menu[hidden] { display: none; }
+    .dropdown-search { flex: none; width: auto; margin: 0 0 6px; }
+    .dropdown-options { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+    .dropdown-option { display: block; width: 100%; min-height: 36px; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: #e2e8f0; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+    .dropdown-option:hover, .dropdown-option[aria-selected="true"] { background: #1e3a5f; color: #fff; }
+    .dropdown-empty { padding: 10px; color: #94a3b8; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -1191,6 +1205,7 @@ def _render_ui() -> str:
     let descriptions = {};
     let llmCatalog = { integrations: [], providers: [], models: [] };
     let activeOAuthAttempt = null;
+    let activeDropdownCloser = null;
     const llmUses = [
       ['sentiment', 'Per-symbol sentiment'],
       ['aggregate_sentiment', 'Aggregate sentiment'],
@@ -1236,6 +1251,177 @@ def _render_ui() -> str:
       const key = localStorage.getItem('apiKey') || '';
       return key ? { 'X-API-Key': key } : {};
     }
+    function attachDropdown(select, accessibleLabel = 'Choose an option') {
+      if (select.multiple) return null;
+      if (select._customDropdown) {
+        select._customDropdown.refresh();
+        return select._customDropdown;
+      }
+      const wrapper = document.createElement('div');
+      wrapper.className = 'dropdown-control';
+      select.parentNode.insertBefore(wrapper, select);
+      wrapper.appendChild(select);
+      select.classList.add('dropdown-source');
+      select.setAttribute('aria-hidden', 'true');
+      select.tabIndex = -1;
+
+      const trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = 'dropdown-trigger';
+      trigger.setAttribute('aria-haspopup', 'listbox');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.setAttribute('aria-label', accessibleLabel);
+      const triggerLabel = document.createElement('span');
+      triggerLabel.className = 'dropdown-trigger-label';
+      const arrow = document.createElement('span');
+      arrow.className = 'dropdown-trigger-arrow';
+      arrow.setAttribute('aria-hidden', 'true');
+      arrow.textContent = '▾';
+      trigger.append(triggerLabel, arrow);
+      wrapper.appendChild(trigger);
+
+      const menu = document.createElement('div');
+      menu.className = 'dropdown-menu';
+      menu.hidden = true;
+      menu.setAttribute('role', 'listbox');
+      document.body.appendChild(menu);
+      const search = document.createElement('input');
+      search.className = 'dropdown-search';
+      search.type = 'search';
+      search.autocomplete = 'off';
+      search.placeholder = 'Filter options…';
+      search.setAttribute('aria-label', `Filter ${accessibleLabel.toLowerCase()}`);
+      const options = document.createElement('div');
+      options.className = 'dropdown-options';
+      menu.append(search, options);
+
+      function renderOptions() {
+        options.replaceChildren();
+        const query = search.value.trim().toLocaleLowerCase();
+        const visible = Array.from(select.options).filter(option =>
+          !option.disabled &&
+          (!query || option.textContent.toLocaleLowerCase().includes(query))
+        );
+        if (!visible.length) {
+          const empty = document.createElement('div');
+          empty.className = 'dropdown-empty';
+          empty.textContent = 'No matching options';
+          options.appendChild(empty);
+          return;
+        }
+        visible.forEach(option => {
+          const item = document.createElement('button');
+          item.type = 'button';
+          item.className = 'dropdown-option';
+          item.setAttribute('role', 'option');
+          item.setAttribute('aria-selected', String(option.value === select.value));
+          item.textContent = option.textContent;
+          item.addEventListener('click', () => {
+            select.value = option.value;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            closeMenu();
+            trigger.focus();
+          });
+          options.appendChild(item);
+        });
+      }
+      function refresh() {
+        const selected = select.selectedOptions[0];
+        triggerLabel.textContent = selected?.textContent || 'Choose an option';
+        trigger.disabled = select.disabled || select.options.length === 0;
+        search.hidden = select.options.length < 8;
+        renderOptions();
+      }
+      function closeMenu() {
+        menu.hidden = true;
+        trigger.setAttribute('aria-expanded', 'false');
+        if (activeDropdownCloser === closeMenu) activeDropdownCloser = null;
+      }
+      function openMenu() {
+        if (activeDropdownCloser && activeDropdownCloser !== closeMenu) activeDropdownCloser();
+        activeDropdownCloser = closeMenu;
+        search.value = '';
+        refresh();
+        menu.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+        const rect = trigger.getBoundingClientRect();
+        const viewportPadding = 8;
+        const width = Math.min(Math.max(rect.width, 260), window.innerWidth - viewportPadding * 2);
+        const below = window.innerHeight - rect.bottom - viewportPadding;
+        const above = rect.top - viewportPadding;
+        const optionCount = Array.from(select.options).filter(option => !option.disabled).length;
+        const desiredHeight = Math.min(420, Math.max(100, optionCount * 42 + (search.hidden ? 12 : 54)));
+        const openAbove = below < Math.min(desiredHeight, 220) && above > below;
+        const available = Math.max(100, Math.min(desiredHeight, openAbove ? above : below));
+        const left = Math.max(viewportPadding, Math.min(rect.left, window.innerWidth - width - viewportPadding));
+        menu.style.width = `${width}px`;
+        menu.style.maxHeight = `${available}px`;
+        menu.style.left = `${left}px`;
+        if (openAbove) {
+          menu.style.top = 'auto';
+          menu.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+        } else {
+          menu.style.bottom = 'auto';
+          menu.style.top = `${rect.bottom + 4}px`;
+        }
+        options.style.maxHeight = `${Math.max(70, available - (search.hidden ? 12 : 54))}px`;
+        if (!search.hidden) search.focus();
+        else {
+          const selected = options.querySelector('[aria-selected="true"]') || options.querySelector('.dropdown-option');
+          selected?.focus();
+        }
+      }
+      trigger.addEventListener('click', () => menu.hidden ? openMenu() : closeMenu());
+      trigger.addEventListener('keydown', event => {
+        if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openMenu();
+        }
+      });
+      search.addEventListener('input', renderOptions);
+      search.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeMenu();
+          trigger.focus();
+        } else if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          (options.querySelector('[aria-selected="true"]') || options.querySelector('.dropdown-option'))?.focus();
+        }
+      });
+      menu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeMenu();
+          trigger.focus();
+          return;
+        }
+        const items = Array.from(options.querySelectorAll('.dropdown-option'));
+        const index = items.indexOf(document.activeElement);
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const delta = event.key === 'ArrowDown' ? 1 : -1;
+          items[Math.max(0, Math.min(items.length - 1, index + delta))]?.focus();
+        } else if (event.key === 'Home') {
+          event.preventDefault();
+          items[0]?.focus();
+        } else if (event.key === 'End') {
+          event.preventDefault();
+          items[items.length - 1]?.focus();
+        }
+      });
+      document.addEventListener('pointerdown', event => {
+        if (!wrapper.contains(event.target) && !menu.contains(event.target)) closeMenu();
+      });
+      window.addEventListener('resize', closeMenu);
+      document.addEventListener('scroll', event => {
+        if (!menu.contains(event.target)) closeMenu();
+      }, true);
+      select.addEventListener('change', refresh);
+      select._customDropdown = { refresh, close: closeMenu };
+      refresh();
+      return select._customDropdown;
+    }
     function saveApiKey() {
       const key = document.getElementById('apiKey').value || '';
       if (key) {
@@ -1276,6 +1462,7 @@ def _render_ui() -> str:
         option.textContent = groupLabels[group] || group;
         groupSelect.appendChild(option);
       });
+      attachDropdown(groupSelect, 'Configuration group');
       renderDescriptions();
     }
     function renderDescriptions() {
@@ -1354,11 +1541,15 @@ def _render_ui() -> str:
           backend.appendChild(option);
         });
         backend.value = (routes[use] || {}).backend || '';
+        backend.setAttribute('aria-label', `${label} backend`);
         const model = document.createElement('select'); model.id = `llm-model-${use}`;
+        model.setAttribute('aria-label', `${label} model`);
         model.dataset.current = (routes[use] || {}).model || '';
         backend.onchange = () => fillModels(model, backend.value);
         fillModels(model, backend.value);
         container.append(title, backend, model);
+        attachDropdown(backend, `${label} backend`);
+        attachDropdown(model, `${label} model`);
       });
     }
     function fillModels(select, backend) {
@@ -1374,6 +1565,7 @@ def _render_ui() -> str:
         select.appendChild(option);
       });
       select.value = current;
+      select._customDropdown?.refresh();
     }
     async function saveLlmSettings() {
       const routes = {};
@@ -1398,6 +1590,7 @@ def _render_ui() -> str:
         integrationSelect.appendChild(option);
       });
       integrationSelect.onchange = renderAuthMethods;
+      attachDropdown(integrationSelect, 'Provider integration');
       renderAuthMethods();
     }
     function renderAuthMethods() {
@@ -1410,6 +1603,7 @@ def _render_ui() -> str:
         select.appendChild(option);
       });
       select.onchange = renderAuthFields;
+      attachDropdown(select, 'Authentication method');
       renderAuthFields();
     }
     function parseAuthAnswer() {
@@ -1451,7 +1645,9 @@ def _render_ui() -> str:
         input.dataset.formKey = field.key;
         input.dataset.formType = field.type;
         input.required = !!field.required;
-        label.appendChild(input); container.appendChild(label);
+        label.appendChild(input);
+        if (input.tagName === 'SELECT') attachDropdown(input, field.title || field.label || field.key);
+        container.appendChild(label);
       });
     }
     async function connectLlmKey() {
