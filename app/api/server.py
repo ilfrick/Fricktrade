@@ -1100,6 +1100,7 @@ def _render_ui() -> str:
   <title>Fricktrade Config</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap');
+    :root { color-scheme: dark; }
     body { font-family: "Space Grotesk", ui-sans-serif, system-ui; margin: 0; background: #0f172a; color: #e2e8f0; }
     header { padding: 16px 24px; background: #111827; border-bottom: 1px solid #1f2937; }
     main { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; padding: 16px 24px; }
@@ -1125,7 +1126,10 @@ def _render_ui() -> str:
     .llm-note { color: #94a3b8; font-size: 12px; line-height: 1.5; }
     code { background: #111827; color: #e2e8f0; padding: 2px 6px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     input { width: 100%; padding: 6px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #1f2937; background: #0b1220; color: #e2e8f0; }
-    select { width: 100%; padding: 6px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #1f2937; background: #0b1220; color: #e2e8f0; }
+    select { color-scheme: dark; width: 100%; padding: 6px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #475569; background-color: #0b1220; color: #f8fafc; opacity: 1; }
+    select:focus { outline: 2px solid #38bdf8; outline-offset: 1px; }
+    option { background-color: #111827; color: #f8fafc; }
+    option:checked { background-color: #1d4ed8; color: #ffffff; }
   </style>
 </head>
 <body>
