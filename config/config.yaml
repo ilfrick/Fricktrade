@@ -1042,44 +1042,44 @@ execution:
       strategies: {}
       fallback_enabled: false
 llm:
-  enabled: true  # Master switch — requires ANTHROPIC_API_KEY and GOOGLE_GEMINI_API_KEY in .env
+  enabled: true  # LLM calls are routed through the internal OpenCode service.
   # OpenCode routes let each LLM use select a provider/model from its catalog.
-  # Empty choices preserve the legacy llm.backends configuration above.
+  # OpenRouter free models; availability/rate limits are controlled by OpenRouter.
   routes:
-    sentiment: {backend: "", model: ""}
-    aggregate_sentiment: {backend: "", model: ""}
-    symbols_filter: {backend: "", model: ""}
-    post_session: {backend: "", model: ""}
-    meta_orchestrator: {backend: "", model: ""}
-    risk_interpreter: {backend: "", model: ""}
-    macro_regime: {backend: "", model: ""}
-    portfolio_orchestrator: {backend: "", model: ""}
-    tactical_meta_orchestrator: {backend: "", model: ""}
+    sentiment: {backend: "opencode", model: "openrouter/liquid/lfm-3-1.7b:free"}
+    aggregate_sentiment: {backend: "opencode", model: "openrouter/liquid/lfm-3-1.7b:free"}
+    symbols_filter: {backend: "opencode", model: "openrouter/baidu/ernie-5.5-flash-preview:free"}
+    post_session: {backend: "opencode", model: "openrouter/baidu/ernie-5.5-flash-preview:free"}
+    meta_orchestrator: {backend: "opencode", model: "openrouter/baidu/ernie-5.5-flash-preview:free"}
+    risk_interpreter: {backend: "opencode", model: "openrouter/baidu/ernie-5.5-flash-preview:free"}
+    macro_regime: {backend: "opencode", model: "openrouter/baidu/ernie-5.5-flash-preview:free"}
+    portfolio_orchestrator: {backend: "opencode", model: "openrouter/baidu/ernie-5.5-flash-preview:free"}
+    tactical_meta_orchestrator: {backend: "opencode", model: "openrouter/baidu/ernie-5.5-flash-preview:free"}
   # Required before Fricktrade sends background requests to OpenAI via OpenCode.
   # This is deliberately explicit because a connected account may use ChatGPT plan.
   chatgpt_plan_background_consent: false
 
   # Backend assignment per module
   backends:
-    sentiment: ollama        # Free local inference (llama3.2:3b)
-    aggregate_sentiment: ollama  # Also selectable via Gemini/Claude API through the shared LLMClient
-    symbols_filter: gemini   # High volume, large context
-    post_session: gemini     # Large trade logs
-    meta_orchestrator: gemini # Complex reasoning
-    risk_interpreter: gemini  # Safety-critical
+    sentiment: opencode
+    aggregate_sentiment: opencode
+    symbols_filter: opencode
+    post_session: opencode
+    meta_orchestrator: opencode
+    risk_interpreter: opencode
 
   # Macro regime analyzer (Gemini) — fetches FRED data + calls LLM every 4h
   macro_regime:
-    enabled: false
+    enabled: true
     refresh_hours: 4
-    backend: gemini
+    backend: opencode
 
   # Per-symbol sentiment via local Ollama (llama3.2:3b, ~1.5s/call).
   # Injected into market_state["llm_sentiment"] for strategies to read directly.
   # Uses 3B model (not 8B) — fast enough for 33 symbols within a 5-min cycle.
   sentiment:
     enabled: true
-    model: llama3.2:3b
+    model: openrouter/liquid/lfm-3-1.7b:free
     cache_ttl_seconds: 900
     max_news_items: 10
     min_confidence_to_inject: 0.3
@@ -1089,12 +1089,12 @@ llm:
   # Runs every 15 min in background; result is cached and never blocks the main loop.
   ollama_sentiment:
     enabled: true
-    model: llama3.2:3b         # 3B model: ~1.5s/call; fast enough for 15-min cadence
+    model: openrouter/liquid/lfm-3-1.7b:free
     max_headlines: 20          # max headlines per analysis call
 
   # Daily symbol selection (Gemini) — replaces PPO filter
   symbols_filter:
-    enabled: false           # Enable manually; runs pre-market, overrides AI filter
+    enabled: true
     run_time: pre_market   # pre_market | manual
     select_count: 30
     fallback_to_rules: true  # Use rule-based filter if LLM fails
