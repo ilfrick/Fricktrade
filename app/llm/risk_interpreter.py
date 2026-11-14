@@ -180,6 +180,7 @@ class RiskEventInterpreter:
                 max_tokens=2048,
                 temperature=0.1,
                 critical=True,  # Bypass daily budget for risk calls
+                usage="risk_interpreter",
             )
             data = response.parse_json()
 

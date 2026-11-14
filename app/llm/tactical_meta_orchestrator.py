@@ -397,6 +397,7 @@ class TacticalMetaOrchestrator:
                 user_prompt=prompt,
                 model=self._model,
                 max_tokens=1024,
+                usage="tactical_meta_orchestrator",
             )
             latency = time.monotonic() - t0
             if _PROMETHEUS_OK:

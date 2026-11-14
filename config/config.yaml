@@ -1043,6 +1043,21 @@ execution:
       fallback_enabled: false
 llm:
   enabled: true  # Master switch — requires ANTHROPIC_API_KEY and GOOGLE_GEMINI_API_KEY in .env
+  # OpenCode routes let each LLM use select a provider/model from its catalog.
+  # Empty choices preserve the legacy llm.backends configuration above.
+  routes:
+    sentiment: {backend: "", model: ""}
+    aggregate_sentiment: {backend: "", model: ""}
+    symbols_filter: {backend: "", model: ""}
+    post_session: {backend: "", model: ""}
+    meta_orchestrator: {backend: "", model: ""}
+    risk_interpreter: {backend: "", model: ""}
+    macro_regime: {backend: "", model: ""}
+    portfolio_orchestrator: {backend: "", model: ""}
+    tactical_meta_orchestrator: {backend: "", model: ""}
+  # Required before Fricktrade sends background requests to OpenAI via OpenCode.
+  # This is deliberately explicit because a connected account may use ChatGPT plan.
+  chatgpt_plan_background_consent: false
 
   # Backend assignment per module
   backends:

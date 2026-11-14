@@ -425,6 +425,7 @@ class StrategicOrchestrator:
                 user_prompt=prompt,
                 model=self._model,
                 max_tokens=2048,
+                usage="meta_orchestrator",
             )
             latency = time.monotonic() - t0
             parsed = self._parse_response(response.content)

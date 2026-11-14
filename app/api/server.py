@@ -3,9 +3,14 @@
 
 from datetime import datetime, timezone
 import hmac
+import json
 import os
 from pathlib import Path
 from typing import Any
+import base64
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import yaml
 from fastapi import FastAPI, HTTPException, Request, Depends
@@ -18,6 +23,39 @@ from app.utils.restart import restart_flag_path
 
 app = FastAPI(title="Fricktrade API")
 CONFIG_PATH = Path("/app/config/config.yaml")
+_LLM_USES = (
+    "sentiment", "aggregate_sentiment", "symbols_filter", "post_session",
+    "meta_orchestrator", "risk_interpreter", "macro_regime",
+    "portfolio_orchestrator", "tactical_meta_orchestrator",
+)
+_LEGACY_LLM_BACKENDS = frozenset({"ollama", "gemini", "claude"})
+
+
+def _opencode_request(method: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
+    """Call only fixed, internally selected OpenCode API paths."""
+    base_url = os.getenv("OPENCODE_URL", "http://opencode:4096").rstrip("/")
+    username = "opencode"
+    password = os.getenv("OPENCODE_SERVER_PASSWORD", "")
+    headers = {"Accept": "application/json"}
+    body = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        body = json.dumps(payload).encode("utf-8")
+    if password:
+        token = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+        headers["Authorization"] = f"Basic {token}"
+    request = urllib.request.Request(
+        f"{base_url}{path}", data=body, headers=headers, method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read()
+            return response.status, json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        # Never forward upstream bodies; provider/auth errors can include sensitive data.
+        return exc.code, {}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="OpenCode service unavailable") from exc
 
 
 class ConfigUnavailable(RuntimeError):
@@ -589,6 +627,205 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/llm/catalog", dependencies=[Depends(_require_auth)])
+async def llm_catalog():
+    """Return OpenCode's provider/model catalog without exposing credential values."""
+    responses = [
+        _opencode_request("GET", path)
+        for path in ("/api/integration", "/api/provider", "/api/model")
+    ]
+    if any(status != 200 for status, _ in responses):
+        raise HTTPException(status_code=503, detail="OpenCode catalog unavailable")
+    integrations_response, providers_response, models_response = [
+        result for _, result in responses
+    ]
+    integrations = []
+    for item in integrations_response.get("data", []):
+        connections = []
+        for connection in item.get("connections", []):
+            state = connection.get("status") or {}
+            connections.append({
+                "type": connection.get("type"),
+                "method": connection.get("method"),
+                "label": connection.get("label") or connection.get("name"),
+                "status": state.get("status", "connected"),
+            })
+        methods = []
+        for method in item.get("methods", []):
+            safe_fields = []
+            for field in method.get("form", []):
+                if not isinstance(field, dict):
+                    continue
+                safe = {
+                    key: field[key]
+                    for key in (
+                        "id", "key", "name", "type", "title", "label", "description",
+                        "placeholder", "required", "hidden",
+                    )
+                    if key in field
+                }
+                if isinstance(field.get("options"), list):
+                    safe["options"] = [
+                        {k: option[k] for k in ("label", "value") if k in option}
+                        for option in field["options"] if isinstance(option, dict)
+                    ]
+                safe_fields.append(safe)
+            methods.append({
+                "id": method.get("id", method.get("type")),
+                "type": method.get("type"),
+                "label": method.get("label", method.get("type")),
+                "form": safe_fields,
+            })
+        integrations.append({
+            "id": item.get("id"), "name": item.get("name"),
+            "methods": methods, "connections": connections,
+        })
+    providers = [
+        {
+            "id": item.get("id"), "name": item.get("name"),
+            "integrationID": item.get("integrationID"),
+            "activation": item.get("activation"),
+        }
+        for item in providers_response.get("data", [])
+    ]
+    models = [
+        {
+            "id": item.get("id"), "modelID": item.get("modelID"),
+            "providerID": item.get("providerID"), "name": item.get("name"),
+            "type": item.get("type", "chat"), "enabled": item.get("enabled", True),
+            "cost": item.get("cost", []),
+        }
+        for item in models_response.get("data", [])
+        if item.get("type", "chat") == "chat" and item.get("enabled", True)
+    ]
+    return {"integrations": integrations, "providers": providers, "models": models}
+
+
+@app.get("/llm/settings", dependencies=[Depends(_require_auth)])
+async def get_llm_settings():
+    try:
+        cfg = _load_raw_config()
+    except ConfigUnavailable as exc:
+        raise HTTPException(status_code=503, detail="config unavailable") from exc
+    llm = cfg.get("llm", {}) if isinstance(cfg, dict) else {}
+    return {
+        "routes": llm.get("routes", {}),
+        "chatgpt_plan_background_consent": bool(
+            llm.get("chatgpt_plan_background_consent", False)
+        ),
+    }
+
+
+@app.put("/llm/settings", dependencies=[Depends(_require_auth)])
+async def update_llm_settings(payload: dict[str, Any]):
+    routes = payload.get("routes")
+    consent = payload.get("chatgpt_plan_background_consent")
+    if not isinstance(routes, dict) or not isinstance(consent, bool):
+        raise HTTPException(status_code=400, detail="routes and consent are required")
+    if set(routes) - set(_LLM_USES):
+        raise HTTPException(status_code=400, detail="unknown LLM use")
+    cfg = _load_raw_config()
+    llm = cfg.get("llm")
+    if not isinstance(llm, dict) or set(routes) - set(llm.get("routes", {})):
+        raise HTTPException(status_code=400, detail="LLM routes schema is incomplete")
+    for use, route in routes.items():
+        if not isinstance(route, dict):
+            raise HTTPException(status_code=400, detail=f"invalid route for {use}")
+        backend = route.get("backend", "")
+        model = route.get("model", "")
+        if backend not in ("", "opencode", *_LEGACY_LLM_BACKENDS):
+            raise HTTPException(status_code=400, detail=f"unsupported backend for {use}")
+        if not isinstance(model, str) or len(model) > 300:
+            raise HTTPException(status_code=400, detail=f"invalid model for {use}")
+        if backend == "opencode" and (
+            model.count("/") < 1 or any(ord(char) < 32 for char in model)
+        ):
+            raise HTTPException(
+                status_code=400, detail=f"OpenCode model must be providerID/modelID for {use}"
+            )
+        llm["routes"][use] = {"backend": backend, "model": model}
+    llm["chatgpt_plan_background_consent"] = consent
+    atomic_write_text(CONFIG_PATH, yaml.safe_dump(cfg, sort_keys=False))
+    return {"status": "ok", "restart_required": True}
+
+
+@app.post("/llm/integrations/{integration_id}/key", dependencies=[Depends(_require_auth)])
+async def connect_llm_key(integration_id: str, payload: dict[str, Any]):
+    if not integration_id.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="invalid integration id")
+    key = payload.get("key")
+    if not isinstance(key, str) or not key.strip() or len(key) > 8192:
+        raise HTTPException(status_code=400, detail="API key is required")
+    body = {"key": key}
+    if isinstance(payload.get("answer"), dict):
+        body["answer"] = payload["answer"]
+    if isinstance(payload.get("label"), str):
+        body["label"] = payload["label"][:80]
+    path = f"/api/integration/{urllib.parse.quote(integration_id, safe='')}/connect/key"
+    status, _ = _opencode_request("POST", path, body)
+    if status not in (200, 204):
+        raise HTTPException(status_code=502, detail=f"OpenCode rejected the connection (HTTP {status})")
+    return {"status": "connected"}
+
+
+@app.post("/llm/integrations/{integration_id}/oauth", dependencies=[Depends(_require_auth)])
+async def start_llm_oauth(integration_id: str, payload: dict[str, Any]):
+    if not integration_id.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="invalid integration id")
+    method_id = payload.get("methodID")
+    if not isinstance(method_id, str) or len(method_id) > 200:
+        raise HTTPException(status_code=400, detail="OAuth methodID is required")
+    body: dict[str, Any] = {"methodID": method_id}
+    if isinstance(payload.get("answer"), dict):
+        body["answer"] = payload["answer"]
+    path = f"/api/integration/{urllib.parse.quote(integration_id, safe='')}/connect/oauth"
+    status, result = _opencode_request("POST", path, body)
+    if status != 200:
+        raise HTTPException(status_code=502, detail=f"OpenCode could not start OAuth (HTTP {status})")
+    return result.get("data", {})
+
+
+@app.get(
+    "/llm/integrations/{integration_id}/oauth/{attempt_id}",
+    dependencies=[Depends(_require_auth)],
+)
+async def poll_llm_oauth(integration_id: str, attempt_id: str):
+    for value in (integration_id, attempt_id):
+        if not value.replace("-", "").replace("_", "").isalnum():
+            raise HTTPException(status_code=400, detail="invalid OAuth attempt")
+    path = (
+        f"/api/integration/{urllib.parse.quote(integration_id, safe='')}"
+        f"/connect/oauth/{urllib.parse.quote(attempt_id, safe='')}"
+    )
+    status, result = _opencode_request("GET", path)
+    if status != 200:
+        raise HTTPException(status_code=502, detail=f"OpenCode OAuth status failed (HTTP {status})")
+    return result.get("data", {})
+
+
+@app.post(
+    "/llm/integrations/{integration_id}/oauth/{attempt_id}/complete",
+    dependencies=[Depends(_require_auth)],
+)
+async def complete_llm_oauth(
+    integration_id: str, attempt_id: str, payload: dict[str, Any]
+):
+    for value in (integration_id, attempt_id):
+        if not value.replace("-", "").replace("_", "").isalnum():
+            raise HTTPException(status_code=400, detail="invalid OAuth attempt")
+    code = payload.get("code")
+    if not isinstance(code, str) or not code.strip() or len(code) > 4096:
+        raise HTTPException(status_code=400, detail="OAuth redirect code is required")
+    path = (
+        f"/api/integration/{urllib.parse.quote(integration_id, safe='')}"
+        f"/connect/oauth/{urllib.parse.quote(attempt_id, safe='')}/complete"
+    )
+    status, _ = _opencode_request("POST", path, {"code": code})
+    if status not in (200, 204):
+        raise HTTPException(status_code=502, detail=f"OpenCode could not complete OAuth (HTTP {status})")
+    return {"status": "submitted"}
+
+
 @app.get("/config", dependencies=[Depends(_require_auth)])
 async def get_config():
     # load_config interpolates ${ENV_VAR}, so this response contains live credentials if
@@ -880,6 +1117,12 @@ def _render_ui() -> str:
     .group-title { font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: #7dd3fc; margin-bottom: 6px; }
     .desc span { color: #cbd5f5; }
     .group-meta { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+    .llm-grid { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(220px, 2fr); gap: 10px; align-items: center; }
+    .llm-row { display: contents; }
+    .llm-row b { padding: 6px 0; }
+    .llm-auth { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
+    .llm-auth label { font-size: 12px; color: #cbd5f5; }
+    .llm-note { color: #94a3b8; font-size: 12px; line-height: 1.5; }
     code { background: #111827; color: #e2e8f0; padding: 2px 6px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     input { width: 100%; padding: 6px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #1f2937; background: #0b1220; color: #e2e8f0; }
     select { width: 100%; padding: 6px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #1f2937; background: #0b1220; color: #e2e8f0; }
@@ -911,9 +1154,50 @@ def _render_ui() -> str:
       </select>
       <div id="descriptions"></div>
     </section>
+    <section class="panel" style="grid-column: 1 / -1">
+      <div class="group-title">LLM providers and models</div>
+      <p class="llm-note">OpenCode manages provider catalogs, API-key credentials, OAuth/device-code login and token refresh. Fricktrade uses its stateless text-generation API only; no agent tools are exposed.</p>
+      <div id="llmRoutes" class="llm-grid"></div>
+      <label class="llm-note"><input id="chatgptConsent" type="checkbox" style="width:auto"/> I explicitly consent to background requests using an OpenAI ChatGPT plan, if that is the connected OpenAI credential. OpenAI routes are blocked until this is enabled.</label>
+      <div class="actions">
+        <button onclick="saveLlmSettings()">Save LLM routing</button>
+        <button class="secondary" onclick="loadLlm()">Refresh catalog</button>
+      </div>
+      <div class="group">
+        <div class="group-title">Provider authentication</div>
+        <div class="llm-auth">
+          <label>Provider integration<select id="llmIntegration"></select></label>
+          <label>Authentication method<select id="llmAuthMethod"></select></label>
+          <label>API key<input id="llmApiKey" type="password" autocomplete="new-password" placeholder="Only sent to OpenCode; never saved in Fricktrade config"/></label>
+        </div>
+        <div id="llmAuthFields" class="llm-auth"></div>
+        <div class="actions">
+          <button onclick="connectLlmKey()">Connect API key</button>
+          <button class="secondary" onclick="connectLlmOAuth()">Start OAuth / device code</button>
+        </div>
+        <div class="llm-auth">
+          <label>OAuth redirect code (only if OpenCode requests a pasted callback)<input id="llmOAuthCode" autocomplete="off"/></label>
+          <button class="secondary" onclick="completeLlmOAuth()">Submit OAuth callback</button>
+        </div>
+      </div>
+      <div class="status" id="llmStatus">Loading OpenCode catalog...</div>
+    </section>
   </main>
   <script>
     let descriptions = {};
+    let llmCatalog = { integrations: [], providers: [], models: [] };
+    let activeOAuthAttempt = null;
+    const llmUses = [
+      ['sentiment', 'Per-symbol sentiment'],
+      ['aggregate_sentiment', 'Aggregate sentiment'],
+      ['symbols_filter', 'Symbols filter'],
+      ['post_session', 'Post-session analyst'],
+      ['meta_orchestrator', 'Strategic orchestrator'],
+      ['risk_interpreter', 'Risk interpreter'],
+      ['macro_regime', 'Macro regime'],
+      ['portfolio_orchestrator', 'Portfolio orchestrator'],
+      ['tactical_meta_orchestrator', 'Tactical orchestrator']
+    ];
     const groupOrder = [
       "market",
       "brokers",
@@ -1035,9 +1319,202 @@ def _render_ui() -> str:
       const data = await res.json();
       document.getElementById('status').textContent = data.status === 'ok' ? 'Restart requested.' : 'Restart failed.';
     }
+    async function llmFetch(path, options = {}) {
+      return fetch(path, { ...options, headers: { ...apiHeaders(), ...(options.headers || {}) } });
+    }
+    async function loadLlm() {
+      const status = document.getElementById('llmStatus');
+      try {
+        const [catalogRes, settingsRes] = await Promise.all([
+          llmFetch('/llm/catalog'), llmFetch('/llm/settings')
+        ]);
+        if (!catalogRes.ok || !settingsRes.ok) throw new Error('OpenCode catalog unavailable or API authentication failed.');
+        llmCatalog = await catalogRes.json();
+        const settings = await settingsRes.json();
+        renderLlmRoutes(settings.routes || {});
+        document.getElementById('chatgptConsent').checked = !!settings.chatgpt_plan_background_consent;
+        renderIntegrations();
+        status.textContent = `${llmCatalog.providers.length} providers, ${llmCatalog.models.length} chat models. OAuth credentials remain in OpenCode storage.`;
+      } catch (e) {
+        status.textContent = e.message || 'Could not load OpenCode catalog.';
+      }
+    }
+    function renderLlmRoutes(routes) {
+      const container = document.getElementById('llmRoutes');
+      container.replaceChildren();
+      llmUses.forEach(([use, label]) => {
+        const title = document.createElement('b'); title.textContent = label;
+        const backend = document.createElement('select'); backend.id = `llm-backend-${use}`;
+        [['', 'Keep legacy backend'], ['opencode', 'OpenCode catalog'], ['ollama', 'Ollama'], ['gemini', 'Gemini'], ['claude', 'Claude']].forEach(([value, text]) => {
+          const option = document.createElement('option'); option.value = value; option.textContent = text;
+          backend.appendChild(option);
+        });
+        backend.value = (routes[use] || {}).backend || '';
+        const model = document.createElement('select'); model.id = `llm-model-${use}`;
+        model.dataset.current = (routes[use] || {}).model || '';
+        backend.onchange = () => fillModels(model, backend.value);
+        fillModels(model, backend.value);
+        container.append(title, backend, model);
+      });
+    }
+    function fillModels(select, backend) {
+      const current = select.dataset.current || select.value || '';
+      select.replaceChildren();
+      const models = backend === 'opencode' ? llmCatalog.models : [];
+      const empty = document.createElement('option'); empty.value = ''; empty.textContent = models.length ? 'Select provider/model' : 'Model configured by legacy settings';
+      select.appendChild(empty);
+      models.forEach(item => {
+        const option = document.createElement('option');
+        option.value = `${item.providerID}/${item.id}`;
+        option.textContent = `${item.providerID} · ${item.name} (${item.id})`;
+        select.appendChild(option);
+      });
+      select.value = current;
+    }
+    async function saveLlmSettings() {
+      const routes = {};
+      llmUses.forEach(([use]) => {
+        routes[use] = {
+          backend: document.getElementById(`llm-backend-${use}`).value,
+          model: document.getElementById(`llm-model-${use}`).value
+        };
+      });
+      const res = await llmFetch('/llm/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routes, chatgpt_plan_background_consent: document.getElementById('chatgptConsent').checked })
+      });
+      const data = await res.json();
+      document.getElementById('llmStatus').textContent = res.ok ? 'LLM routing saved. Restart the trader to apply it.' : (data.detail || 'Could not save LLM routing.');
+    }
+    function renderIntegrations() {
+      const integrationSelect = document.getElementById('llmIntegration');
+      integrationSelect.replaceChildren();
+      llmCatalog.integrations.forEach(item => {
+        const option = document.createElement('option'); option.value = item.id; option.textContent = item.name;
+        integrationSelect.appendChild(option);
+      });
+      integrationSelect.onchange = renderAuthMethods;
+      renderAuthMethods();
+    }
+    function renderAuthMethods() {
+      const integration = llmCatalog.integrations.find(item => item.id === document.getElementById('llmIntegration').value);
+      const select = document.getElementById('llmAuthMethod');
+      select.replaceChildren();
+      (integration?.methods || []).forEach(method => {
+        const option = document.createElement('option'); option.value = method.id;
+        option.dataset.type = method.type; option.textContent = `${method.label} (${method.type})`;
+        select.appendChild(option);
+      });
+      select.onchange = renderAuthFields;
+      renderAuthFields();
+    }
+    function parseAuthAnswer() {
+      const answer = {};
+      document.querySelectorAll('#llmAuthFields [data-form-key]').forEach(field => {
+        if (field.value === '' && field.type !== 'checkbox') return;
+        let value = field.type === 'checkbox' ? field.checked : field.value;
+        if (field.dataset.formType === 'integer' && value !== '') value = Number.parseInt(value, 10);
+        if (field.dataset.formType === 'multiselect') value = Array.from(field.selectedOptions).map(option => option.value);
+        answer[field.dataset.formKey] = value;
+      });
+      return Object.keys(answer).length ? answer : undefined;
+    }
+    function renderAuthFields() {
+      const integration = llmCatalog.integrations.find(item => item.id === document.getElementById('llmIntegration').value);
+      const method = (integration?.methods || []).find(item => item.id === document.getElementById('llmAuthMethod').value);
+      const container = document.getElementById('llmAuthFields');
+      container.replaceChildren();
+      (method?.form || []).forEach(field => {
+        if (!field.key || field.type === 'external') return;
+        const label = document.createElement('label');
+        label.textContent = field.title || field.label || field.key;
+        if (field.description) label.title = field.description;
+        let input;
+        if (field.type === 'boolean') {
+          input = document.createElement('input'); input.type = 'checkbox'; input.checked = false;
+        } else if (field.type === 'multiselect' || (field.options && field.options.length)) {
+          input = document.createElement('select');
+          (field.options || []).forEach(item => {
+            const option = document.createElement('option'); option.value = item.value; option.textContent = item.label || item.value; input.appendChild(option);
+          });
+          if (field.type === 'multiselect') input.multiple = true;
+        } else {
+          input = document.createElement('input');
+          input.type = field.hidden || /secret|password|token|key/i.test(field.key) ? 'password' : (field.type === 'integer' ? 'number' : 'text');
+          input.placeholder = field.placeholder || '';
+          if (field.type === 'integer') input.step = '1';
+        }
+        input.dataset.formKey = field.key;
+        input.dataset.formType = field.type;
+        input.required = !!field.required;
+        label.appendChild(input); container.appendChild(label);
+      });
+    }
+    async function connectLlmKey() {
+      const status = document.getElementById('llmStatus');
+      try {
+        const integration = document.getElementById('llmIntegration').value;
+        const method = document.getElementById('llmAuthMethod').selectedOptions[0];
+        if (method && method.dataset.type !== 'key') throw new Error('Choose an API-key method first.');
+        const body = { key: document.getElementById('llmApiKey').value, answer: parseAuthAnswer() };
+        const res = await llmFetch(`/llm/integrations/${encodeURIComponent(integration)}/key`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Provider connection failed.');
+        document.getElementById('llmApiKey').value = '';
+        status.textContent = 'Credential stored by OpenCode. Refreshing catalog...';
+        await loadLlm();
+      } catch (e) { status.textContent = e.message || 'Provider connection failed.'; }
+    }
+    async function connectLlmOAuth() {
+      const status = document.getElementById('llmStatus');
+      const integration = document.getElementById('llmIntegration').value;
+      const method = document.getElementById('llmAuthMethod').selectedOptions[0];
+      if (!method || method.dataset.type !== 'oauth') { status.textContent = 'Choose an OAuth method first.'; return; }
+      try {
+        const res = await llmFetch(`/llm/integrations/${encodeURIComponent(integration)}/oauth`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ methodID: method.value, answer: parseAuthAnswer() })
+        });
+        const attempt = await res.json();
+        if (!res.ok) throw new Error(attempt.detail || 'OAuth could not start.');
+        activeOAuthAttempt = { integration, attemptID: attempt.attemptID };
+        if (attempt.url) window.open(attempt.url, '_blank', 'noopener');
+        status.textContent = [attempt.instructions, attempt.url].filter(Boolean).join(' · ') || 'OAuth started; waiting for authorization...';
+        const poll = async () => {
+          const result = await llmFetch(`/llm/integrations/${encodeURIComponent(integration)}/oauth/${encodeURIComponent(attempt.attemptID)}`);
+          if (!result.ok) throw new Error('OAuth status check failed.');
+          const state = await result.json();
+          if (state.status === 'complete') { status.textContent = 'OAuth connected.'; await loadLlm(); return true; }
+          if (state.status === 'failed' || state.status === 'expired') throw new Error(state.message || `OAuth ${state.status}.`);
+          return false;
+        };
+        const deadline = Date.now() + 300000;
+        const timer = setInterval(async () => {
+          try {
+            if (await poll() || Date.now() > deadline) clearInterval(timer);
+            if (Date.now() > deadline) status.textContent = 'OAuth is still pending. Refresh the catalog after completing sign-in.';
+          } catch (e) { clearInterval(timer); status.textContent = e.message; }
+        }, 2500);
+      } catch (e) { status.textContent = e.message || 'OAuth could not start.'; }
+    }
+    async function completeLlmOAuth() {
+      const code = document.getElementById('llmOAuthCode').value.trim();
+      if (!activeOAuthAttempt || !code) { document.getElementById('llmStatus').textContent = 'Start OAuth and enter the callback code if requested.'; return; }
+      const { integration, attemptID } = activeOAuthAttempt;
+      const res = await llmFetch(`/llm/integrations/${encodeURIComponent(integration)}/oauth/${encodeURIComponent(attemptID)}/complete`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code })
+      });
+      const data = await res.json();
+      if (!res.ok) { document.getElementById('llmStatus').textContent = data.detail || 'Could not submit OAuth callback.'; return; }
+      document.getElementById('llmOAuthCode').value = '';
+      document.getElementById('llmStatus').textContent = 'Callback submitted; waiting for OpenCode...';
+    }
     loadApiKey();
     loadConfig();
     loadDescriptions();
+    loadLlm();
   </script>
 </body>
 </html>

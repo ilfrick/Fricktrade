@@ -4,6 +4,28 @@
 version: "3.9"
 
 services:
+  opencode:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.opencode
+    environment:
+      OPENCODE_SERVER_HOSTNAME: 0.0.0.0
+      OPENCODE_SERVER_PORT: 4096
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-${FRICKTRADE_API_TOKEN:-}}
+      OPENCODE_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-${FRICKTRADE_API_TOKEN:-}}
+      XDG_DATA_HOME: /data
+    volumes:
+      - ./data/opencode:/data/opencode
+    expose:
+      - "4096"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4096/api/info').then(r=>process.exit(r.ok||r.status===401?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
   redis:
     image: redis:7.2-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "768mb", "--maxmemory-policy", "allkeys-lru"]
@@ -50,6 +72,8 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+      - OPENCODE_URL=http://opencode:4096
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-${FRICKTRADE_API_TOKEN:-}}
     volumes:
       - ./config:/app/config
       - ./data:/data
@@ -106,6 +130,9 @@ services:
       dockerfile: docker/Dockerfile
     env_file:
       - .env
+    environment:
+      - OPENCODE_URL=http://opencode:4096
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-${FRICKTRADE_API_TOKEN:-}}
     volumes:
       - ./config:/app/config
     command: ["python", "-m", "app.main", "--config", "/app/config/config.yaml", "api"]

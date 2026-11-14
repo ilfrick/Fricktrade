@@ -157,6 +157,7 @@ class DailySymbolsFilter:
                 user_prompt=user_prompt,
                 max_tokens=4096,
                 temperature=0.15,
+                usage="symbols_filter",
             )
             data = response.parse_json()
 

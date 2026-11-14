@@ -422,6 +422,10 @@ class TradingAgent:
             self._llm_client = LLMClient(
                 daily_budget_usd=float(cost_cfg.get("daily_budget_usd", 5.0)),
                 alert_threshold_usd=float(cost_cfg.get("alert_threshold_usd", 4.0)),
+                routes=llm_cfg.get("routes", {}),
+                allow_chatgpt_plan=bool(
+                    llm_cfg.get("chatgpt_plan_background_consent", False)
+                ),
             )
             sent_cfg = llm_cfg.get("sentiment", {})
             if sent_cfg.get("enabled", False):

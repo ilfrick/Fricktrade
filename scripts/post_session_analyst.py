@@ -16,7 +16,7 @@ Run daily after market close (alongside decision_monitor.py):
   cron: 30 22 * * 1-5    (22:30 CET = 16:30 ET)
 
 Usage:
-  python3 scripts/post_session_analyst.py [--date YYYY-MM-DD] [--backend gemini|claude]
+  python3 scripts/post_session_analyst.py [--date YYYY-MM-DD] [--backend opencode|gemini|claude|ollama]
 """
 
 from __future__ import annotations
@@ -49,7 +49,8 @@ OUTPUT_DIR = _PROJECT_ROOT / "data" / "session_reports"
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", default=None, help="Session date YYYY-MM-DD (ET). Default: today.")
-    parser.add_argument("--backend", default="gemini", choices=["gemini", "claude"])
+    parser.add_argument("--backend", default="gemini", choices=["opencode", "gemini", "claude", "ollama"])
+    parser.add_argument("--config", default=str(_PROJECT_ROOT / "config" / "config.yaml"))
     args = parser.parse_args()
 
     et_now = datetime.now(ET)
@@ -92,13 +93,21 @@ def main() -> None:
     trades = _build_synthetic_trades(strategy_stats)
 
     # --- Call LLM ---
-    _check_env(args.backend)
+    from app.utils.config import load_config
+    cfg = load_config(args.config)
+    llm_cfg = cfg.get("llm", {})
+    post_route = llm_cfg.get("routes", {}).get("post_session", {})
+    backend = post_route.get("backend") or args.backend
+    _check_env(backend)
 
     from app.llm.client import LLMClient
     from app.llm.post_session import PostSessionAnalyst
 
-    client = LLMClient()
-    analyst = PostSessionAnalyst(client, backend=args.backend, output_dir=str(OUTPUT_DIR))
+    client = LLMClient(
+        routes=llm_cfg.get("routes", {}),
+        allow_chatgpt_plan=bool(llm_cfg.get("chatgpt_plan_background_consent", False)),
+    )
+    analyst = PostSessionAnalyst(client, backend=backend, output_dir=str(OUTPUT_DIR))
 
     result = analyst.analyze(
         date=session_date,

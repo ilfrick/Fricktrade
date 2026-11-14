@@ -181,6 +181,7 @@ class PostSessionAnalyst:
                 user_prompt=user_prompt,
                 max_tokens=8192,
                 temperature=0.2,
+                usage="post_session",
             )
             data = response.parse_json()
 

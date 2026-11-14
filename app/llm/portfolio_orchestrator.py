@@ -192,6 +192,7 @@ class LLMPortfolioOrchestrator:
                 max_tokens=self._max_tokens,
                 temperature=0.1,
                 model=self._model,
+                usage="portfolio_orchestrator",
             )
             parsed = response.parse_json()
 

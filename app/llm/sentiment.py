@@ -225,6 +225,7 @@ class NewsSentimentAnalyzer:
                 user_prompt=user_prompt,
                 max_tokens=512 if is_crypto else 1024,
                 temperature=0.1,
+                usage="sentiment",
             )
             if self._model:
                 kwargs["model"] = self._model

@@ -212,6 +212,7 @@ class MacroRegimeAnalyzer:
                 user_prompt=prompt,
                 max_tokens=512,
                 temperature=0.1,
+                usage="macro_regime",
             )
             data = response.parse_json()
             _valid = {"risk_on", "risk_off", "rotation", "range_bound", "crisis"}

@@ -385,6 +385,34 @@ Exponential: 1/2/4/8/15 min cap. `floors_to_zero` → 8h backoff. Stale `_pendin
 
 ## LLM Integration
 
+### Provider router and authentication (added 2026-11-14)
+
+All `LLMClient` calls carry a use identifier and can be routed independently via
+`llm.routes.<use>.{backend,model}`. The authenticated `/ui` provides provider and
+model selection from OpenCode's live catalog, API-key setup, and the OAuth/device
+code flow exposed by OpenCode. Credentials and refresh tokens are stored in the
+OpenCode data volume (`data/opencode`), not in Fricktrade YAML or API responses.
+The OpenCode V2 HTTP service is only exposed on the internal Compose network;
+Fricktrade calls its stateless text-generation endpoint and does not grant agent
+tools or workspace access.
+
+Use `backend: opencode` with `model: providerID/modelID`; other routes may continue
+using `ollama`, `gemini`, or `claude`. Routing changes require a trader restart.
+Set a strong `OPENCODE_SERVER_PASSWORD` in `.env`; if omitted, Compose reuses
+`FRICKTRADE_API_TOKEN` for the internal service password. OpenCode V2 Basic auth
+uses the fixed username `opencode`.
+The UI's API-key field is sent only to the authenticated Fricktrade API and then
+to OpenCode; it is not saved in browser storage or Fricktrade config.
+
+`llm.chatgpt_plan_background_consent` defaults to `false`. Because Fricktrade
+cannot distinguish an OpenAI API key from a ChatGPT-plan credential managed by
+OpenCode, any OpenCode `openai/*` route fails closed until the user explicitly
+checks the UI consent. This covers scheduled/background use of a ChatGPT plan.
+OpenCode's stateless generation response does not report actual token usage, so
+the shared budget uses a rough character-based token and catalog-price estimate;
+it is not billing-grade metering. Its API does not expose a hard max-token control
+for this stateless endpoint; the requested output limit is included as an instruction.
+
 ### Active components
 
 | Component | Backend | Cadence | What it does |

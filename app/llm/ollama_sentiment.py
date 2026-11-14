@@ -94,6 +94,7 @@ class AggregateSentimentAnalyzer:
                 temperature=0.1,
                 retries=1,
                 model=self._model,
+                usage="aggregate_sentiment",
             )
             bias = str(result.get("bias", "neutral")).lower()
             if bias not in {"bullish", "bearish", "neutral"}:

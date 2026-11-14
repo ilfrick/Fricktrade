@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
+
+FROM node:22-alpine
+
+RUN npm install --global @opencode/cli
+
+EXPOSE 4096
+CMD ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"]
