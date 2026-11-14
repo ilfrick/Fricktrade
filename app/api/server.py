@@ -1110,6 +1110,8 @@ def _render_ui() -> str:
     button { background: #2563eb; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
     button.secondary { background: #334155; }
     .status { margin-top: 8px; font-size: 12px; color: #94a3b8; }
+    .status.error { color: #fca5a5; }
+    .status.success { color: #86efac; }
     .api-key { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
     .api-key input { flex: 1; }
     .desc { font-size: 12px; line-height: 1.4; padding: 6px 0; display: grid; grid-template-columns: minmax(180px, 0.9fr) 1.1fr; gap: 12px; }
@@ -1144,6 +1146,13 @@ def _render_ui() -> str:
     .dropdown-option { display: block; width: 100%; min-height: 36px; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: #e2e8f0; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
     .dropdown-option:hover, .dropdown-option[aria-selected="true"] { background: #1e3a5f; color: #fff; }
     .dropdown-empty { padding: 10px; color: #94a3b8; font-size: 13px; }
+    @media (max-width: 900px) {
+      main { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+      main > .panel[style*="grid-column"] { grid-column: auto !important; }
+      .llm-grid, .llm-auth { grid-template-columns: minmax(0, 1fr); }
+      .desc { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+      .api-key { flex-direction: column; align-items: stretch; }
+    }
   </style>
 </head>
 <body>
@@ -1151,8 +1160,8 @@ def _render_ui() -> str:
   <main>
     <section class="panel">
       <div class="api-key">
-        <input id="apiKey" type="password" placeholder="API key (optional)"/>
-        <button class="secondary" onclick="saveApiKey()">Save</button>
+        <input id="apiKey" type="password" placeholder="Fricktrade UI API token — not the OpenRouter key"/>
+        <button class="secondary" onclick="saveApiKey()">Save UI token</button>
       </div>
       <textarea id="config"></textarea>
       <div class="actions">
@@ -1175,6 +1184,8 @@ def _render_ui() -> str:
     <section class="panel" style="grid-column: 1 / -1">
       <div class="group-title">LLM providers and models</div>
       <p class="llm-note">OpenCode manages provider catalogs, API-key credentials, OAuth/device-code login and token refresh. Fricktrade uses its stateless text-generation API only; no agent tools are exposed.</p>
+      <p class="llm-note">If provider menus are empty, the UI catalog did not load. Enter the Fricktrade UI token in the field at the top, save it, then refresh this catalog. Do not enter the OpenRouter key there.</p>
+      <div class="status" id="llmStatus" role="status" aria-live="polite">Loading OpenCode catalog...</div>
       <div id="llmRoutes" class="llm-grid"></div>
       <label class="llm-note"><input id="chatgptConsent" type="checkbox" style="width:auto"/> I explicitly consent to background requests using an OpenAI ChatGPT plan, if that is the connected OpenAI credential. OpenAI routes are blocked until this is enabled.</label>
       <div class="actions">
@@ -1198,7 +1209,6 @@ def _render_ui() -> str:
           <button class="secondary" onclick="completeLlmOAuth()">Submit OAuth callback</button>
         </div>
       </div>
-      <div class="status" id="llmStatus">Loading OpenCode catalog...</div>
     </section>
   </main>
   <script>
@@ -1327,7 +1337,7 @@ def _render_ui() -> str:
       }
       function refresh() {
         const selected = select.selectedOptions[0];
-        triggerLabel.textContent = selected?.textContent || 'Choose an option';
+        triggerLabel.textContent = selected?.textContent || (select.disabled ? 'Catalog not loaded' : 'Choose an option');
         trigger.disabled = select.disabled || select.options.length === 0;
         search.hidden = select.options.length < 8;
         renderOptions();
@@ -1422,13 +1432,17 @@ def _render_ui() -> str:
       refresh();
       return select._customDropdown;
     }
-    function saveApiKey() {
+    async function saveApiKey() {
       const key = document.getElementById('apiKey').value || '';
       if (key) {
         localStorage.setItem('apiKey', key);
       } else {
         localStorage.removeItem('apiKey');
       }
+      const status = document.getElementById('status');
+      status.classList.remove('error', 'success');
+      status.textContent = key ? 'UI token saved in this browser. Loading settings…' : 'UI token cleared.';
+      if (key) await Promise.all([loadConfig(), loadDescriptions(), loadLlm()]);
     }
     function loadApiKey() {
       const key = localStorage.getItem('apiKey') || '';
@@ -1519,15 +1533,24 @@ def _render_ui() -> str:
         const [catalogRes, settingsRes] = await Promise.all([
           llmFetch('/llm/catalog'), llmFetch('/llm/settings')
         ]);
-        if (!catalogRes.ok || !settingsRes.ok) throw new Error('OpenCode catalog unavailable or API authentication failed.');
+        if (catalogRes.status === 401 || settingsRes.status === 401) {
+          throw new Error('UI API token missing or invalid. Enter the Fricktrade UI token in the field at the top of the page, save it, then refresh this catalog.');
+        }
+        if (!catalogRes.ok || !settingsRes.ok) throw new Error('OpenCode catalog unavailable. Check the API and OpenCode service, then refresh.');
         llmCatalog = await catalogRes.json();
         const settings = await settingsRes.json();
         renderLlmRoutes(settings.routes || {});
         document.getElementById('chatgptConsent').checked = !!settings.chatgpt_plan_background_consent;
         renderIntegrations();
         status.textContent = `${llmCatalog.providers.length} providers, ${llmCatalog.models.length} chat models. OAuth credentials remain in OpenCode storage.`;
+        status.classList.remove('error');
+        status.classList.add('success');
       } catch (e) {
         status.textContent = e.message || 'Could not load OpenCode catalog.';
+        status.classList.remove('success');
+        status.classList.add('error');
+        llmCatalog = { integrations: [], providers: [], models: [] };
+        renderIntegrations();
       }
     }
     function renderLlmRoutes(routes) {
@@ -1589,6 +1612,14 @@ def _render_ui() -> str:
         const option = document.createElement('option'); option.value = item.id; option.textContent = item.name;
         integrationSelect.appendChild(option);
       });
+      if (!integrationSelect.options.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Catalog unavailable — enter UI token above';
+        option.disabled = true;
+        integrationSelect.appendChild(option);
+      }
+      integrationSelect.disabled = llmCatalog.integrations.length === 0;
       integrationSelect.onchange = renderAuthMethods;
       attachDropdown(integrationSelect, 'Provider integration');
       renderAuthMethods();
@@ -1602,6 +1633,14 @@ def _render_ui() -> str:
         option.dataset.type = method.type; option.textContent = `${method.label} (${method.type})`;
         select.appendChild(option);
       });
+      if (!select.options.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No authentication methods loaded';
+        option.disabled = true;
+        select.appendChild(option);
+      }
+      select.disabled = !integration || !integration.methods?.length;
       select.onchange = renderAuthFields;
       attachDropdown(select, 'Authentication method');
       renderAuthFields();
