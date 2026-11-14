@@ -3,64 +3,29 @@
 
 # Fricktrade Documentation
 
-> **ARCHIVED -- Pre-v3.0 planning material.** These docs predate the strategic reset (Mar 2026). The system is now crypto-only with 2 active strategies in weighted mode. Equity trading, vote mode, 9-strategy config, meta-orchestrators, and most features described below are disabled or removed. **See `AGENTS.md` in the project root for the current authoritative operational document.**
+**Trading retired 2026-08-20.** The repository is retained as engineering infrastructure and a
+research platform. See `AGENTS.md` for the operational state and the decision record.
 
-```mermaid
-flowchart LR
-    A[Start] --> B[Trading Agent Flow]
-    click B "flow_trading_agent.md" "Open trading agent flow diagrams"
-```
+## Living documents
 
-## Getting Started
+| Document | What it is |
+|---|---|
+| [`../AGENTS.md`](../AGENTS.md) | **Authoritative operational document** — current config values, strategy logic, risk parameters, LLM flow, runbook, pitfalls |
+| [`PLAN-2026-Q4.md`](PLAN-2026-Q4.md) | **The development plan.** 8 phases, ~55 tasks with acceptance criteria, dependencies, milestones |
+| [`audit/2026-11-14-sistema.md`](audit/2026-11-14-sistema.md) | System documentation as-built: what actually runs vs what config declares, the 37-reason decision funnel, 10 documentation↔code divergences |
+| [`audit/2026-11-14-bug.md`](audit/2026-11-14-bug.md) | Bug and inefficiency inventory — ~60 verified findings with severity, liveness, file:line and fix |
+| [`audit/2026-11-14-letteratura.md`](audit/2026-11-14-letteratura.md) | Applicable literature: validation statistics, sizing, execution, crypto factors, reference architectures |
 
-| Document | What you'll learn |
-|----------|-------------------|
-| [Getting Started](getting-started.md) | First-time setup, credentials, and running your first backtest |
-| [System Map](system_map.md) | Architecture overview — what each module does and how they connect |
-| [Configuration](configuration.md) | Every config key explained, with common toggles and examples |
-| [Deployment](deployment.md) | Docker setup, GPU detection, and production deployment |
+## Archived
 
-## How the System Works
+[`archive/`](archive/) holds the pre-v3.0 planning material (37 documents, Dec 2025 – Mar 2026:
+architecture, deployment, strategies, brokers, execution, risk, learning, backtesting, ops).
+It predates the strategic reset and describes features that are disabled or removed. It is kept
+for historical reference only — **do not use it to reason about current behaviour**.
 
-| Document | What you'll learn |
-|----------|-------------------|
-| [Trading Loop](trading-loop.md) | The core trading cycle: symbols, signals, risk, execution |
-| [Flow Diagrams](flow_trading_agent.md) | Visual flowcharts for the trading loop, orchestrator, execution, and exit logic |
-| [State Transitions](agent_state_transitions.md) | Runtime state machines for trader, healthwatch, learner, and tests |
-| [Strategies](strategies.md) | Active strategies (trend, factor, pattern, stat-arb), their filters, and how signals combine |
-| [Strategy Models](strategy_models.md) | Production defaults: what each strategy computes and what it outputs |
-| [Execution](execution.md) | Order queue, TWAP/VWAP/POV algos, retry policy, pending notional |
-| [Risk](risk.md) | Risk limits, stops, circuit breaker, VaR, exposure caps |
-| [Brokers](brokers.md) | Alpaca/IBKR adapters, multi-broker routing, multi-account setup |
+## Where to start
 
-## Data & ML
-
-| Document | What you'll learn |
-|----------|-------------------|
-| [Data](data.md) | Market data providers, ingestion, dynamic symbol scanning |
-| [AI Symbol Filter](ai-symbol-filter.md) | PPO-based symbol scoring with Keras overlay and online updates |
-| [Learning](learning.md) | RL training, online updates, model registry, drift detection |
-| [Backtesting](backtesting.md) | Agent-aligned backtests with cost models and binary cache |
-| [Benchmarking](benchmarking.md) | Walk-forward benchmarks, bootstrap CI, Monte Carlo stress |
-
-## Operations & Monitoring
-
-| Document | What you'll learn |
-|----------|-------------------|
-| [Operator Guide](operator_guide.md) | Day-to-day operations: starting, monitoring, troubleshooting |
-| [Operations](operations.md) | Daily checklist, health checks, common tasks |
-| [Monitoring](monitoring.md) | Prometheus metrics, Grafana dashboards, monitoring scripts |
-| [API](api.md) | FastAPI endpoints: health, config, restart, web UI |
-| [Testing](testing.md) | Test suite, running tests, what's covered |
-| [Troubleshooting](troubleshooting.md) | Common issues and how to fix them |
-| [Oversight](oversight.md) | System oversight and safety controls |
-
-## Planning
-
-| Document | What you'll learn |
-|----------|-------------------|
-| [Strategy Upgrade Plan](strategy_upgrade_plan.md) | Roadmap for strategy improvements |
-| [Improvement Roadmap](improvement_roadmap.md) | Future enhancements and priorities |
-| [Developer Guide](developer_guide.md) | Contributing, extending strategies, adding brokers |
-| [Top-Tier Epics](top_tier_epics.md) | High-level feature epics |
-| [Top-Tier Backlog](top_tier_backlog.md) | Detailed backlog items |
+- **"What does this system actually do?"** → `audit/2026-11-14-sistema.md`
+- **"What is broken?"** → `audit/2026-11-14-bug.md`, section *Priorità*
+- **"What should I work on?"** → `PLAN-2026-Q4.md`, section *Ordine e dipendenze*
+- **"How do I run it?"** → `AGENTS.md`, section *Operational Runbook*

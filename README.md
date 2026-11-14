@@ -9,11 +9,20 @@ Fricktrade is a personal algorithmic trading system for cryptocurrency. It runs 
 
 ## What It Does
 
-- Trades crypto 24/7 via 2 active strategies: `crypto_mean_reversion` (60% weight) and `crypto_momentum` (40% weight)
-- Weighted combine: strategy confidences × weights vs `min_conviction` threshold (0.25, reduced to 0.15 when single-sided via SSCM)
-- Per-symbol LLM sentiment (Ollama llama3.2:3b) modifies strategy confidence: momentum uses directional multiplier, MR uses contrarian logic
+> **Status: trading retired 2026-08-20, stack shut down.** This section describes the machinery,
+> not current activity. New entries are blocked by `strategy.alpha_gate` until a configuration
+> passes a recorded hold-out. See `AGENTS.md`.
+
+- Crypto 24/7 via **1 active strategy**, `crypto_mean_reversion` (weight 1.0). `crypto_momentum`
+  is disabled and was inert even when enabled (its confidence × 0.40 weight never cleared the
+  threshold).
+- Weighted combine against `min_conviction` (0.25, 0.15 when single-sided via SSCM). With one
+  strategy and a `confidence_floor` of 0.4 this filter **cannot bind** — see AGENTS.md D3.
+- Per-symbol LLM sentiment (Ollama llama3.2:3b) modifies strategy confidence: momentum uses a
+  directional multiplier, MR uses contrarian logic
 - Aggregate market sentiment gates entry ranking: bearish sentiment penalizes all entry scores by 30%
-- Risk management: trailing stops, hard stops, ATR stops, circuit breakers, vol targeting, position sizing via Half-Kelly
+- Risk management: trailing stops, hard stops, ATR stops (floored at the hard stop), circuit
+  breakers, vol targeting, position sizing via Half-Kelly
 - Prometheus + Grafana provide real-time observability; Alertmanager handles email alerts
 
 ## Architecture
@@ -142,7 +151,18 @@ docker compose logs -f trader
 - Common pitfalls
 - Extension guide
 
-Files in `docs/` predate the v3.0 strategic reset (Mar 2026) and should be treated as archived planning material.
+**`AGENTS.md` is the single authoritative operational document.** Living documentation is in
+`docs/` — see [`docs/README.md`](docs/README.md):
+
+| Document | What it is |
+|---|---|
+| [`docs/PLAN-2026-Q4.md`](docs/PLAN-2026-Q4.md) | Development plan: 8 phases, ~55 tasks with acceptance criteria |
+| [`docs/audit/2026-11-14-sistema.md`](docs/audit/2026-11-14-sistema.md) | System as-built, 10 documentation↔code divergences |
+| [`docs/audit/2026-11-14-bug.md`](docs/audit/2026-11-14-bug.md) | ~60 verified bugs with severity and liveness |
+| [`docs/audit/2026-11-14-letteratura.md`](docs/audit/2026-11-14-letteratura.md) | Applicable literature and transferable ideas |
+
+`docs/archive/` holds the pre-v3.0 planning material (37 documents). It describes features that
+are disabled or removed — do not use it to reason about current behaviour.
 
 ## Common Commands
 

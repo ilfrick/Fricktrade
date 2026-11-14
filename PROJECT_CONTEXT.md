@@ -3,15 +3,27 @@
 
 # Fricktrade Project Context
 
-This file captures the key state and workflows for this repo so a new Codex session
+This file captures the key state and workflows for this repo so a new session
 can reload context quickly. Keep it updated when the setup changes.
 
+> **Status (2026-08-20):** stack shut down, trading retired. Retained as engineering
+> infrastructure and a research platform. `strategy.alpha_gate` blocks all new entries by
+> default. See `AGENTS.md` for the decision record.
+>
+> **Audit (2026-11-14):** full re-audit of the codebase. Start from
+> [`docs/README.md`](docs/README.md). The one-paragraph version: ~60 verified defects, the
+> validation harness that produced the "no edge" verdict has five measured methodological
+> failures, the sizing used an even-money Kelly formula on an asymmetric payoff distribution
+> (correct Kelly is negative), and five critical execution bugs are latent only because the
+> alpha gate currently places no orders. Working plan: [`docs/PLAN-2026-Q4.md`](docs/PLAN-2026-Q4.md).
+
 ## Worktrees and Branches
-- Live worktree: `./` on branch `v3.0`
+- Live worktree: `./` on branch `v3.0` (stack down, not trading)
 - Dev worktree: `./dev` on branch `master` (created via `git worktree`)
 
 ## Dev vs Live Intent
-- Live (v3.0) is running and trading.
+- Live (v3.0) is **shut down**; it does not trade. Restarting it does not resume trading —
+  the alpha gate blocks new entries until a configuration passes a recorded hold-out.
 - v2.0 is offline.
 - Dev is for development and backtesting only; no live broker credentials.
 - `dev/.env` exists and is based on `.env.example` with empty broker keys.

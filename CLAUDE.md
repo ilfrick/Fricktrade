@@ -12,13 +12,18 @@ Fricktrade is a personal algorithmic trading system (~24,000+ lines Python) trad
 - Infrastructure: Docker-native, Prometheus + Grafana, structured logging, state persistence
 
 ## Authoritative Documentation
-**`AGENTS.md`** is the single authoritative operational document. It contains all current config values, strategy logic, risk parameters, LLM flow, Docker services, operational runbook, and common pitfalls. Refer to it for any operational question.
-
-Files in `docs/` predate the v3.0 strategic reset and are archived planning material.
+**`AGENTS.md`** is the single authoritative operational document. Living docs are in `docs/`
+(see `docs/README.md`): the development plan (`docs/PLAN-2026-Q4.md`) and the 2026-11-14 audit
+(`docs/audit/`). `docs/archive/` is pre-v3.0 planning material.
 
 ## Known Issues
-- Alpha generation unproven — infrastructure solid but edge not yet demonstrated in live trading
-- Binance demo dust positions (~30 sub-LOT_SIZE) cycle through circuit breaker → 8h backoff every restart (normal, demo API limitation)
+- Alpha generation unproven — and the 2026-11-14 audit found the validation harness itself has
+  five measured methodological failures, so "no edge" is an open hypothesis, not a settled result.
+  See `docs/audit/2026-11-14-bug.md` section B.
+- Five critical execution bugs are latent only because the alpha gate currently places no orders
+  (`docs/audit/2026-11-14-bug.md` section C). Fix them before ever unblocking the gate.
+- Binance demo dust positions (~30 sub-LOT_SIZE) cycle through circuit breaker → 8h backoff every
+  restart (normal, demo API limitation)
 - `tests-when-closed` writes to same decision trace file as trader (filter by timestamp)
 
 ## Market Context

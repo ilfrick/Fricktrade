@@ -3,7 +3,7 @@
 
 ## Fricktrade Operational Guide
 
-This is the **single authoritative document** for understanding and operating Fricktrade. Files in `docs/` predate the strategic reset (Mar 21) and should be treated as archived planning material.
+This is the **single authoritative document** for understanding and operating Fricktrade. Files in `docs/archive/` predate the strategic reset (Mar 21) and are archived planning material. Living documents live in `docs/` — see [`docs/README.md`](docs/README.md).
 
 **System**: v3.0, crypto-only, paper trading. Alpaca paper (2 accounts) + Binance Spot demo.
 
@@ -33,6 +33,21 @@ This is the **single authoritative document** for understanding and operating Fr
 > Paper accounts as left: Alpaca Realistic $246.34 (−1.5% lifetime),
 > Alpaca Higher $2,514.96 (−3.3%), both effectively all-cash plus ~30 untradeable
 > dust positions. Nothing was ever funded with real money.
+>
+> ### ⚠️ AUDIT 2026-11-14: the *instrument* that produced that verdict is itself broken
+>
+> A full re-audit found that the validation harness which decreted the failure has at least
+> five measured defects: it validates parameters it never reads from the config, slices the
+> hold-out by per-symbol percentile so each symbol gets a different regime, reuses the hold-out
+> inside the walk-forward of the same decision, has no minimum-trade guard, and counts none of
+> the ~100 trials that were run. The live execution ladder also diverges from the validated one
+> on four points, and the sizing used a Kelly formula that assumes even-money payoffs — for this
+> payoff distribution the correct Kelly is **negative**.
+>
+> **The "no edge" conclusion is therefore an open hypothesis, not a settled result.** It may
+> well survive a correct test. The way to find out is
+> [`docs/PLAN-2026-Q4.md`](docs/PLAN-2026-Q4.md), phases 1–3 — **not** tuning parameters.
+> Nothing in the audit changes the operational decision: stay flat, keep the alpha gate on.
 
 ---
 
@@ -42,16 +57,72 @@ This is the **single authoritative document** for understanding and operating Fr
 |-----------|-------|
 | Active strategies | `crypto_mean_reversion` **only** (weight 1.0) — `crypto_momentum` disabled 2026-04-24 after AAVE/USD churn |
 | Combine mode | `weighted` — weighted sum of buy confidences vs min_conviction |
-| min_conviction | 0.25 (effective 0.15 when single-sided via SSCM=0.6) |
+| min_conviction | 0.25 (effective 0.15 when single-sided via SSCM=0.6) — **cannot bind with one strategy**: MR's `confidence_floor` is 0.4 and its weight is 1.0, so `buy_score >= 0.40 > 0.15` always. See [Divergenze](#divergenze-documentazionecodice) D3 |
 | Data interval | 1m bars |
 | Brokers | Alpaca paper (2 accounts, `crypto_only`), Binance Spot demo |
-| Trailing stop (crypto) | 4.5% global; 2.0% for momentum entries (momentum inactive) |
+| Trailing stop (crypto) | **4.5% always.** The per-signal 2.0% from `crypto_momentum` is never read (D2) |
 | Vol targeting | Enabled, target 4% **daily**, scale [0.3, 1.5] |
 | Macro regime | **Disabled** (`llm.macro_regime.enabled: false`) |
 | Per-symbol sentiment | Enabled (Ollama llama3.2:3b, 900s cache) |
 | Aggregate sentiment | Enabled (Ollama, every 15 min) |
-| Portfolio rebalance | **Disabled** 2026-08-19 — `_maybe_rebalance` called `check_rebalance()` with a mismatched signature; the TypeError was swallowed every cycle so it never did anything |
+| Portfolio rebalance | **Disabled** 2026-08-19 — `_maybe_rebalance` calls `check_rebalance()` with a mismatched signature and the TypeError is swallowed. But the underlying engine **never places trades in any case** (it only logs), so this is unimplemented code, not a signature bug. See D8 |
 | Disabled | Tactical/strategic meta-orchestrators, portfolio orchestrator, RL policy, guardrail, VaR, exposure_caps, signal_bias_guard, kill_switch, symbols_filter, rebalance |
+
+---
+
+## Divergenze documentazione↔codice
+
+Audit 2026-11-14. Ogni voce è verificata sul codice, non dedotta. Il documento completo è
+[`docs/audit/2026-11-14-sistema.md`](docs/audit/2026-11-14-sistema.md) §9.
+
+| ID | Questo documento diceva | Il codice fa |
+|---|---|---|
+| **D1** | "Hard stop 6.0% global, **5.0% MR override**" | `_check_position_exit:851` legge solo `risk.crypto.hard_stop_pct`. Il campo `hard_stop_pct` emesso dalla strategia non ha consumatori → vale **6.0%** |
+| **D2** | "Trailing override: momentum 2.0%, altrimenti 4.5%" | Nessun consumatore di `signal["trailing_stop_pct"]` → vale sempre **4.5%** |
+| **D3** | "`min_conviction` 0.25 (0.15 single-sided) filtra i segnali" | Non può vincolare: `confidence_floor` 0.4 × peso 1.0 = 0.40 > 0.15 sempre |
+| **D4** | "ATR stop (2.5× ATR), priorità 2" | Il floor al hard stop lo rende coincidente con esso su quasi tutto il crypto |
+| **D5** | "`risk.crypto.max_daily_loss_pct: 5.0`" | Chiave mai letta; vale `risk.max_daily_loss_pct` = **3.0** |
+| **D6** | "`is_market_open()` ritorna True 24/7 con Crypto" | Ritorna False sabato/domenica (verificato). Il loop compensa filtrando ai simboli crypto |
+| **D7** | "193 test" | **324** funzioni `test_` in 45 file (301 eseguiti sull'host, i restanti richiedono tensorflow) |
+| **D8** | "Rebalance disabilitato per firma sbagliata di `check_rebalance()`" | Vero, ma il motore **non piazza ordini in nessun caso**: logga soltanto. Non è un bug di firma, è codice mai completato |
+| **D9** | "`crypto_momentum` causava churn" | Coerente, ma la ragione vera è che la sua confidenza × 0.40 non supera mai 0.15: era inerte per costruzione, non per scelta di pesi |
+| **D10** | "Alpha validation" presentata come autorevole | `scripts/alpha_validation.py` è una **reimplementazione**, non il codice di produzione. Diverge su hard stop (5.0 vs 6.0), barra del drop, banda per peak detection (BB50 vs BB20), trailing |
+
+---
+
+## Cosa è configurato ma non è collegato
+
+Leggere il codice senza questa tabella porta a sovrastimare di molto ciò che il sistema può fare.
+Circa metà del volume di `app/` non può influenzare un ordine con la configurazione attuale.
+
+**Non istanziate:** 13 delle 14 strategie in `_build_strategy()` (solo `crypto_mean_reversion`
+è in `strategy.names`).
+
+**Costruite ma neutralizzate:** orchestratore RL (il combiner è `weighted`), tactical e strategic
+meta-orchestrator, `learning/*` (PPO/TCN/registry/online training — il servizio `learner` gira ma
+il modello non entra mai nel percorso decisionale), guardrail, drift monitor, kill_switch_profiles,
+exposure_caps, VaR, stress, liquidity_haircut, macro regime, signals filter, symbols LLM filter,
+`quote_stream` (websocket incompatibile con alpaca-py).
+
+**Chiavi di config senza consumatori** (usare `grep` prima di tararle):
+
+| Chiave | Nota |
+|---|---|
+| `strategy.params.crypto_mean_reversion.hard_stop_pct` | morta — D1 |
+| `strategy.params.crypto_momentum.trailing_stop_pct` | morta — D2 |
+| `risk.crypto.max_daily_loss_pct` | morta — D5 |
+| `trading_limits.min_order_notional` | **non esiste**: `check_order_limits` legge questa chiave, la config definisce `min_notional`. Il preflight è un no-op |
+| `portfolio.rebalance.*` | motore disabilitato e incompleto |
+| `risk.kill_switch_profiles.*` | `_apply_kill_switch_profile` muta `self.cfg["risk"]`, ma `RiskManager` ne ha una **copia** da `merge_cfg` → non può stringere nulla |
+| `orchestrator.top_k` / `min_score` | ignorati in `weighted` mode |
+
+**Codice morto che sembra vivo:** `RiskManager.should_circuit_break` (nessun chiamante — il
+breaker reale è reimplementato in `trader.py:1573-1626`), `ExecutionEngine` e `TCAAnalyzer`
+(istanziati e mai usati), `app/execution/executor.py` (percorso alternativo che bypasserebbe
+coda e guardie), `top_movers_rf` e `rl_policy` (importati, non istanziabili dal dispatcher).
+
+**Piano di lavoro:** [`docs/PLAN-2026-Q4.md`](docs/PLAN-2026-Q4.md).
+**Inventario difetti:** [`docs/audit/2026-11-14-bug.md`](docs/audit/2026-11-14-bug.md).
 
 ---
 
@@ -177,7 +248,7 @@ strategy and the market. Being flat was better than trading.
 - API: `app/api/server.py` (FastAPI) — `/health`, `/config`, `/config/update`, `/restart`, `/ui`.
 - Metrics: `app/monitoring/metrics.py` — all Prometheus metrics.
 - Config: `config/config.yaml` (supports `${ENV_VAR}` interpolation).
-- Market-hours gating: `app/utils/market.py` — `is_market_open()` with `open_mode: any` returns True 24/7 when Crypto is in `trading_venues`. Use `is_venue_open(cfg,'NYSE')` for equity-only hours.
+- Market-hours gating: `app/utils/market.py` — `_venue_session_state()` applies the `weekday() >= 5` gate to **every** venue, Crypto included, so `is_market_open()` returns **False on Saturday and Sunday** even with Crypto in `trading_venues` (verified 2026-11-14: Sat 15:00 UTC → False). It also returns False for the last ~59 s of each UTC day, because the Crypto venue window is `00:00`–`23:59`. The trading loop compensates: when it reports False, `loop()` filters to crypto symbols (`trader.py:4299-4305`), so crypto still trades. The consequences are a misleading `BROKER_MARKET_OPEN` gauge on weekends and this document having claimed the opposite until 2026-11-14 (D6). Use `is_venue_open(cfg,'NYSE')` for equity-only hours.
 
 ---
 
@@ -242,14 +313,28 @@ Has config parameters but is **not** in `strategy.names`. Not instantiated. Do n
 
 **Entry ranking** (`entry_ranking.enabled: true`): Non-holder symbols ranked by opportunity score before processing. Components: Bollinger %B proximity (40%), MFI oversold (30%), catalyst flag (15%), funding extreme (15%). When aggregate Ollama sentiment is bearish (score < -0.4, conf >= 0.5), all scores penalized 30%.
 
-**Exit logic** (in order of priority):
-1. Hard stop (6.0% crypto global, 5.0% MR override)
-2. ATR stop (2.5x ATR)
-3. Trailing stop (4.5% global, 2.0% momentum override)
+> **Step 3 is stale as of 2026-04-24.** `strategy.weights` lists only `crypto_mean_reversion: 1.0`, so there is no `× 0.40` term. And step 6 never fires: see D3.
+
+**Exit logic** (in order of priority, as implemented in `trader._check_position_exit`):
+0. `min_hold_minutes` (15) — suppresses **every** exit below for 15 min after entry, **including the hard stop and the ATR stop**
+1. ATR stop (2.5× daily-equivalent ATR), floored at the hard-stop price
+2. Hard stop (6.0% from entry — **not** 5.0%; the strategy's `hard_stop_pct` is never read, see D1)
+3. Trailing stop (4.5% from `peak_price` — the momentum 2.0% override is never read, see D2)
 4. Take profit (5.0%)
-5. Alpha decay exit: if entry strategy now signals sell, exit (min hold 30 min)
-6. Regime hold: Hurst-scaled max hold (base 120 min, trending 240, MR 90)
-7. Circuit breaker: 8.0% per-symbol drawdown → force sell_to_close
+5. Partial take profit (1.0%, ratio 0.5)
+   *(warmup grace: the next four are suppressed for 5 min after a cold start)*
+6. Peak detection: RSI > 70 + close ≥ BB(20) upper + order-book imbalance < −0.2, at least 2 of 3
+7. Alpha decay exit: if entry strategy now signals sell (min hold 30 min)
+8. Regime hold / time exit — `enabled: false`
+9. Opportunity-cost exit — `enabled: false`
+
+Outside this function, in `run_once`: per-symbol circuit breaker (8.0% drawdown → force sell_to_close), `stop_exit_reentry_cooldown` (30 min after a stop exit), exit backoff (1/2/4/8/15 min).
+
+**Why the ATR stop almost never fires on crypto** (D4): the guard is
+`atr_stop_price = max(entry − ATR_daily × 2.5, entry × (1 − hard_stop/100))`. Crypto daily ATR
+is typically above 2.4%, so `ATR_daily × 2.5 > 6%` and the `max()` returns the hard-stop price.
+The ATR stop therefore coincides with the hard stop and only wins the *label*, because it is
+evaluated first.
 
 **Vote thresholds** (`buy_vote_threshold`, `exit_vote_threshold`) exist in config but are **inactive** in weighted mode.
 
@@ -261,12 +346,12 @@ Has config parameters but is **not** in `strategy.names`. Not instantiated. Do n
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| `hard_stop_pct` | 6.0% | Global; MR overrides to 5.0% |
-| `atr_stop_mult` | 2.5 | ATR multiplier |
-| `trailing_stop_pct` | 4.5% | Global; momentum overrides to 2.0% |
+| `hard_stop_pct` | **6.0%** | Global. The strategy's `hard_stop_pct: 5.0` is emitted but **never read** (D1) |
+| `atr_stop_mult` | 2.5 | ATR multiplier; floored at the hard stop, so on crypto it almost always equals it (D4) |
+| `trailing_stop_pct` | **4.5%** | Global. The momentum `2.0` override is emitted but **never read** (D2) |
 | `take_profit_pct` | 5.0% | |
 | `circuit_breaker_drawdown_pct` | 8.0% | Per-symbol; forces sell_to_close |
-| `max_daily_loss_pct` | 5.0% | Crypto-specific |
+| `max_daily_loss_pct` | **3.0%** (global) | `risk.crypto.max_daily_loss_pct: 5.0` is **dead config** — no module reads it (D5) |
 | `max_crypto_exposure_pct` | 50.0% | |
 
 ### Portfolio-level guards
@@ -388,11 +473,13 @@ risk.crypto:
   trailing_stop_pct: 4.5
   take_profit_pct: 5.0
   circuit_breaker_drawdown_pct: 8.0
-  max_daily_loss_pct: 5.0
+  max_daily_loss_pct: 5.0          # DEAD (D5) — no module reads risk.crypto.max_daily_loss_pct.
+                                   # The effective cap is risk.max_daily_loss_pct (3.0) below.
   vol_targeting:
     target_vol_pct: 4.0           # per-asset override (target only)
 
 risk:                              # global level
+  max_daily_loss_pct: 3.0          # the value that actually binds (see D5)
   vol_targeting:
     enabled: true                  # master switch — read from risk.vol_targeting, not risk.crypto
     target_vol_pct: 4.0
@@ -522,7 +609,7 @@ with open('/data/reports/decision_trace/$(date -u +%Y-%m-%d).jsonl', 'rb') as f:
 Common causes:
 - `strategies_hold` — market conditions don't meet strategy thresholds. Expected in calm markets.
 - `pending_sell_covers_position` — deadlocked. Restart trader to clear. If persistent, check broker connectivity.
-- `below_min_conviction` — signals too weak. Check if SSCM is set.
+- `below_min_conviction` — signals too weak. Check if SSCM is set. **Note (D3): with a single strategy this reason cannot occur** — MR's `confidence_floor` 0.4 × weight 1.0 always clears the 0.15 threshold. If you see it, a second strategy is enabled or the floor changed.
 
 **2. `pending_sell_covers_position` deadlock**
 
@@ -650,10 +737,10 @@ JSON Lines format: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`. Each li
 - **`record_pnl()` vs `update_daily_loss()`**: `record_pnl()` accumulates deltas; `update_daily_loss()` sets absolute day P&L — wrong one causes -543% false loss
 - **`order_queue.enqueue()` sentinel**: returns `"queued"` (truthy) when accepted but not started
 - **`_check_position_exit` crypto stops**: reads from `risk.crypto.*` for `/` symbols
-- **`is_market_open()` 24/7**: returns True always with Crypto venue; use `is_venue_open('NYSE')` for equity-only
+- **`is_market_open()` is NOT 24/7** (D6, verified 2026-11-14): the `weekday() >= 5` gate applies to every venue including Crypto, so it returns False on weekends and for the last ~59 s of each UTC day. The loop compensates by filtering to crypto symbols. Use `is_venue_open('NYSE')` for equity-only hours; do not use `is_market_open()` to decide whether crypto can trade.
 - **Binance `asset_class`**: check with `"crypto" in asset_class`, not `== "crypto"`
 - **`/USDT` symbols in Alpaca batches**: must be filtered at all data-path entry points
-- **Trailing stop override**: momentum returns `trailing_stop_pct: 2.0` in buy signal dict. Trader uses per-signal value if present, else falls back to config global 4.5%. So momentum entries have a 2.0% stop, not 4.5%.
+- **Per-signal stop overrides are NOT read** (D1/D2, verified 2026-11-14): strategies emit `hard_stop_pct` (`crypto_mean_reversion: 5.0`) and `trailing_stop_pct` (`crypto_momentum: 2.0`) in the buy-signal dict, but `_check_position_exit` reads only `risk.crypto.*`. Effective values are therefore always the config globals — 6.0% and 4.5%. Do not tune the strategy-level keys expecting an effect.
 - **Per-symbol sentiment in strategies**: Both strategies read `market_state["llm_sentiment"]`. When debugging unexpected confidence values, check if Ollama returned a non-neutral score.
 - **Vol targeting is live**: `_size_order` applies vol_targeting scale. Positions in high-vol periods will be smaller. Scale range: [0.3, 1.5].
 - **`tests-when-closed` shares codebase**: Must be rebuilt when trader code changes. Writes to the same decision trace file.
@@ -679,7 +766,8 @@ JSON Lines format: `data/reports/decision_trace/trace_YYYY-MM-DD.jsonl`. Each li
 
 ## Testing
 
-193 tests (16 skip without tensorflow/prometheus). Run:
+324 `test_` functions across 45 files. 301 pass on the host without tensorflow/prometheus; the
+rest skip. Run:
 
 ```bash
 docker compose run --rm trader pytest tests/ -v
