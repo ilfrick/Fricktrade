@@ -433,14 +433,23 @@ class TradingAgent:
                     min_confidence_to_inject=float(sent_cfg.get("min_confidence_to_inject", 0.3)),
                     model=sent_cfg.get("model"),
                 )
-            # Ollama aggregate sentiment (free, local, runs every 15 min in background)
+            # Aggregate sentiment uses the shared provider client (default Ollama;
+            # may be switched to a metered API backend through llm.backends).
             ollama_sent_cfg = llm_cfg.get("ollama_sentiment", {})
             if ollama_sent_cfg.get("enabled", False):
-                from app.llm.ollama_sentiment import OllamaSentimentAnalyzer
-                self._ollama_sentiment = OllamaSentimentAnalyzer(
-                    base_url=ollama_sent_cfg.get("base_url", "http://ollama:11434"),
-                    model=ollama_sent_cfg.get("model", "llama3.2:3b"),
-                    timeout=int(ollama_sent_cfg.get("timeout_seconds", 30)),
+                from app.llm.ollama_sentiment import AggregateSentimentAnalyzer
+                aggregate_backend = llm_cfg.get("backends", {}).get(
+                    "aggregate_sentiment", ollama_sent_cfg.get("backend", "ollama")
+                )
+                aggregate_model = (
+                    ollama_sent_cfg.get("model")
+                    if aggregate_backend == "ollama"
+                    else llm_cfg.get("models", {}).get(aggregate_backend)
+                )
+                self._ollama_sentiment = AggregateSentimentAnalyzer(
+                    self._llm_client,
+                    backend=aggregate_backend,
+                    model=aggregate_model,
                     max_headlines=int(ollama_sent_cfg.get("max_headlines", 20)),
                 )
 
@@ -5351,5 +5360,3 @@ def _dt_from_str(value: str | None) -> datetime | None:
 def _realized_volatility_pct(market_state: dict) -> float:
     prices = market_state.get("prices", []) or []
     return realized_volatility_pct(prices)
-
-

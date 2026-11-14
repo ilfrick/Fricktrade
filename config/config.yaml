@@ -1047,6 +1047,7 @@ llm:
   # Backend assignment per module
   backends:
     sentiment: ollama        # Free local inference (llama3.2:3b)
+    aggregate_sentiment: ollama  # Also selectable via Gemini/Claude API through the shared LLMClient
     symbols_filter: gemini   # High volume, large context
     post_session: gemini     # Large trade logs
     meta_orchestrator: gemini # Complex reasoning
@@ -1068,14 +1069,12 @@ llm:
     max_news_items: 10
     min_confidence_to_inject: 0.3
 
-  # Aggregate market sentiment via local Ollama (llama3.2:3b, ~1.5s/call).
-  # Runs every 15 min in background; result passed to tactical + strategic orchestrators.
-  # Never blocks main loop — runs in news executor thread with a hard timeout.
+  # Aggregate market sentiment via the shared LLM provider client (default local Ollama).
+  # Set llm.backends.aggregate_sentiment to gemini or claude to use their APIs instead.
+  # Runs every 15 min in background; result is cached and never blocks the main loop.
   ollama_sentiment:
     enabled: true
-    base_url: http://ollama:11434
     model: llama3.2:3b         # 3B model: ~1.5s/call; fast enough for 15-min cadence
-    timeout_seconds: 30        # hard wall-clock limit — ollama call aborted if exceeded
     max_headlines: 20          # max headlines per analysis call
 
   # Daily symbol selection (Gemini) — replaces PPO filter

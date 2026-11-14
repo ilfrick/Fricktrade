@@ -390,9 +390,9 @@ Exponential: 1/2/4/8/15 min cap. `floors_to_zero` → 8h backoff. Stale `_pendin
 | Component | Backend | Cadence | What it does |
 |-----------|---------|---------|-------------|
 | Per-symbol sentiment | Ollama llama3.2:3b | Per symbol (900s TTL cache) | Injects `market_state["llm_sentiment"]` with score [-1,+1] and confidence. Crypto-specific prompt. Both strategies apply confidence-gated multipliers. |
-| Aggregate sentiment | Ollama llama3.2:3b | Every 15 min (background thread) | Market-wide score from recent headlines. Penalizes entry ranking when bearish. Visible in Grafana via `MARKET_SENTIMENT_SCORE`. |
-| Post-session analyst | Gemini 2.5 Flash | Daily at session end | Grades session A-F. Writes `data/reports/session/report_YYYY-MM-DD.json`. |
-| Macro regime | Gemini 2.5 Flash | 4h TTL | FRED (VIX/DGS10/DXY) + LLM → 5-regime. Only "crisis" blocks entries. |
+| Aggregate sentiment | Ollama llama3.2:3b by default; Gemini/Claude API selectable via `llm.backends.aggregate_sentiment` | Every 15 min (background thread) | Uses shared `LLMClient` for provider selection, usage and budget. Market-wide score from recent headlines. Penalizes entry ranking when bearish. Visible in Grafana via `MARKET_SENTIMENT_SCORE`. OAuth/ADC is not implemented. |
+| Post-session analyst | Configured Gemini 2.5 Flash | Not instantiated in the current runtime | `PostSessionAnalyst` exists and config is enabled, but no production caller was found. |
+| Macro regime | Gemini 2.5 Flash configured | Disabled (`llm.macro_regime.enabled: false`) | FRED (VIX/DGS10/DXY) + LLM → 5-regime. Only "crisis" blocks entries. |
 | Risk interpreter | Gemini 2.5 Flash | On DriftMonitor alert | Triages structural break vs noise; may set 1h pause. |
 
 ### Disabled components
@@ -409,12 +409,23 @@ Exponential: 1/2/4/8/15 min cap. `floors_to_zero` → 8h backoff. Stale `_pendin
 ```
 RSS feeds (CoinDesk, CoinTelegraph, etc.) → _raw_news_cache
     → NewsSentimentAnalyzer.analyze(symbol, articles)
-    → Ollama llama3.2:3b with crypto-specific prompt
+    → `llm.backends.sentiment` via shared `LLMClient`
     → SentimentResult {score, confidence, bias, risk_flag}
     → inject_into_market_state() → market_state["llm_sentiment"]
     → crypto_momentum reads it: multiplier = 1.0 + 0.15 * score
     → crypto_mean_reversion reads it: bearish boosts, bullish dampens
 ```
+
+Aggregate sentiment also now routes through the same `LLMClient`:
+
+```
+_raw_news_cache → AggregateSentimentAnalyzer → llm.backends.aggregate_sentiment
+               → Ollama (default) | Gemini API | Claude API → shared budget/usage tracker
+```
+
+The live config remains on local Ollama; changing the provider requires setting the
+corresponding API credential in `.env` and selecting `gemini` or `claude`. OAuth/ADC
+authentication is not implemented yet; choose a concrete provider/auth flow before adding it.
 
 Confidence gate: sentiment ignored when confidence < 0.3. Cache TTL: 900s. The old double-application in `_enrich_signals()` has been removed.
 

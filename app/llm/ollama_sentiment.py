@@ -1,22 +1,19 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 """
-Aggregate crypto market sentiment via local Ollama (llama3.2:3b).
+Aggregate crypto-market sentiment via the configured LLM provider.
 
-Runs once per TMO cycle (~15 min), reads cached news headlines, returns
-a market-wide sentiment score that is injected into TMO/strategic orch metrics.
+Runs periodically, reads cached news headlines, and returns a market-wide
+sentiment score for entry ranking and monitoring.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
-
-import requests
+from app.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -52,31 +49,32 @@ class MarketSentiment:
         }
 
 
-class OllamaSentimentAnalyzer:
+class AggregateSentimentAnalyzer:
     """
-    Lightweight aggregate-sentiment client for Ollama.
+    Provider-neutral aggregate-sentiment client.
 
-    Uses llama3.2:3b (~1.5s per call) to analyse a batch of news headlines
-    and return a single market-wide sentiment score. Keeps the last result
-    so callers always get a (possibly stale) answer even if Ollama is down.
+    Uses the shared LLMClient so `llm.backends.aggregate_sentiment` can select
+    Ollama, Gemini, or Claude. This also brings the call under the shared budget,
+    retry policy, and usage accounting instead of making a direct unmetered HTTP
+    request to Ollama.
     """
 
     def __init__(
         self,
-        base_url: str = "http://ollama:11434",
-        model: str = "llama3.2:3b",
-        timeout: int = 30,
+        client: LLMClient,
+        backend: str = "ollama",
+        model: str | None = "llama3.2:3b",
         max_headlines: int = 20,
     ) -> None:
-        self._base_url = base_url.rstrip("/")
+        self._client = client
+        self._backend = str(backend)
         self._model = model
-        self._timeout = timeout
         self._max_headlines = max_headlines
         self._last = MarketSentiment()
 
     def analyze(self, headlines: list[str]) -> MarketSentiment:
         """
-        Call Ollama with up to max_headlines items and update cached sentiment.
+        Call the configured provider with up to max_headlines and cache the result.
         Returns the (possibly stale) last result on failure.
         """
         if not headlines:
@@ -88,43 +86,36 @@ class OllamaSentimentAnalyzer:
 
         t0 = time.monotonic()
         try:
-            resp = requests.post(
-                f"{self._base_url}/api/generate",
-                json={
-                    "model": self._model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"num_predict": 120, "temperature": 0.1},
-                },
-                timeout=self._timeout,
+            result = self._client.complete_json(
+                backend=self._backend,
+                system_prompt="Return only valid JSON matching the requested schema.",
+                user_prompt=prompt,
+                max_tokens=256,
+                temperature=0.1,
+                retries=1,
+                model=self._model,
             )
-            resp.raise_for_status()
-            text = resp.json().get("response", "").strip()
-
-            # Extract JSON even if model wraps it in markdown
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                d = json.loads(text[start:end])
-                self._last = MarketSentiment(
-                    score=max(-1.0, min(1.0, float(d.get("score", 0.0)))),
-                    bias=str(d.get("bias", "neutral")).lower(),
-                    key_theme=str(d.get("key_theme", ""))[:120],
-                    confidence=max(0.0, min(1.0, float(d.get("confidence", 0.5)))),
-                )
-                elapsed = time.monotonic() - t0
-                logger.info(
-                    "Ollama sentiment: score=%.2f bias=%s conf=%.2f (%.1fs) — %s",
-                    self._last.score,
-                    self._last.bias,
-                    self._last.confidence,
-                    elapsed,
-                    self._last.key_theme[:60],
-                )
-            else:
-                logger.debug("Ollama sentiment: could not parse JSON from: %s", text[:200])
+            bias = str(result.get("bias", "neutral")).lower()
+            if bias not in {"bullish", "bearish", "neutral"}:
+                bias = "neutral"
+            self._last = MarketSentiment(
+                score=max(-1.0, min(1.0, float(result.get("score", 0.0)))),
+                bias=bias,
+                key_theme=str(result.get("key_theme", ""))[:120],
+                confidence=max(0.0, min(1.0, float(result.get("confidence", 0.5)))),
+            )
+            elapsed = time.monotonic() - t0
+            logger.info(
+                "Aggregate sentiment [%s/%s]: score=%.2f bias=%s conf=%.2f "
+                "(%.1fs) — %s",
+                self._backend, self._model, self._last.score, self._last.bias,
+                self._last.confidence, elapsed, self._last.key_theme[:60],
+            )
         except Exception as exc:
-            logger.debug("Ollama sentiment failed (%.1fs): %s", time.monotonic() - t0, exc)
+            logger.debug(
+                "Aggregate sentiment [%s] failed (%.1fs): %s",
+                self._backend, time.monotonic() - t0, exc,
+            )
 
         return self._last
 
@@ -133,3 +124,7 @@ class OllamaSentimentAnalyzer:
 
     def to_dict(self) -> dict:
         return self._last.to_dict()
+
+
+# Backwards-compatible import name. The analyzer is no longer Ollama-specific.
+OllamaSentimentAnalyzer = AggregateSentimentAnalyzer

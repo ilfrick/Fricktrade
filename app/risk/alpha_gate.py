@@ -55,6 +55,12 @@ _FINGERPRINT_KEYS = [
     "risk.partial_take_profit_pct",
     "risk.partial_take_profit_ratio",
     "risk.vol_targeting",
+    "llm.enabled",
+    "llm.backends.sentiment",
+    "llm.backends.aggregate_sentiment",
+    "llm.models",
+    "llm.sentiment",
+    "llm.ollama_sentiment",
     "brokers.alpaca.fees",
     "brokers.binance.fees",
     "backtest.commission_pct",
@@ -94,6 +100,7 @@ def implementation_hash() -> str:
         root / "scripts" / "alpha_gate_run.py",
     ]
     paths.extend(sorted((root / "app" / "strategies").glob("*.py")))
+    paths.extend(sorted((root / "app" / "llm").glob("*.py")))
     digest = hashlib.sha256()
     for path in paths:
         if path.is_file():
