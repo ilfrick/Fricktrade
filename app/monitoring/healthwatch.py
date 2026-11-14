@@ -242,7 +242,40 @@ def _start_services(client, project: str, services: set[str]) -> None:
                 logging.warning("Healthwatch start failed for %s: %s", service, exc)
 
 
+def _resolve_stop_services(ms_cfg: dict, keep: set[str]) -> tuple[set[str], set[str]]:
+    """Return (services_to_stop, conflicting) for the market scheduler.
+
+    `stop_services: null` (or absent) means "do not stop anything". The previous
+    fallback `services - keep` inverted the documented intent: every service not listed
+    in keep_services was stopped at each NYSE close, including newly added ones.
+    `keep_services` always wins, so a mandatory service cannot be stopped by mistake.
+    """
+    raw = ms_cfg.get("stop_services")
+    configured = set(raw) if isinstance(raw, list) else set()
+    conflicting = configured & keep
+    return configured - keep, conflicting
+
+
 def _run_market_scheduler(cfg: dict) -> None:
+    """Crash-resistant wrapper around the scheduler loop.
+
+    `_market_scheduler_loop` runs in a daemon thread. Without this wrapper any exception
+    inside it (docker socket drop, malformed config value) killed the thread permanently
+    while the HTTP endpoint kept reporting healthwatch_up=1 — the schedule silently stopped
+    working and nothing alerted.
+    """
+    while True:
+        try:
+            _market_scheduler_loop(cfg)
+            return
+        except Exception as exc:  # noqa: BLE001 - must not escape a daemon thread
+            logging.exception(
+                "Healthwatch market scheduler crashed; restarting in 60s: %s", exc
+            )
+            time.sleep(60)
+
+
+def _market_scheduler_loop(cfg: dict) -> None:
     ms_cfg = _market_shutdown_cfg(cfg)
     if not ms_cfg.get("enabled", False):
         return
@@ -254,11 +287,22 @@ def _run_market_scheduler(cfg: dict) -> None:
     start_before = int(ms_cfg.get("start_before_minutes", 15))
     heartbeat_minutes = int(ms_cfg.get("heartbeat_minutes", 15))
     keep = set(ms_cfg.get("keep_services", ["healthwatch", "autoheal", "docker-socket-proxy"]))
-    stop_list = ms_cfg.get("stop_services")
+    stop_services_cfg, stop_conflicts = _resolve_stop_services(ms_cfg, keep)
+    if stop_conflicts:
+        logging.warning(
+            "Healthwatch: %s are in both keep_services and stop_services; keeping them.",
+            sorted(stop_conflicts),
+        )
     state_path = Path(ms_cfg.get("state_path", "/data/system_state.json"))
     write_state = bool(ms_cfg.get("write_state", True))
     docker_host = os.environ.get("DOCKER_HOST", "unix://var/run/docker.sock")
-    client = docker.DockerClient(base_url=docker_host)
+    try:
+        client = docker.DockerClient(base_url=docker_host)
+    except Exception as exc:
+        # This is a daemon thread: an exception here would die silently while the HTTP
+        # endpoint kept serving healthwatch_up=1, so nothing would ever alert.
+        logging.exception("Healthwatch market scheduler could not create the Docker client: %s", exc)
+        return
 
     mode = str(ms_cfg.get("mode", "full")).lower()  # 'full' | 'partial'
     last_state: str | None = None
@@ -284,10 +328,8 @@ def _run_market_scheduler(cfg: dict) -> None:
         containers = _project_containers(client, project)
         services = {c.labels.get("com.docker.compose.service", "") for c in containers}
         services.discard("")
-        if stop_list:
-            stop_services = set(stop_list)
-        else:
-            stop_services = services - keep
+        logging.debug("Healthwatch scheduler: %d services running in project %s", len(services), project)
+        stop_services = set(stop_services_cfg)
         if should_run:
             if mode == "partial" and not equity_open:
                 # Partial mode: stop optional services (e.g. ollama) when equity closes
@@ -330,6 +372,12 @@ def _run_market_scheduler(cfg: dict) -> None:
                 )
                 last_heartbeat = now
         time.sleep(interval)
+
+
+class _ReusableTCPServer(socketserver.TCPServer):
+    """Allow a restart to rebind while the previous socket is in TIME_WAIT."""
+
+    allow_reuse_address = True
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -375,7 +423,7 @@ def main() -> None:
 
     handler = _Handler
     handler.state = state
-    with socketserver.TCPServer(("", port), handler) as httpd:
+    with _ReusableTCPServer(("", port), handler) as httpd:
         logging.info("Healthwatch listening on :%d", port)
         httpd.serve_forever()
 

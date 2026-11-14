@@ -92,10 +92,20 @@ class RiskManager:
 
     def _maybe_reset_daily(self) -> None:
         """Auto-reset daily loss at start of new trading day. Must be called with lock held."""
-        today = datetime.now(self._tz).date()
+        today = self.today()
         if self._last_reset_date != today:
             self._daily_loss = 0.0
             self._last_reset_date = today
+
+    def today(self) -> date:
+        """The current date in the risk manager's timezone.
+
+        Exposed so callers that compute a day-to-date P&L baseline use the SAME day
+        boundary as the accumulator. account_metrics used to use midnight UTC while
+        RiskManager resets at `risk.timezone`; with the default US/Eastern that pushed
+        update_daily_loss(~0) four hours early and cleared the cap mid-session.
+        """
+        return datetime.now(self._tz).date()
 
     @property
     def daily_loss(self) -> float:
@@ -154,7 +164,12 @@ class RiskManager:
         max_notional = limits_cfg.get("max_order_notional")
         if max_notional is not None and notional > float(max_notional):
             return True, "order_limit"
-        min_notional = limits_cfg.get("min_order_notional")
+        # `min_notional` is the key the config actually defines; `min_order_notional`
+        # never existed, so this check silently returned False forever and the whole
+        # preflight was a no-op. Accept both, prefer the configured name.
+        min_notional = limits_cfg.get(
+            "min_notional", limits_cfg.get("min_order_notional")
+        )
         if min_notional is not None and notional < float(min_notional):
             return True, "order_limit"
         return False, None

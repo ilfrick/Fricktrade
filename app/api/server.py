@@ -2,6 +2,7 @@
 # Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
 
 from datetime import datetime, timezone
+import hmac
 import os
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse
 
 from app.utils.config import load_config
+from app.utils.atomic import atomic_write_text
 from app.utils.restart import restart_flag_path
 
 
@@ -18,35 +20,72 @@ app = FastAPI(title="Fricktrade API")
 CONFIG_PATH = Path("/app/config/config.yaml")
 
 
+class ConfigUnavailable(RuntimeError):
+    """The config file cannot be read. The API fails closed on this."""
+
+
 def _load_raw_config() -> dict:
+    """Read the on-disk config without env-var interpolation.
+
+    Raises ConfigUnavailable when the file is missing, unreadable or unparseable.
+    Callers must treat that as "deny", never as "no auth configured": a missing or
+    corrupt config volume is exactly the situation in which an unauthenticated
+    control API is most dangerous. Returning {} here silently disabled auth.
+    """
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
-            return yaml.safe_load(handle) or {}
-    except FileNotFoundError:
-        return {}
+            loaded = yaml.safe_load(handle)
+    except FileNotFoundError as exc:
+        raise ConfigUnavailable(f"config not found at {CONFIG_PATH}") from exc
+    except yaml.YAMLError as exc:
+        raise ConfigUnavailable(f"config at {CONFIG_PATH} is not valid YAML: {exc}") from exc
+    except OSError as exc:
+        raise ConfigUnavailable(f"config at {CONFIG_PATH} is unreadable: {exc}") from exc
+    return loaded if isinstance(loaded, dict) else {}
 
 
-def _resolve_auth_token(cfg: dict) -> str | None:
-    auth_cfg = cfg.get("api", {}).get("auth", {}) if isinstance(cfg, dict) else {}
-    if not auth_cfg.get("enabled", False):
-        return None
+def _resolve_auth_token(cfg: dict) -> str:
+    """Return the token to require, or "" when auth is explicitly disabled.
+
+    Absent `api.auth` (or absent `enabled`) means ENABLED. Only an explicit
+    `enabled: false` opts out — the default must not depend on a block being present,
+    otherwise deleting a few lines from the config silently opens the API.
+    """
+    auth_cfg = _auth_cfg(cfg)
+    if not auth_cfg.get("enabled", True):
+        return ""
     token_env = str(auth_cfg.get("token_env", "FRICKTRADE_API_TOKEN"))
-    token = os.getenv(token_env, "")
-    if not token:
-        raise HTTPException(status_code=500, detail="API auth enabled but token is missing")
-    return token
+    return os.getenv(token_env, "")
+
+
+def _auth_cfg(cfg: dict) -> dict:
+    if not isinstance(cfg, dict):
+        return {}
+    node = (cfg.get("api", {}) or {}).get("auth", {}) or {}
+    return node if isinstance(node, dict) else {}
 
 
 def _require_auth(request: Request) -> None:
-    token = _resolve_auth_token(_load_raw_config())
-    if not token:
+    try:
+        cfg = _load_raw_config()
+    except ConfigUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"config unavailable: {exc}") from exc
+    if not _auth_cfg(cfg).get("enabled", True):
         return
+    token = _resolve_auth_token(cfg)
+    if not token:
+        # Auth is on but no token is configured. Refuse rather than allow: an API that
+        # can rewrite the risk config must not be reachable because an env var is unset.
+        raise HTTPException(
+            status_code=500,
+            detail="API auth is enabled but the token environment variable is missing",
+        )
     header = request.headers.get("x-api-key", "")
     auth = request.headers.get("authorization", "")
     provided = header
     if auth.lower().startswith("bearer "):
         provided = auth.split(" ", 1)[1].strip()
-    if not provided or provided != token:
+    if not provided or not hmac.compare_digest(provided, token):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -111,7 +150,7 @@ _DESCRIPTIONS = {
     "brokers.ibkr.accounts[].client_id": "IBKR client id for this account.",
     "brokers.ibkr.accounts[].account_id": "IBKR account id for this account.",
     "brokers.ibkr.accounts[].currency": "IBKR contract currency override for this account.",
-    "risk.crypto.max_daily_loss_pct": "Max daily loss percent for crypto positions.",
+    "risk.crypto.max_daily_loss_pct": "DEPRECATED: never read by any module; use risk.max_daily_loss_pct. Removed from config 2026-11-14.",
     "risk.crypto.max_position_size_pct": "Max single crypto position size as percent of equity.",
     "risk.crypto.max_crypto_exposure_pct": "Max total crypto exposure as percent of equity.",
     "risk.crypto.hard_stop_pct": "Hard stop loss percent for crypto positions.",
@@ -552,14 +591,23 @@ async def health():
 
 @app.get("/config", dependencies=[Depends(_require_auth)])
 async def get_config():
-    cfg = load_config(CONFIG_PATH)
+    # load_config interpolates ${ENV_VAR}, so this response contains live credentials if
+    # anything is missed by the masker. _mask_secrets must cover every leaf key whose
+    # name looks like a secret (see _is_secret_key).
+    try:
+        cfg = load_config(CONFIG_PATH)
+    except Exception as exc:  # noqa: BLE001 - missing volume, bad YAML, unset env var
+        raise HTTPException(status_code=503, detail=f"config unavailable: {exc}") from exc
     _mask_secrets(cfg)
     return cfg
 
 
 @app.get("/config/raw", dependencies=[Depends(_require_auth)])
 async def get_config_raw():
-    raw_cfg = _load_raw_config()
+    try:
+        raw_cfg = _load_raw_config()
+    except ConfigUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"config unavailable: {exc}") from exc
     _mask_secrets(raw_cfg)
     return {"yaml": yaml.safe_dump(raw_cfg, sort_keys=False)}
 
@@ -579,6 +627,20 @@ async def update_config(payload: dict[str, Any]):
     except yaml.YAMLError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}") from exc
     current_cfg = _load_raw_config()
+    protected = _protected_removals(new_cfg, current_cfg)
+    if protected:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Refusing to remove safety-critical config: "
+                + ", ".join(protected)
+                + ". Set enabled: false explicitly if that is really intended."
+            ),
+        )
+    type_errors = _validate_config_types(new_cfg, current_cfg)
+    if type_errors:
+        joined = ", ".join(sorted(type_errors)[:20])
+        raise HTTPException(status_code=400, detail=f"Invalid config types: {joined}")
     unknown_keys = _validate_config_keys(new_cfg, current_cfg)
     if unknown_keys:
         joined = ", ".join(sorted(unknown_keys)[:20])
@@ -588,8 +650,7 @@ async def update_config(payload: dict[str, Any]):
             detail=f"Unknown config keys: {joined}{suffix}",
         )
     _merge_secrets(new_cfg, current_cfg)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as handle:
-        yaml.safe_dump(new_cfg, handle, sort_keys=False)
+    atomic_write_text(CONFIG_PATH, yaml.safe_dump(new_cfg, sort_keys=False))
     return {"status": "ok", "restart_required": True}
 
 
@@ -650,176 +711,126 @@ async def ui():
     return HTMLResponse(_render_ui())
 
 
-def _mask_secrets(cfg: dict) -> None:
-    try:
-        cfg["brokers"]["alpaca"]["api_key"] = "***"
-        cfg["brokers"]["alpaca"]["api_secret"] = "***"
-    except (KeyError, TypeError):
-        pass
-    try:
-        ibkr_cfg = cfg.get("brokers", {}).get("ibkr", {})
-        if ibkr_cfg:
-            for key in ("password", "api_key", "api_secret"):
-                if key in ibkr_cfg:
-                    ibkr_cfg[key] = "***"
-            ibkr_accounts = ibkr_cfg.get("accounts", []) or []
-            for acct in ibkr_accounts:
-                if isinstance(acct, dict):
-                    for key in ("password", "api_key", "api_secret"):
-                        if key in acct:
-                            acct[key] = "***"
-    except (KeyError, TypeError):
-        pass
-    try:
-        accounts = cfg.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
-        for acct in accounts:
-            if not isinstance(acct, dict):
-                continue
-            acct["api_key"] = "***"
-            acct["api_secret"] = "***"
-    except Exception:
-        pass
-    try:
-        binance_accounts = cfg.get("brokers", {}).get("binance", {}).get("accounts", []) or []
-        for acct in binance_accounts:
-            if isinstance(acct, dict):
-                for key in ("api_key", "api_secret"):
-                    if key in acct:
-                        acct[key] = "***"
-    except Exception:
-        pass
-    try:
-        cfg["news"]["api_key"] = "***"
-        cfg["news"]["api_secret"] = "***"
-    except Exception:
-        pass
-    try:
-        for src in (cfg.get("news", {}).get("sources", []) or []):
-            if isinstance(src, dict) and "api_key" in src:
-                src["api_key"] = "***"
-    except Exception:
-        pass
-    try:
-        sources = cfg.get("data", {}).get("sources", []) or []
-        for source in sources:
-            if not isinstance(source, dict):
-                continue
-            if "api_key" in source:
-                source["api_key"] = "***"
-            if "api_secret" in source:
-                source["api_secret"] = "***"
-    except Exception:
-        pass
+MASK = "***"
 
-def _merge_secrets(target: dict, source: dict) -> None:
-    for path in (
-        ("brokers", "alpaca", "api_key"),
-        ("brokers", "alpaca", "api_secret"),
-        ("news", "api_key"),
-        ("news", "api_secret"),
-    ):
-        try:
-            current = source
-            for key in path:
-                current = current[key]
-            new_val = target
-            for key in path[:-1]:
-                new_val = new_val[key]
-            if new_val[path[-1]] == "***" and current:
-                new_val[path[-1]] = current
-        except Exception:
-            continue
-    # Restore Binance account secrets
-    try:
-        current_bn = source.get("brokers", {}).get("binance", {}).get("accounts", []) or []
-        new_bn = target.get("brokers", {}).get("binance", {}).get("accounts", []) or []
-        current_bn_by_name = {
-            str(a.get("name")): a for a in current_bn if isinstance(a, dict) and a.get("name")
-        }
-        for idx, acct in enumerate(new_bn):
-            if not isinstance(acct, dict):
+# Keys whose VALUE is a credential. Matched case-insensitively on the leaf key name,
+# everywhere in the tree — the previous implementation was a hand-written list of paths
+# and missed brokers.binance.api_key/api_secret, fred.api_key, alt_data.*.api_key and
+# kill_switch.required_code.
+_SECRET_KEY_NAMES = frozenset({
+    "api_key", "apikey", "api_secret", "secret", "secret_key", "client_secret",
+    "password", "passphrase", "private_key", "access_token", "api_token",
+    "required_code", "signing_key", "webhook_url", "smtp_password",
+})
+_SECRET_KEY_SUFFIXES = (
+    "_api_key", "_api_secret", "_secret", "_password", "_passphrase",
+    "_private_key", "_access_token", "_client_secret", "_required_code",
+    "_webhook_url", "_smtp_password",
+)
+# Names that *identify* a secret rather than being one (env var names, file paths).
+_NON_SECRET_KEY_SUFFIXES = ("_env", "_path", "_file", "_url", "_variable")
+
+
+def _is_secret_key(key: object) -> bool:
+    name = str(key).strip().lower()
+    if not name or name.endswith(_NON_SECRET_KEY_SUFFIXES):
+        return False
+    return name in _SECRET_KEY_NAMES or name.endswith(_SECRET_KEY_SUFFIXES)
+
+
+def _mask_secrets(node: Any) -> None:
+    """Replace every credential value with MASK, in place, recursively."""
+    if isinstance(node, dict):
+        for key, value in list(node.items()):
+            if _is_secret_key(key) and isinstance(value, (str, int, float)):
+                if value not in ("", None, MASK):
+                    node[key] = MASK
+            else:
+                _mask_secrets(value)
+    elif isinstance(node, list):
+        for item in node:
+            _mask_secrets(item)
+
+
+def _merge_secrets(target: Any, source: Any) -> None:
+    """Restore credentials that the UI echoed back as MASK.
+
+    Walks target and source in parallel. Where target holds MASK (or None for a
+    credential key) and source holds a real value, source wins. Lists are matched by
+    `name`, then `provider`, then position, because order is not stable in the UI.
+    """
+    if isinstance(target, dict) and isinstance(source, dict):
+        for key, value in list(target.items()):
+            if key not in source:
                 continue
-            cur = current_bn_by_name.get(str(acct.get("name", "")))
-            if cur is None and idx < len(current_bn) and isinstance(current_bn[idx], dict):
-                cur = current_bn[idx]
-            if not cur:
+            original = source[key]
+            if _is_secret_key(key) and (value == MASK or value is None):
+                if original not in (None, "", MASK):
+                    target[key] = original
                 continue
-            for key in ("api_key", "api_secret"):
-                if acct.get(key) == "***":
-                    acct[key] = cur.get(key, "")
-    except Exception:
-        pass
-    # Restore news source api_keys
-    try:
-        current_srcs = source.get("news", {}).get("sources", []) or []
-        new_srcs = target.get("news", {}).get("sources", []) or []
-        cur_src_by_name = {
-            str(s.get("name")): s for s in current_srcs if isinstance(s, dict) and s.get("name")
-        }
-        for src in new_srcs:
-            if not isinstance(src, dict):
-                continue
-            cur = cur_src_by_name.get(str(src.get("name", "")))
-            if cur and src.get("api_key") == "***":
-                src["api_key"] = cur.get("api_key", "")
-    except Exception:
-        pass
-    try:
-        current_accounts = source.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
-        new_accounts = target.get("brokers", {}).get("alpaca", {}).get("accounts", []) or []
-        current_by_name = {
-            str(item.get("name")): item
-            for item in current_accounts
-            if isinstance(item, dict) and item.get("name")
-        }
-        for idx, acct in enumerate(new_accounts):
-            if not isinstance(acct, dict):
-                continue
-            current_acct = None
-            name = acct.get("name")
-            if name:
-                current_acct = current_by_name.get(str(name))
-            if current_acct is None and idx < len(current_accounts) and isinstance(current_accounts[idx], dict):
-                current_acct = current_accounts[idx]
-            if not current_acct:
-                continue
-            for key in ("api_key", "api_secret"):
-                if acct.get(key) == "***":
-                    acct[key] = current_acct.get(key, "")
-    except Exception:
-        pass
-    try:
-        current_sources = source.get("data", {}).get("sources", []) or []
-        new_sources = target.get("data", {}).get("sources", []) or []
-        current_by_provider = {
-            str(item.get("provider")): item
-            for item in current_sources
-            if isinstance(item, dict) and item.get("provider")
-        }
-        current_by_name = {
-            str(item.get("name")): item
-            for item in current_sources
-            if isinstance(item, dict) and item.get("name")
-        }
-        for idx, item in enumerate(new_sources):
+            _merge_secrets(value, original)
+    elif isinstance(target, list) and isinstance(source, list):
+        for idx, item in enumerate(target):
             if not isinstance(item, dict):
                 continue
-            provider = item.get("provider")
-            current_item = None
-            name = item.get("name")
-            if name:
-                current_item = current_by_name.get(str(name))
-            if current_item is None and provider:
-                current_item = current_by_provider.get(str(provider))
-            elif idx < len(current_sources) and isinstance(current_sources[idx], dict):
-                current_item = current_sources[idx]
-            if not current_item:
-                continue
-            for key in ("api_key", "api_secret"):
-                if item.get(key) == "***":
-                    item[key] = current_item.get(key, "")
-    except Exception:
-        pass
+            match = None
+            for id_key in ("name", "provider"):
+                ident = item.get(id_key)
+                if ident is None:
+                    continue
+                match = next(
+                    (c for c in source if isinstance(c, dict) and c.get(id_key) == ident),
+                    None,
+                )
+                if match is not None:
+                    break
+            if match is None and idx < len(source) and isinstance(source[idx], dict):
+                match = source[idx]
+            if match is not None:
+                _merge_secrets(item, match)
+
+
+# Config paths whose deletion via POST /config/update would silently disable a safety
+# control. Deletion is otherwise allowed (the validator only rejects UNKNOWN keys), which
+# meant removing a few lines could turn the alpha gate off with reason "gate_disabled" —
+# indistinguishable from a deliberate opt-out.
+_PROTECTED_PATHS = ("strategy.alpha_gate",)
+
+
+def _has_path(cfg: object, dotted: str) -> bool:
+    node = cfg
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+def _protected_removals(new_cfg: object, current_cfg: object) -> list[str]:
+    return [
+        path
+        for path in _PROTECTED_PATHS
+        if _has_path(current_cfg, path) and not _has_path(new_cfg, path)
+    ]
+
+
+def _validate_config_types(new_cfg: object, current_cfg: object, prefix: str = "") -> list[str]:
+    """Reject replacements that change a container's type (e.g. {"risk": null})."""
+    bad: list[str] = []
+    if isinstance(current_cfg, dict) and not isinstance(new_cfg, dict):
+        return [f"{prefix or '<root>'}: expected mapping"]
+    if isinstance(current_cfg, list) and not isinstance(new_cfg, list):
+        return [f"{prefix or '<root>'}: expected list"]
+    if isinstance(new_cfg, dict) and isinstance(current_cfg, dict):
+        for key, value in new_cfg.items():
+            if key in current_cfg:
+                bad.extend(
+                    _validate_config_types(value, current_cfg[key], f"{prefix}{key}.")
+                )
+    elif isinstance(new_cfg, list) and isinstance(current_cfg, list) and current_cfg:
+        for idx, item in enumerate(new_cfg):
+            bad.extend(_validate_config_types(item, current_cfg[0], f"{prefix}[{idx}]."))
+    return bad
 
 
 def _validate_config_keys(new_cfg: object, current_cfg: object, prefix: str = "") -> list[str]:
@@ -949,22 +960,25 @@ def _render_ui() -> str:
       const key = localStorage.getItem('apiKey') || '';
       document.getElementById('apiKey').value = key;
     }
+    async function showError(res, fallback) {
+      let detail = fallback;
+      try {
+        const body = await res.json();
+        if (body && body.detail) detail = body.detail;
+      } catch (e) { /* non-JSON body */ }
+      const status = document.getElementById('status');
+      status.textContent = res.status === 401 ? 'Unauthorized. Provide API key.' : detail;
+    }
     async function loadConfig() {
       const res = await fetch('/config/raw', { headers: apiHeaders() });
-      if (res.status === 401) {
-        document.getElementById('status').textContent = 'Unauthorized. Provide API key.';
-        return;
-      }
+      if (!res.ok) { await showError(res, 'Could not load configuration.'); return; }
       const data = await res.json();
       document.getElementById('config').value = data.yaml;
       document.getElementById('status').textContent = 'Loaded configuration.';
     }
     async function loadDescriptions() {
       const res = await fetch('/config/schema', { headers: apiHeaders() });
-      if (res.status === 401) {
-        document.getElementById('status').textContent = 'Unauthorized. Provide API key.';
-        return;
-      }
+      if (!res.ok) { await showError(res, 'Could not load schema.'); return; }
       const data = await res.json();
       descriptions = data.descriptions || {};
       const groupSelect = document.getElementById('groupFilter');
@@ -1017,10 +1031,7 @@ def _render_ui() -> str:
     }
     async function requestRestart() {
       const res = await fetch('/restart', { method: 'POST', headers: apiHeaders() });
-      if (res.status === 401) {
-        document.getElementById('status').textContent = 'Unauthorized. Provide API key.';
-        return;
-      }
+      if (!res.ok) { await showError(res, 'Restart failed.'); return; }
       const data = await res.json();
       document.getElementById('status').textContent = data.status === 'ok' ? 'Restart requested.' : 'Restart failed.';
     }

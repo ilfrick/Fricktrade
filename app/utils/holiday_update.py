@@ -14,6 +14,8 @@ import requests
 import pandas as pd
 import yaml
 
+from app.utils.atomic import atomic_write_text
+
 
 _VENUE_HANDLERS = {
     "nyse": "nyse",
@@ -161,15 +163,41 @@ def update_holidays(config_path: str, years_ahead: int = 1) -> bool:
             holidays = _compute_borsa_holidays(start, end)
         else:
             holidays = []
+        # A scrape that returns nothing is a FAILURE, not a calendar with no holidays.
+        # Writing [] here used to wipe the calendar until the next successful run, and
+        # _venue_session_state would then report the market open on Christmas.
+        if not _holidays_look_plausible(holidays, venue.get("holidays") or [], start, end):
+            logging.warning(
+                "Holiday refresh for %s returned %d entries (existing: %d) — keeping "
+                "the existing calendar. Source is probably unreachable or its layout changed.",
+                venue.get("name"), len(holidays), len(venue.get("holidays") or []),
+            )
+            continue
         if venue.get("holidays") != holidays:
             venue["holidays"] = holidays
             updated = True
             logging.info("Updated holidays for %s (%s): %d entries", venue.get("name"), handler, len(holidays))
 
     if updated:
-        with open(config_path, "w", encoding="utf-8") as handle:
-            yaml.safe_dump(cfg, handle, sort_keys=False)
+        atomic_write_text(config_path, yaml.safe_dump(cfg, sort_keys=False))
     return updated
+
+
+def _holidays_look_plausible(
+    holidays: list[str], existing: list[str], start: date, end: date
+) -> bool:
+    """Guard against replacing a good calendar with an empty or truncated one.
+
+    An empty result is always rejected. A result that shrinks the calendar by more than
+    half is rejected too: NYSE/Nasdaq closures are 9-10 per year, so a sudden drop means
+    a partial parse rather than a real calendar change.
+    """
+    in_range = [h for h in existing if start.isoformat() <= h <= end.isoformat()]
+    if not holidays:
+        return not in_range or len(in_range) < 2
+    if in_range and len(holidays) < len(in_range) / 2:
+        return False
+    return True
 
 
 def _load_config(config_path: str) -> dict:

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from app.utils.atomic import atomic_write_json
+
 
 @dataclass
 class CheckpointConfig:
@@ -59,11 +61,11 @@ def maybe_save_checkpoint(name: str, payload: dict, cfg: dict, last_saved_at: da
     data = {"saved_at": now.isoformat(), "payload": payload}
     primary = base / f"{name}.json"
     try:
-        primary.write_text(json.dumps(data, indent=2))
+        atomic_write_json(primary, data)
         if cfg_obj.keep_history:
             stamp = now.strftime("%Y%m%d%H%M%S%f")
             history = base / f"{name}-{stamp}.json"
-            history.write_text(json.dumps(data, indent=2))
+            atomic_write_json(history, data)
         _prune_history(base, name, cfg_obj)
         logging.info("Checkpoint saved: %s", primary)
     except Exception as exc:

@@ -95,7 +95,7 @@ class AccountMetricsUpdater:
             drawdown_pct = (broker_state.equity_peak - equity) / broker_state.equity_peak * 100.0
             broker_state.current_drawdown_pct = max(drawdown_pct, 0.0)
             DRAWDOWN_BY_BROKER.labels(broker=broker_name).set(max(drawdown_pct, 0.0))
-        today = datetime.now(timezone.utc).date()
+        today = broker_state.risk.today()
         if broker_state.day_start_date != today or broker_state.day_start_equity is None:
             broker_state.day_start_date = today
             broker_state.day_start_equity = equity
@@ -188,12 +188,29 @@ class AccountMetricsUpdater:
         if buying_power_val is not None:
             ACCOUNT_BUYING_POWER.set(buying_power_val)
         ACCOUNT_INVESTED.set(total_val - cash_val)
-        today = datetime.now(timezone.utc).date()
+        today = self._today(broker_states)
         if self._day_start_date != today or self._day_start_equity is None:
             self._day_start_date = today
             self._day_start_equity = total_val
         self._update_var_cvar(total_val, broker_equities, broker_states)
         return account
+
+    def _today(self, broker_states: dict | None = None) -> date:
+        """Day boundary taken from the risk manager, so every day-to-date figure agrees.
+
+        This baseline and RiskManager's accumulator used to roll over on different clocks
+        (UTC vs `risk.timezone`, default US/Eastern), which pushed a ~0 day P&L into
+        update_daily_loss four hours early and cleared the daily loss cap mid-session.
+        """
+        for state in (broker_states or {}).values():
+            risk = getattr(state, "risk", None)
+            today = getattr(risk, "today", None)
+            if callable(today):
+                try:
+                    return today()
+                except Exception:  # noqa: BLE001 - fall through to UTC
+                    break
+        return datetime.now(timezone.utc).date()
 
     def get_day_pnl_pct(self) -> float | None:
         if self._day_start_equity is None or self._equity_start is None:

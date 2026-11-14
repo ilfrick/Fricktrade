@@ -5,7 +5,12 @@ app:
   log_level: INFO
 api:
   auth:
-    enabled: false
+    # The control API can rewrite this file and restart the stack, so it is
+    # authenticated by default. Set `enabled: false` explicitly to opt out; if the
+    # block is missing entirely the API still requires a token (it fails closed).
+    # The token is read from the env var named by `token_env`; when auth is enabled
+    # and that variable is empty, /config and /restart return 500 rather than allow.
+    enabled: true
     token_env: FRICKTRADE_API_TOKEN
 logging:
   file_path: /data/logs/trader.log
@@ -194,7 +199,11 @@ risk:
   enabled: true
   max_daily_loss_pct: 3.0
   crypto:
-    max_daily_loss_pct: 5.0
+    # NOTE: there is no crypto-specific daily-loss override. `risk.crypto.max_daily_loss_pct`
+    # (5.0) was removed on 2026-11-14 because no module read it — RiskManager only reads the
+    # global `risk.max_daily_loss_pct`. It was removed rather than wired up because wiring it
+    # would have LOOSENED the effective cap from 3.0% to 5.0% as a side effect of a cleanup.
+    # If a looser crypto cap is genuinely wanted, add it explicitly and pass it to RiskManager.
     max_position_size_pct: 25.0
     max_crypto_exposure_pct: 50.0
     hard_stop_pct: 6.0       # raised from 4.0 — altcoins need room before reversion completes

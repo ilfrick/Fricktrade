@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025-2026 Nicola Vittorio Francesconi, AKA ilfrick
+#
+# Task 0.9 of docs/PLAN-2026-Q4.md: the repository had 324 test functions and no CI,
+# so nothing enforced them. This runs the subset that does not need the heavy ML stack
+# (tensorflow / torch / stable-baselines3); those modules use importorskip and simply
+# skip here, exactly as they do on a developer machine without them.
+#
+# The goal is "a regression cannot be merged silently", not "run everything". A full
+# run still lives in the container image.
+
+name: tests
+
+on:
+  push:
+    branches: ["v3.0", "main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Runtime deps the suite actually imports. Kept deliberately narrow: pulling
+          # tensorflow/torch makes the job 20+ minutes for tests that skip anyway.
+          pip install \
+            "pyyaml==6.0.2" \
+            "numpy==1.26.4" \
+            "pandas==2.2.2" \
+            "scikit-learn==1.5.2" \
+            "requests==2.32.3" \
+            "pydantic==2.8.2" \
+            "fastapi==0.112.2" \
+            "httpx" \
+            "prometheus-client==0.20.0" \
+            "redis==5.2.1" \
+            "alpaca-py==0.26.1" \
+            "python-binance>=1.0.19" \
+            "gymnasium==0.29.1" \
+            "pytest==8.3.2" \
+            "hypothesis==6.112.0"
+
+      - name: Unit tests
+        run: |
+          python -m pytest tests/ -q -p no:cacheprovider \
+            --ignore=tests/test_trader_sizing.py
+
+  config-guard:
+    # Fails if config.yaml is not valid YAML or a Phase-0 protected key disappears.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate config
+        run: |
+          pip install "pyyaml==6.0.2"
+          python - <<'PY'
+          import sys, yaml, pathlib
+          cfg = yaml.safe_load(pathlib.Path("config/config.yaml").read_text())
+          problems = []
+          gate = (cfg.get("strategy") or {}).get("alpha_gate")
+          if not isinstance(gate, dict) or not gate.get("enabled"):
+              problems.append(
+                  "strategy.alpha_gate must exist and be enabled: deleting it would "
+                  "silently unblock entries (docs/audit/2026-11-14-bug.md E-2)"
+              )
+          if "max_daily_loss_pct" in (cfg.get("risk") or {}).get("crypto", {}):
+              problems.append(
+                  "risk.crypto.max_daily_loss_pct is dead config; RiskManager reads only "
+                  "the global risk.max_daily_loss_pct"
+              )
+          if problems:
+              print("\n".join("FAIL: " + p for p in problems))
+              sys.exit(1)
+          print("config.yaml OK")
+          PY

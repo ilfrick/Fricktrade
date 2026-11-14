@@ -100,12 +100,16 @@ def load_record(cfg: dict) -> dict | None:
 def check_entries(cfg: dict) -> GateDecision:
     """Return a GateDecision for opening NEW positions.
 
-    Fails closed: if the gate is enabled and no matching passing record exists,
-    entries are blocked. A system with no evidence of edge should not be
-    deploying capital.
+    Fails closed: if no matching passing record exists, entries are blocked. A system
+    with no evidence of edge should not be deploying capital.
+
+    `enabled` defaults to True when the block is absent. That default is load-bearing:
+    the config validator allows key deletion, so with a False default, deleting a few
+    lines from config.yaml would silently open the gate with reason "gate_disabled" —
+    indistinguishable from a deliberate opt-out.
     """
     gate = _gate_cfg(cfg)
-    if not gate.get("enabled", False):
+    if not gate.get("enabled", True):
         return GateDecision(False, "gate_disabled")
 
     record = load_record(cfg)

@@ -4606,6 +4606,14 @@ class TradingAgent:
                 "last_trade_at": _dt_to_str(state.last_trade_at),
                 "equity_start": state.equity_start,
                 "equity_peak": state.equity_peak,
+                # Daily-loss baseline. Without these, a restart re-baselines
+                # day_start_equity to current equity, pushes day_pnl_pct=0 into
+                # RiskManager.update_daily_loss(0) and clears the daily loss cap --
+                # i.e. the limit resets on exactly the failure mode it guards against.
+                "day_start_date": state.day_start_date.isoformat() if state.day_start_date else None,
+                "day_start_equity": state.day_start_equity,
+                "day_deposits_baseline": state.day_deposits_baseline,
+                "day_pnl_pct": state.day_pnl_pct,
                 "disabled_strategies": sorted(state.disabled_strategies),
                 "position_state": pos_state_serialized,
             }
@@ -4662,6 +4670,24 @@ class TradingAgent:
                 broker_state.last_trade_at = _dt_from_str(state.get("last_trade_at"))
                 broker_state.equity_start = state.get("equity_start")
                 broker_state.equity_peak = state.get("equity_peak")
+                _day_date = state.get("day_start_date")
+                if isinstance(_day_date, str) and _day_date:
+                    try:
+                        broker_state.day_start_date = date.fromisoformat(_day_date)
+                    except ValueError:
+                        broker_state.day_start_date = None
+                _day_equity = state.get("day_start_equity")
+                if isinstance(_day_equity, (int, float)):
+                    broker_state.day_start_equity = float(_day_equity)
+                _day_dep = state.get("day_deposits_baseline")
+                if isinstance(_day_dep, (int, float)):
+                    broker_state.day_deposits_baseline = float(_day_dep)
+                _day_pnl = state.get("day_pnl_pct")
+                if isinstance(_day_pnl, (int, float)):
+                    broker_state.day_pnl_pct = float(_day_pnl)
+                    # Re-arm the risk manager's daily loss accumulator so a restart
+                    # during a losing day does not hand back the spent budget.
+                    broker_state.risk.update_daily_loss(float(_day_pnl))
                 disabled = state.get("disabled_strategies")
                 if isinstance(disabled, list):
                     broker_state.disabled_strategies = {str(item) for item in disabled}
